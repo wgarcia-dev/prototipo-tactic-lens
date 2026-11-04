@@ -1,0 +1,17 @@
+[Unit]
+Description=Recolector de eventos Cowrie para Honey Analytics
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cowrie
+Group=cowrie
+WorkingDirectory=/home/cowrie
+EnvironmentFile=/home/cowrie/.config/cowrie-ingest.env
+ExecStart=/usr/bin/python3 /home/cowrie/collector.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

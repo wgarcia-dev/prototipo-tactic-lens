@@ -10,7 +10,7 @@ from pathlib import Path
 
 LOG = Path(os.getenv("COWRIE_LOG", "/home/cowrie/my-honeypot/var/log/cowrie/cowrie.json"))
 STATE = Path(os.getenv("COLLECTOR_STATE", str(LOG.parent / ".cowrie_ingest_state.json")))
-URL = os.getenv("INGEST_URL", "http://192.168.56.1:8000/api/ingesta/eventos")
+URL = os.getenv("INGEST_URL", "")
 KEY = os.getenv("INGEST_API_KEY")
 
 
@@ -63,8 +63,10 @@ def heartbeat():
 
 def main():
     import fcntl
+    if not URL:
+        raise SystemExit('INGEST_URL requerida')
     if not KEY:
-        raise SystemExit("INGEST_API_KEY requerida")
+        raise SystemExit('INGEST_API_KEY requerida')
     lock_path = STATE.with_suffix(STATE.suffix + ".lock")
     lock = lock_path.open("a+")
     try:

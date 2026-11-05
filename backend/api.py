@@ -10,11 +10,12 @@ from uuid import UUID
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import MetaData, Table, create_engine, select, func
+from sqlalchemy import MetaData, Table, String, cast, create_engine, or_, select, func
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import URL
 from sqlalchemy.exc import SQLAlchemyError
 from pgvector.sqlalchemy import VECTOR  # registers pgvector type for reflection
+from .analysis_state import public_state, states_for_sessions
 
 load_dotenv()
 
@@ -30,7 +31,7 @@ def safe(value):
 
 
 def local_only(request: Request):
-    allowed = {"127.0.0.1", "::1", os.getenv("DEV_HOST_IP", "192.168.56.1")}
+    allowed = {"127.0.0.1", "::1", os.getenv("DEV_HOST_IP", "")}
     if not request.client or request.client.host not in allowed:
         raise HTTPException(403, "Acceso local requerido")
 
@@ -146,25 +147,29 @@ def _persist_events(events):
 
 
 @app.get("/api/sesiones")
-def sessions(request: Request, limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
+def sessions(request: Request, limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0), q: str = Query('', max_length=100)):
     local_only(request)
     table = app.state.tables["sesion"]
     events_table = app.state.tables["evento"]
     analysis_table = app.state.tables["analisis_llm"]
     count_events = select(func.count()).where(events_table.c.id_sesion == table.c.id_sesion).scalar_subquery().label("eventos")
-    latest_analysis = select(analysis_table.c.estado).where(analysis_table.c.id_sesion == table.c.id_sesion).order_by(analysis_table.c.creado_en.desc()).limit(1).scalar_subquery().label("estado_analisis")
+    statement = select(table.c.id_sesion, table.c.cowrie_session_id, table.c.ip_origen, table.c.protocolo, table.c.fecha_inicio, table.c.fecha_fin, count_events).where(table.c.id_honeypot == app.state.honeypot_id)
+    if q.strip():
+        term = f'%{q.strip()}%'
+        statement = statement.where(or_(table.c.cowrie_session_id.ilike(term), cast(table.c.ip_origen, String).ilike(term)))
     with app.state.engine.connect() as conn:
-        rows = conn.execute(select(table.c.id_sesion, table.c.cowrie_session_id, table.c.ip_origen, table.c.protocolo, table.c.fecha_inicio, table.c.fecha_fin, count_events, latest_analysis).where(table.c.id_honeypot == app.state.honeypot_id).order_by(table.c.fecha_inicio.desc()).limit(limit).offset(offset)).mappings().all()
-    return [{k: str(v) if isinstance(v, UUID) else v for k, v in row.items()} for row in rows]
+        rows = conn.execute(statement.order_by(table.c.fecha_inicio.desc()).limit(limit).offset(offset)).mappings().all()
+        states = states_for_sessions(conn, analysis_table, {row.id_sesion: row.eventos for row in rows})
+    return [{**{k: str(v) if isinstance(v, UUID) else v for k, v in row.items()}, **public_state(states[row.id_sesion])} for row in rows]
 
 
 @app.get("/api/sesiones/{id}/eventos")
-def events(id: UUID, request: Request, limit: int = Query(200, ge=1, le=500)):
+def events(id: UUID, request: Request, limit: int = Query(200, ge=1, le=500), offset: int = Query(0, ge=0)):
     local_only(request)
     table = app.state.tables["evento"]
     with app.state.engine.connect() as conn:
-        rows = conn.execute(select(table.c.id_evento, table.c.tipo_evento, table.c.fecha_hora, table.c.datos_originales).where(table.c.id_sesion == id).order_by(table.c.fecha_hora, table.c.id_evento).limit(limit)).mappings().all()
+        rows = conn.execute(select(table.c.id_evento, table.c.tipo_evento, table.c.fecha_hora, table.c.datos_originales).where(table.c.id_sesion == id).order_by(table.c.fecha_hora, table.c.id_evento).limit(limit).offset(offset)).mappings().all()
     return [{**dict(row), "datos_originales": safe(row.datos_originales)} for row in rows]
 
 
-import platform_api  # noqa: E402 - registers the extended prototype routes
+from . import routes  # noqa: E402,F401 - registers extended routes

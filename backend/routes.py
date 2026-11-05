@@ -16,7 +16,8 @@ from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import and_, func, select
 from sqlalchemy.dialects.postgresql import insert
 
-from backend import app, local_only, persist_events, safe
+from .api import app, local_only, persist_events, safe
+from .analysis_state import public_state, states_for_sessions
 
 
 def table(name):
@@ -86,10 +87,10 @@ def session_detail(id_sesion: UUID):
     s, e, a = table("sesion"), table("evento"), table("analisis_llm")
     with app.state.engine.connect() as conn:
         row = conn.execute(select(s, select(func.count()).where(e.c.id_sesion == s.c.id_sesion).scalar_subquery().label("eventos")).where(s.c.id_sesion == id_sesion, s.c.id_honeypot == app.state.honeypot_id)).mappings().first()
-        latest = conn.execute(select(a.c.id_analisis, a.c.estado, a.c.creado_en).where(a.c.id_sesion == id_sesion).order_by(a.c.creado_en.desc()).limit(1)).mappings().first()
+        state = states_for_sessions(conn, a, {id_sesion: row.eventos})[id_sesion] if row else None
     if not row:
-        raise HTTPException(404, "Sesión no encontrada")
-    return {**plain(row), "analisis": plain(latest) if latest else None}
+        raise HTTPException(404, "Sesion no encontrada")
+    return {**plain(row), **public_state(state)}
 
 
 @app.get("/api/dashboard/resumen", dependencies=[Depends(local_only)])
@@ -186,33 +187,64 @@ def ensure_model(conn):
 @app.post("/api/sesiones/{id_sesion}/analizar", dependencies=[Depends(local_only)])
 def analyze(id_sesion: UUID):
     s, e, a = table("sesion"), table("evento"), table("analisis_llm")
+    # Lock the session row while deciding whether to reuse or start an analysis.
+    # Concurrent requests serialize here, including requests from another worker.
     with app.state.engine.begin() as conn:
-        if not conn.scalar(select(s.c.id_sesion).where(s.c.id_sesion == id_sesion, s.c.id_honeypot == app.state.honeypot_id)):
-            raise HTTPException(404, "Sesión no encontrada")
-        events = conn.execute(select(e.c.id_evento, e.c.tipo_evento, e.c.fecha_hora, e.c.datos_originales).where(e.c.id_sesion == id_sesion).order_by(e.c.fecha_hora, e.c.id_evento)).all()
+        session_id = conn.scalar(
+            select(s.c.id_sesion)
+            .where(s.c.id_sesion == id_sesion, s.c.id_honeypot == app.state.honeypot_id)
+            .with_for_update()
+        )
+        if not session_id:
+            raise HTTPException(404, "Sesion no encontrada")
+        events = conn.execute(
+            select(e.c.id_evento, e.c.tipo_evento, e.c.fecha_hora, e.c.datos_originales)
+            .where(e.c.id_sesion == id_sesion)
+            .order_by(e.c.fecha_hora, e.c.id_evento)
+        ).all()
         if not events:
-            raise HTTPException(422, "La sesión no tiene eventos")
+            raise HTTPException(422, "La sesion no tiene eventos")
+        state = states_for_sessions(conn, a, {id_sesion: len(events)})[id_sesion]
+        if state["intento_expirado_id"]:
+            conn.execute(a.update().where(a.c.id_analisis == state["intento_expirado_id"]).values(
+                estado="fallido", fecha_fin=func.clock_timestamp(), mensaje_error="Tiempo de analisis agotado",
+                actualizado_en=func.clock_timestamp()
+            ))
+        if state["analisis_en_proceso"]:
+            raise HTTPException(409, "El analisis de esta sesion ya esta en proceso")
+        if state["analisis_vigente_id"]:
+            return {"id_analisis": str(state["analisis_vigente_id"]), "estado": "completado", "modo": "real", "reutilizado": True}
         model_id = ensure_model(conn)
-        analysis_id = conn.scalar(insert(a).values(id_sesion=id_sesion, id_modelo=model_id, estado="en_proceso", fecha_inicio=func.now()).returning(a.c.id_analisis))
+        analysis_id = conn.scalar(insert(a).values(
+            id_sesion=id_sesion, id_modelo=model_id, estado="en_proceso", fecha_inicio=func.clock_timestamp(), creado_en=func.clock_timestamp()
+        ).returning(a.c.id_analisis))
     try:
         result = real_result(events)
         valid_ids = {x.id_evento for x in events}
         event_text = {x.id_evento: json.dumps(safe(x.datos_originales), ensure_ascii=False).lower() for x in events}
         for action in result.acciones:
             if not set(action.eventos) <= valid_ids:
-                raise ValueError("El LLM citó eventos ajenos a la sesión")
+                raise ValueError("El LLM cito eventos ajenos a la sesion")
             if any(ioc.evento not in action.eventos for ioc in action.iocs):
-                raise ValueError("El IoC no cita una evidencia de la acción")
+                raise ValueError("El IoC no cita una evidencia de la accion")
             if any(ioc.valor.lower() not in event_text[ioc.evento] for ioc in action.iocs):
                 raise ValueError("El IoC no aparece en el evento citado")
+        # Results and all linked findings commit together. A failure leaves no partial IoCs.
         with app.state.engine.begin() as conn:
-            conn.execute(a.update().where(a.c.id_analisis == analysis_id).values(estado="completado", fecha_fin=func.now(), resumen=result.resumen, resultado_estructurado={**result.model_dump(), "eventos_analizados": len(events)}, actualizado_en=func.now()))
+            conn.execute(a.update().where(a.c.id_analisis == analysis_id).values(
+                estado="completado", fecha_fin=func.clock_timestamp(), resumen=result.resumen,
+                resultado_estructurado={**result.model_dump(), "eventos_analizados": len(events)},
+                actualizado_en=func.clock_timestamp()
+            ))
             persist_findings(conn, analysis_id, result, events)
-    except (Exception,) as exc:
+    except Exception as exc:
         with app.state.engine.begin() as conn:
-            conn.execute(a.update().where(a.c.id_analisis == analysis_id).values(estado="fallido", fecha_fin=func.now(), mensaje_error=f"{type(exc).__name__}: {str(exc)[:160]}", actualizado_en=func.now()))
-        raise HTTPException(502, "El análisis falló; consulte el estado del análisis") from exc
-    return {"id_analisis": str(analysis_id), "estado": "completado", "modo": "real"}
+            conn.execute(a.update().where(a.c.id_analisis == analysis_id).values(
+                estado="fallido", fecha_fin=func.clock_timestamp(),
+                mensaje_error=f"{type(exc).__name__}: {str(exc)[:160]}", actualizado_en=func.clock_timestamp()
+            ))
+        raise HTTPException(502, "El analisis fallo; consulte el estado del analisis") from exc
+    return {"id_analisis": str(analysis_id), "estado": "completado", "modo": "real", "reutilizado": False}
 
 
 def persist_findings(conn, analysis_id, result, events):
@@ -276,18 +308,18 @@ def get_analysis(id_analisis: UUID):
 
 
 @app.get("/api/iocs", dependencies=[Depends(local_only)])
-def list_iocs(limit: int = 100):
+def list_iocs(limit: int = 100, offset: int = 0):
     i, typ, det, event = (table(n) for n in ("ioc", "tipo_ioc", "deteccion_ioc", "evento"))
     origin = select(det.c.id_evento).where(det.c.id_ioc == i.c.id_ioc).order_by(det.c.detectado_en).limit(1).correlate(i).scalar_subquery().label("id_evento")
     session = select(event.c.id_sesion).join(det, det.c.id_evento == event.c.id_evento).where(det.c.id_ioc == i.c.id_ioc).limit(1).correlate(i).scalar_subquery().label("id_sesion")
     with app.state.engine.connect() as conn:
-        rows = conn.execute(select(i.c.id_ioc, typ.c.nombre.label("tipo"), i.c.valor, i.c.primera_observacion, origin, session, func.count(det.c.id_deteccion).label("evidencias")).join(typ, i.c.id_tipo_ioc == typ.c.id_tipo_ioc).outerjoin(det, det.c.id_ioc == i.c.id_ioc).group_by(i.c.id_ioc, typ.c.nombre).order_by(i.c.primera_observacion.desc()).limit(min(max(limit, 1), 200))).mappings().all()
+        rows = conn.execute(select(i.c.id_ioc, typ.c.nombre.label("tipo"), i.c.valor, i.c.primera_observacion, origin, session, func.count(det.c.id_deteccion).label("evidencias")).join(typ, i.c.id_tipo_ioc == typ.c.id_tipo_ioc).outerjoin(det, det.c.id_ioc == i.c.id_ioc).group_by(i.c.id_ioc, typ.c.nombre).order_by(i.c.primera_observacion.desc()).limit(min(max(limit, 1), 200)).offset(max(offset, 0))).mappings().all()
     return [plain(x) for x in rows]
 
 
 @app.get("/api/mitre/mapeos", dependencies=[Depends(local_only)])
-def list_mappings(limit: int = 100):
+def list_mappings(limit: int = 100, offset: int = 0):
     m, tt, tech, tac, act, analysis = (table(n) for n in ("mapeo_mitre", "tecnica_tactica", "tecnica_mitre", "tactica_mitre", "accion_identificada", "analisis_llm"))
     with app.state.engine.connect() as conn:
-        rows = conn.execute(select(m.c.id_mapeo, tech.c.codigo_tecnica, tech.c.nombre.label("tecnica"), tac.c.nombre.label("tactica"), m.c.evidencia, m.c.justificacion, m.c.confianza, act.c.id_analisis, analysis.c.id_sesion).join(tt, m.c.id_vinculo == tt.c.id_vinculo).join(tech, tt.c.codigo_tecnica == tech.c.codigo_tecnica).join(tac, tt.c.codigo_tactica == tac.c.codigo_tactica).join(act, m.c.id_accion == act.c.id_accion).join(analysis, act.c.id_analisis == analysis.c.id_analisis).order_by(m.c.fecha_mapeo.desc()).limit(min(max(limit, 1), 200))).mappings().all()
+        rows = conn.execute(select(m.c.id_mapeo, tech.c.codigo_tecnica, tech.c.nombre.label("tecnica"), tac.c.nombre.label("tactica"), m.c.evidencia, m.c.justificacion, m.c.confianza, act.c.id_analisis, analysis.c.id_sesion).join(tt, m.c.id_vinculo == tt.c.id_vinculo).join(tech, tt.c.codigo_tecnica == tech.c.codigo_tecnica).join(tac, tt.c.codigo_tactica == tac.c.codigo_tactica).join(act, m.c.id_accion == act.c.id_accion).join(analysis, act.c.id_analisis == analysis.c.id_analisis).order_by(m.c.fecha_mapeo.desc()).limit(min(max(limit, 1), 200)).offset(max(offset, 0))).mappings().all()
     return [plain(x) for x in rows]

@@ -1,8 +1,8 @@
 import unittest
 from datetime import datetime, timezone
 
-from backend import event_identity, safe, timestamp
-from platform_api import extract_iocs
+from backend.api import event_identity, safe, timestamp
+from backend.routes import extract_iocs
 
 
 class CoreTests(unittest.TestCase):

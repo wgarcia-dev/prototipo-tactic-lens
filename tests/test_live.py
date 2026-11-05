@@ -9,13 +9,13 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 from sqlalchemy import select, func
 
-from backend import app
-from platform_api import AnalysisResult, Finding, IocProposal, MitreProposal
+from backend.api import app
+from backend.routes import AnalysisResult, Finding, IocProposal, MitreProposal
 
 
 class LiveTests(unittest.TestCase):
     def test_import_and_reimport_in_rolled_back_transaction(self):
-        with TestClient(app, client=("192.168.56.1", 50000)) as client:
+        with TestClient(app, client=("127.0.0.1", 50000)) as client:
             engine = app.state.engine
             with engine.connect() as connection:
                 outer = connection.begin()
@@ -44,7 +44,7 @@ class LiveTests(unittest.TestCase):
                     self.assertIsNotNone(session_id)
                     self.assertEqual(connection.scalar(select(func.count()).where(event.c.id_sesion == session_id)), 1)
                     result = AnalysisResult(resumen="Comando de descarga observado", acciones=[Finding(tipo="comando", descripcion="Descarga mediante shell", confianza=0.9, eventos=[connection.scalar(select(event.c.id_evento).where(event.c.id_sesion == session_id))], iocs=[IocProposal(tipo="URL", valor="http://example.org/a.sh", evento=connection.scalar(select(event.c.id_evento).where(event.c.id_sesion == session_id)))], mitre=[MitreProposal(codigo="T1059.004", justificacion="Comando en shell", confianza=0.7)])])
-                    with patch.dict("os.environ", {"LLM_MODEL": "test-provider-model", "LLM_PROVIDER": "test"}), patch("platform_api.real_result", return_value=result):
+                    with patch.dict("os.environ", {"LLM_MODEL": "test-provider-model", "LLM_PROVIDER": "test"}), patch("backend.routes.real_result", return_value=result):
                         analysis = client.post(f"/api/sesiones/{session_id}/analizar")
                     self.assertEqual(analysis.status_code, 200)
                     details = client.get("/api/analisis/" + analysis.json()["id_analisis"]).json()
@@ -52,17 +52,52 @@ class LiveTests(unittest.TestCase):
                     self.assertEqual(len(details["acciones"]), 1)
                     self.assertEqual(len(details["acciones"][0]["mitre"]), 1)
                     self.assertEqual(connection.scalar(select(func.count()).select_from(app.state.tables["deteccion_ioc"]).where(app.state.tables["deteccion_ioc"].c.id_analisis == details["id_analisis"])), 1)
-                    with patch.dict("os.environ", {"LLM_MODE": "real", "LLM_MODEL": "test-provider-model", "LLM_PROVIDER": "test"}), patch("platform_api.real_result", side_effect=RuntimeError("provider unavailable")):
+                    current = client.get(f"/api/sesiones/{session_id}").json()
+                    self.assertEqual(current["estado_analisis"], "analizada")
+                    with patch("backend.routes.real_result", side_effect=AssertionError("LLM should not be called")):
+                        reused = client.post(f"/api/sesiones/{session_id}/analizar")
+                    self.assertEqual(reused.status_code, 200)
+                    self.assertTrue(reused.json()["reutilizado"])
+                    self.assertEqual(reused.json()["id_analisis"], analysis.json()["id_analisis"])
+
+                    # A later event makes the old result stale without changing the capture.
+                    later = {**raw, "timestamp": datetime.now(timezone.utc).isoformat(), "input": "pwd"}
+                    uploaded = client.post("/api/ingesta/cowrie", files={"file": ("later.json", (json.dumps(later)+"\n").encode())})
+                    self.assertEqual(uploaded.json()["insertados"], 1)
+                    stale = client.get(f"/api/sesiones/{session_id}").json()
+                    self.assertEqual(stale["estado_analisis"], "pendiente")
+                    self.assertTrue(stale["analisis_desactualizado"])
+                    self.assertEqual(stale["analisis"]["id_analisis"], analysis.json()["id_analisis"])
+
+                    with patch.dict("os.environ", {"LLM_MODEL": "test-provider-model", "LLM_PROVIDER": "test"}), patch("backend.routes.real_result", side_effect=RuntimeError("provider unavailable")):
                         failed = client.post(f"/api/sesiones/{session_id}/analizar")
                     self.assertEqual(failed.status_code, 502)
+                    self.assertEqual(client.get(f"/api/sesiones/{session_id}").json()["estado_analisis"], "error")
                     analysis_t = app.state.tables["analisis_llm"]
-                    self.assertEqual(connection.scalar(select(func.count()).where(analysis_t.c.id_sesion == session_id, analysis_t.c.estado == "fallido")), 1)
+                    failed_id = connection.scalar(select(analysis_t.c.id_analisis).where(analysis_t.c.id_sesion == session_id, analysis_t.c.estado == "fallido"))
+                    self.assertIsNotNone(failed_id)
+                    self.assertEqual(connection.scalar(select(func.count()).select_from(app.state.tables["accion_identificada"]).where(app.state.tables["accion_identificada"].c.id_analisis == failed_id)), 0)
+
+                    with patch.dict("os.environ", {"LLM_MODEL": "test-provider-model", "LLM_PROVIDER": "test"}), patch("backend.routes.real_result", return_value=result):
+                        retried = client.post(f"/api/sesiones/{session_id}/analizar")
+                    self.assertEqual(retried.status_code, 200)
+                    self.assertFalse(retried.json()["reutilizado"])
+                    self.assertNotEqual(retried.json()["id_analisis"], analysis.json()["id_analisis"])
+                    self.assertEqual(client.get(f"/api/sesiones/{session_id}").json()["estado_analisis"], "analizada")
+                    self.assertEqual(connection.scalar(select(func.count()).select_from(app.state.tables["ioc"]).where(app.state.tables["ioc"].c.valor == "http://example.org/a.sh")), 1)
+
+                    # A second request cannot start while a current attempt is in progress.
+                    model_id = connection.scalar(select(analysis_t.c.id_modelo).where(analysis_t.c.id_analisis == failed_id))
+                    pending_id = connection.scalar(analysis_t.insert().values(id_sesion=session_id, id_modelo=model_id, estado="en_proceso", fecha_inicio=func.clock_timestamp(), creado_en=func.clock_timestamp()).returning(analysis_t.c.id_analisis))
+                    self.assertEqual(client.post(f"/api/sesiones/{session_id}/analizar").status_code, 409)
+                    self.assertEqual(client.get(f"/api/sesiones/{session_id}").json()["estado_analisis"], "en_proceso")
+                    self.assertIsNotNone(pending_id)
                 finally:
                     app.state.engine = engine
                     outer.rollback()
 
     def test_database_and_api(self):
-        with TestClient(app, client=("192.168.56.1", 50000)) as client:
+        with TestClient(app, client=("127.0.0.1", 50000)) as client:
             self.assertEqual(client.get("/api/health").json()["database"], "connected")
             sessions = client.get("/api/sesiones")
             self.assertEqual(sessions.status_code, 200)

@@ -1,5 +1,5 @@
 [Unit]
-Description=Recolector de eventos Cowrie para Honey Analytics
+Description=Recolector de eventos Cowrie para TacticLens
 After=network-online.target
 Wants=network-online.target
 

@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict haHzjgqaVNXkeerqj2SGcQL8JaqSksYdYLrLgRTUnIr2JpUJT9gzdYrdmhr5l66
+\restrict mDWcjS9y14ajh1i7DTItC8Z9UEn9oaalf7XwCwdPTlEYPCAZf0Qyr2QzqtBF3VL
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -1196,5 +1196,5 @@ ALTER TABLE ONLY honeypot.usuario
 -- PostgreSQL database dump complete
 --
 
-\unrestrict haHzjgqaVNXkeerqj2SGcQL8JaqSksYdYLrLgRTUnIr2JpUJT9gzdYrdmhr5l66
+\unrestrict mDWcjS9y14ajh1i7DTItC8Z9UEn9oaalf7XwCwdPTlEYPCAZf0Qyr2QzqtBF3VL
 

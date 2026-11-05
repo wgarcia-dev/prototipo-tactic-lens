@@ -1,11 +1,11 @@
-"""CLI import of a Cowrie JSONL file. Usage: python import_cowrie.py path/to/cowrie.json"""
+"""CLI import of a Cowrie JSONL file. Usage: python -m scripts.import_cowrie path/to/cowrie.json"""
 import argparse
 import asyncio
 import json
 from pathlib import Path
 
-from backend import app, lifespan, persist_events
-from platform_api import parse_jsonl
+from backend.api import app, lifespan, persist_events
+from backend.routes import parse_jsonl
 
 
 async def main(path):

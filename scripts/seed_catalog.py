@@ -2,7 +2,7 @@
 import asyncio
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
-from backend import app, lifespan
+from backend.api import app, lifespan
 
 
 async def main():

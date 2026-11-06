@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from backend.api import app
 from backend.routes import AnalysisResult, Finding, IocProposal, MitreProposal
+from backend.analysis_report import BehaviorReport
 
 
 class LiveTests(unittest.TestCase):
@@ -81,6 +82,37 @@ class LiveTests(unittest.TestCase):
                     self.assertEqual(reused.status_code, 200)
                     self.assertTrue(reused.json()["reutilizado"])
                     self.assertEqual(reused.json()["id_analisis"], analysis.json()["id_analisis"])
+
+                    # Upgrading is explicit, keeps the old report and never persists foreign evidence.
+                    event_id = result.acciones[0].eventos[0]
+                    detailed = result.model_copy(update={"informe": BehaviorReport(
+                        contexto="Un comando enviado a Cowrie.",
+                        fases=[{"fase":"Intento de descarga", "observado":"Comando wget registrado.",
+                                "interpretacion":"Obtención de un archivo remoto.", "resultado":"Sin confirmación de descarga.", "eventos":[event_id]}],
+                        hipotesis=[], conclusion="Intento observado, ejecución no confirmada.",
+                        limitaciones=["No se registró transferencia ni salida."], recomendaciones=[]
+                    )})
+                    url = f"/api/sesiones/{session_id}/analizar?actualizar_informe=true"
+                    with patch.dict("os.environ", {"LLM_MODEL":"test-provider-model", "LLM_PROVIDER":"test"}), patch("backend.routes.real_result", side_effect=RuntimeError("provider unavailable")):
+                        self.assertEqual(client.post(url).status_code, 502)
+                    self.assertEqual(client.get("/api/analisis/" + analysis.json()["id_analisis"]).json()["estado"], "completado")
+                    invalid = detailed.model_copy(deep=True)
+                    invalid.informe.fases[0].eventos = [-999]
+                    with patch.dict("os.environ", {"LLM_MODEL":"test-provider-model", "LLM_PROVIDER":"test"}), patch("backend.routes.real_result", return_value=invalid):
+                        self.assertEqual(client.post(url).status_code, 502)
+                    with patch.dict("os.environ", {"LLM_MODEL":"test-provider-model", "LLM_PROVIDER":"test"}), patch("backend.routes.real_result", return_value=detailed):
+                        upgraded = client.post(url)
+                    self.assertEqual(upgraded.status_code, 200)
+                    self.assertFalse(upgraded.json()["reutilizado"])
+                    self.assertNotEqual(upgraded.json()["id_analisis"], analysis.json()["id_analisis"])
+                    self.assertEqual(client.get("/api/analisis/" + analysis.json()["id_analisis"]).json()["resumen"], result.resumen)
+                    stored = client.get("/api/analisis/" + upgraded.json()["id_analisis"]).json()["resultado_estructurado"]
+                    self.assertEqual(stored["version_informe"], 2)
+                    self.assertEqual(stored["informe"]["fases"][0]["eventos"], [event_id])
+                    self.assertEqual(stored["contexto_observado"]["comandos"], 1)
+                    with patch("backend.routes.real_result", side_effect=AssertionError("Do not bill twice for the same report")):
+                        self.assertTrue(client.post(url).json()["reutilizado"])
+                    analysis = upgraded
 
                     # A later event makes the old result stale without changing the capture.
                     later = {**raw, "timestamp": datetime.now(timezone.utc).isoformat(), "input": "pwd"}

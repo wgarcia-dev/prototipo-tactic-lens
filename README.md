@@ -10,6 +10,8 @@ TacticLens es un prototipo académico para observar intentos de acceso SSH en un
 
 **Correo real:** consulte [la configuración de Gmail por SMTP](docs/CORREO_SMTP.md), con las variables actuales y sin incorporar credenciales al repositorio.
 
+**Informes LLM:** consulte [el análisis detallado con evidencia y ampliación de resultados anteriores](docs/ANALISIS_LLM.md).
+
 ## Arquitectura
 
 El despliegue combina tres capas (React, FastAPI, PostgreSQL) en Windows con Cowrie y su recolector en una VM Ubuntu Server. La red Host-only aísla el laboratorio; un adaptador NAT opcional permite descargar paquetes desde la VM.

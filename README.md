@@ -2,7 +2,11 @@
 
 TacticLens es un prototipo académico para observar intentos de acceso SSH en un entorno controlado. Cowrie simula un servidor SSH y registra conexiones, autenticaciones y comandos; un recolector envía esos eventos a FastAPI, que los conserva en PostgreSQL. La interfaz React permite revisar sesiones históricas, ejecutar un análisis con DeepSeek y consultar indicadores de compromiso (IoCs) y asociaciones propuestas con MITRE ATT&CK. Un IoC es un valor observable, como una IP, dominio, URL o hash; un mapeo MITRE describe la técnica que podría explicar una acción. Ambos se muestran junto a su evidencia para revisión humana.
 
-**Implementado:** ingesta automática o importación manual, deduplicación de eventos, consulta y paginación, análisis manual de cualquier sesión con eventos, reutilización de resultados vigentes, reintento de fallos, bloqueo de análisis simultáneos por sesión, aviso cuando llegan eventos nuevos, IoCs y mapeos con evidencia. **Pendiente:** análisis automático al cerrar una sesión, autenticación de usuarios, despliegue público y monitoreo de producción. La ingesta funciona aunque DeepSeek esté indisponible.
+**Implementado:** ingesta automática o importación manual, deduplicación de eventos, consulta y paginación, análisis manual de cualquier sesión con eventos, reutilización de resultados vigentes, reintento de fallos, bloqueo de análisis simultáneos por sesión, aviso cuando llegan eventos nuevos, IoCs y mapeos con evidencia. También incluye registro con autorización administrativa, verificación de correo, Google Authenticator obligatorio, recuperación, sesiones revocables, roles y auditoría. **Pendiente:** análisis automático al cerrar una sesión, despliegue público y monitoreo de producción. La ingesta funciona aunque DeepSeek esté indisponible.
+
+**Autenticación:** consulte [la guía de configuración, primer administrador y prueba manual](docs/AUTENTICACION.md). Todas las pantallas privadas requieren correo verificado, autorización y segundo factor. El recolector conserva su autenticación independiente mediante `X-API-Key`.
+
+**Registro guiado:** incluye validación inmediata, correo verificado en el mismo formulario, contraseña temporal de un solo ingreso, medidor de fortaleza mínima del 75% y aceptación/rechazo administrativo. Consulte [el flujo vigente y su prueba local](docs/REGISTRO_GUIADO.md).
 
 ## Arquitectura
 
@@ -27,24 +31,32 @@ tactic-lens/
 ├── backend/
 │   ├── api.py                  # aplicación, conexión y rutas básicas
 │   ├── routes.py               # ingesta, sesiones, análisis, IoCs y MITRE
-│   └── analysis_state.py       # estado vigente por sesión
+│   ├── analysis_state.py       # estado vigente por sesión
+│   ├── db.py                   # conexión compartida con migraciones
+│   └── auth/                   # autenticación, sesiones, MFA, roles y correo
 ├── collector/collector.py      # lee el JSONL en Ubuntu
 ├── deploy/cowrie-ingest.service
 ├── database/honeypot_schema.sql # esquema SQL, sin datos
+├── database/migrations/         # migraciones aditivas versionadas
+├── docs/AUTENTICACION.md        # instalación y prueba manual del acceso
 ├── frontend/
 │   ├── src/main.tsx             # interfaz React
+│   ├── src/auth/                # pantallas de acceso, seguridad y administración
 │   ├── vite.config.ts           # proxy de desarrollo
 │   └── .env.example
 ├── scripts/
 │   ├── import_cowrie.py
-│   └── seed_catalog.py
+│   ├── seed_catalog.py
+│   ├── configure_auth.py
+│   ├── migrate.py
+│   └── create_admin.py
 ├── tests/
 ├── .env.example
 ├── requirements.txt
 └── README.md
 ```
 
-El SQL es una exportación de estructura del esquema real; no es una migración. No hay un ORM de modelos separado ni servicios adicionales que instalar.
+El SQL base es una exportación de estructura, no una migración. Después de cargarlo en una base nueva, aplique `scripts.migrate`. En una base existente aplique únicamente las migraciones. No hay un ORM de modelos separado. El correo local utiliza archivos `.eml`; el envío real se configura por SMTP.
 
 ## Requisitos
 
@@ -146,15 +158,18 @@ RETURNING id_honeypot;
 No hay sesiones hasta importar un JSONL real o activar el recolector. Para Python:
 
 ```powershell
-py -m venv .venv
+python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 notepad .env
 ```
 
-Complete `DATABASE_NAME`, `DATABASE_USER`, `DATABASE_PASSWORD`, `DATABASE_HOST`, `HONEYPOT_ID` y `DEV_HOST_IP`. Genere una clave aleatoria **nueva** con `.\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(32))"` y úsela para `INGEST_API_KEY` en Windows y Ubuntu. Es distinta de la clave de DeepSeek. Si `.env` ya existe, consérvelo y complete solo los campos necesarios. Cargue el catálogo mínimo:
+Complete `DATABASE_NAME`, `DATABASE_USER`, `DATABASE_PASSWORD`, `DATABASE_HOST` y `HONEYPOT_ID`. Genere una clave aleatoria **nueva** con `.\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(32))"` y úsela para `INGEST_API_KEY` en Windows y Ubuntu. Es distinta de la clave de DeepSeek. Si `.env` ya existe, consérvelo y complete solo los campos necesarios. Prepare las claves de autenticación, aplique la migración y cree el primer administrador antes de cargar el catálogo:
 
 ```powershell
+.\.venv\Scripts\python.exe -m scripts.configure_auth
+.\.venv\Scripts\python.exe -m scripts.migrate
+.\.venv\Scripts\python.exe -m scripts.create_admin
 .\.venv\Scripts\python.exe -m scripts.seed_catalog
 .\.venv\Scripts\python.exe -m uvicorn backend.api:app --host 192.168.56.1 --port 8000
 ```
@@ -173,7 +188,7 @@ notepad .env.local
 npm.cmd run dev
 ```
 
-Configure `VITE_API_PROXY_TARGET=http://192.168.56.1:8000` si usa la red original, o `http://127.0.0.1:8000` para API local. Abra `http://127.0.0.1:5173`. Vite consulta la API cada 5 segundos; Vite no escribe en PostgreSQL. `npm.cmd run build` compila la interfaz. El `package.json` actual no define scripts de lint ni de pruebas frontend.
+Configure `VITE_API_PROXY_TARGET=http://192.168.56.1:8000` si usa la red original, o `http://127.0.0.1:8000` para API local. Abra `http://127.0.0.1:5173/login`, verifique el correo del administrador y vincule Google Authenticator según [la guía de autenticación](docs/AUTENTICACION.md). Vite consulta la API cada 5 segundos; Vite no escribe en PostgreSQL. `npm.cmd run build` compila la interfaz y `npm.cmd test` ejecuta las pruebas de validación del registro. No hay script de lint.
 
 ## 5. Recolector automático en Ubuntu
 
@@ -226,7 +241,7 @@ FastAPI envía al LLM eventos seleccionados de la sesión con credenciales ocult
 
 ## 7. Prueba del flujo completo
 
-1. Inicie PostgreSQL, FastAPI y React como arriba.
+1. Inicie PostgreSQL, FastAPI y React como arriba. Inicie sesión con correo verificado, autorización y Google Authenticator; use Administrador para importar archivos manualmente.
 2. En Ubuntu real confirme Cowrie con `ss -lnt | grep ':2222'` y el recolector con `sudo systemctl status cowrie-ingest --no-pager`.
 3. Desde Ubuntu real ejecute `curl -i http://192.168.56.1:8000/api/health`. El campo `collector_last_seen` debe actualizarse; `null` significa que todavía no ha llegado un latido.
 4. Desde **otra** PowerShell conecte `ssh -p 2222 root@192.168.56.101`. En `root@svr04` ejecute `whoami`, `pwd` y `uname -a`; luego `exit`.
@@ -264,6 +279,6 @@ FROM honeypot.evento ORDER BY fecha_hora DESC LIMIT 20;
 
 ## 9. Validación y seguridad
 
-Desde la raíz: `.\.venv\Scripts\python.exe -m unittest discover -s tests -v`. Desde `frontend/`: `npm.cmd run build`. Las pruebas usan dobles del proveedor para validar reutilización, fallos y concurrencia; no prueban la cuenta real de DeepSeek ni la VM del compañero.
+Desde la raíz: `.\.venv\Scripts\python.exe -m unittest discover -s tests -v`. Desde `frontend/`: `npm.cmd test` y `npm.cmd run build`. Las pruebas usan dobles del proveedor para validar reutilización, fallos y concurrencia; no prueban la cuenta real de DeepSeek ni la VM del compañero.
 
-`.gitignore` excluye `.env`, `frontend/.env.local`, entornos virtuales, dependencias y compilados. Antes de publicar use `git status --short` y `git check-ignore .env frontend/.env.local`. No suba logs Cowrie, respaldos con credenciales capturadas ni claves. Genere una clave de ingesta por instalación; si alguna se compartió anteriormente, rótela en ambos equipos y reinicie los procesos. Ejecute Cowrie como usuario dedicado, restrinja el firewall a la VM y mantenga separadas las credenciales de Ubuntu y las del honeypot. Para exponer este prototipo fuera del laboratorio harían falta TLS, autenticación de usuarios, gestión de secretos y controles de acceso adicionales.
+`.gitignore` excluye `.env`, `frontend/.env.local`, entornos virtuales, dependencias y compilados. Antes de publicar use `git status --short` y `git check-ignore .env frontend/.env.local`. No suba logs Cowrie, respaldos con credenciales capturadas ni claves. Genere una clave de ingesta por instalación; si alguna se compartió anteriormente, rótela en ambos equipos y reinicie los procesos. Ejecute Cowrie como usuario dedicado, restrinja el firewall a la VM y mantenga separadas las credenciales de Ubuntu y las del honeypot. Para exponer este prototipo fuera del laboratorio configure HTTPS, cookies Secure, SMTP TLS, custodia de claves y permisos mínimos de PostgreSQL según [la guía de autenticación](docs/AUTENTICACION.md). La autorización web ya se aplica por roles y exige MFA.

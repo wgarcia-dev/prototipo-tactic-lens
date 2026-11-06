@@ -16,6 +16,8 @@ from sqlalchemy.engine import URL
 from sqlalchemy.exc import SQLAlchemyError
 from pgvector.sqlalchemy import VECTOR  # registers pgvector type for reflection
 from .analysis_state import public_state, states_for_sessions
+from .db import database_engine
+from .auth.config import Settings
 
 load_dotenv()
 
@@ -31,9 +33,11 @@ def safe(value):
 
 
 def local_only(request: Request):
-    allowed = {"127.0.0.1", "::1", os.getenv("DEV_HOST_IP", "")}
-    if not request.client or request.client.host not in allowed:
-        raise HTTPException(403, "Acceso local requerido")
+    # Kept as an internal compatibility name for the existing module routes.
+    # A local IP is no longer an authentication credential.
+    if not getattr(request.state, "user", None):
+        from .auth.store import authorize_request
+        authorize_request(request)
 
 
 def timestamp(value):
@@ -65,10 +69,10 @@ async def lifespan(app: FastAPI):
         raise RuntimeError("Variables faltantes: " + ", ".join(missing))
     app.state.honeypot_id = UUID(os.environ["HONEYPOT_ID"])
     app.state.api_key = os.environ["INGEST_API_KEY"]
-    url = URL.create("postgresql+psycopg", username=os.environ["DATABASE_USER"], password=os.environ["DATABASE_PASSWORD"], host=os.environ["DATABASE_HOST"], database=os.environ["DATABASE_NAME"])
-    engine = create_engine(url, pool_pre_ping=True)
+    app.state.auth_settings = Settings.load()
+    engine = database_engine()
     meta = MetaData()
-    names = ("honeypot", "sesion", "evento", "modelo_llm", "analisis_llm", "accion_identificada", "accion_evento", "tipo_ioc", "ioc", "deteccion_ioc", "accion_ioc", "tactica_mitre", "tecnica_mitre", "tecnica_tactica", "mapeo_mitre")
+    names = ("honeypot", "sesion", "evento", "modelo_llm", "analisis_llm", "accion_identificada", "accion_evento", "tipo_ioc", "ioc", "deteccion_ioc", "accion_ioc", "tactica_mitre", "tecnica_mitre", "tecnica_tactica", "mapeo_mitre", "usuario", "rol", "auth_factor", "auth_token", "auth_sesion", "auth_recuperacion", "auth_limite", "auth_auditoria")
     tables = {name: Table(name, meta, schema="honeypot", autoload_with=engine) for name in names}
     expected = {"sesion": {"id_sesion", "id_honeypot", "cowrie_session_id", "fecha_inicio", "ip_origen", "puerto_origen", "puerto_destino", "protocolo", "fecha_fin"}, "evento": {"id_evento", "id_sesion", "numero_secuencia", "tipo_evento", "fecha_hora", "datos_originales"}}
     for name, columns in expected.items():
@@ -173,3 +177,21 @@ def events(id: UUID, request: Request, limit: int = Query(200, ge=1, le=500), of
 
 
 from . import routes  # noqa: E402,F401 - registers extended routes
+from .auth.routes import router as auth_router
+from .auth.middleware import AuthMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+app.include_router(auth_router)
+from .auth.onboarding import router as onboarding_router
+app.include_router(onboarding_router)
+app.add_middleware(AuthMiddleware)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError):
+    # Pydantic's default JSON includes rejected input values (including secrets).
+    return JSONResponse(status_code=422, content={"detail": [
+        {"loc": list(error["loc"]), "msg": error["msg"], "type": error["type"]}
+        for error in exc.errors()
+    ]})

@@ -8,17 +8,39 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select, func
+from sqlalchemy.dialects.postgresql import insert
 
 from backend.api import app
 from backend.routes import AnalysisResult, Finding, IocProposal, MitreProposal
 
 
 class LiveTests(unittest.TestCase):
+    def setUp(self):
+        # Legacy module tests isolate authentication, just as they isolate the LLM.
+        # test_auth exercises the actual authentication/authorization boundary in SQL.
+        if self._testMethodName != "test_sensitive_endpoint_restricted":
+            self.auth_patch = patch("backend.auth.middleware.authorize_request", side_effect=lambda request: setattr(request.state, "user", {"rol": "administrador"}))
+            self.auth_patch.start()
+
+    def tearDown(self):
+        if hasattr(self, "auth_patch"):
+            self.auth_patch.stop()
+
     def test_import_and_reimport_in_rolled_back_transaction(self):
         with TestClient(app, client=("127.0.0.1", 50000)) as client:
+            client.headers["origin"] = "http://127.0.0.1:5173"
+            client.headers["x-csrf-token"] = client.get("/api/auth/csrf").json()["csrf_token"]
             engine = app.state.engine
             with engine.connect() as connection:
                 outer = connection.begin()
+                # Catalog fixtures belong to this rolled-back test, not the live DB.
+                t = app.state.tables
+                for number, name in ((1, "IP"), (2, "Dominio"), (3, "URL"), (4, "Hash")):
+                    connection.execute(insert(t["tipo_ioc"]).values(id_tipo_ioc=number,nombre=name).on_conflict_do_nothing())
+                connection.execute(insert(t["tactica_mitre"]).values(codigo_tactica="TA0002",nombre="Execution").on_conflict_do_nothing())
+                connection.execute(insert(t["tecnica_mitre"]).values(codigo_tecnica="T1059",nombre="Command and Scripting Interpreter").on_conflict_do_nothing())
+                connection.execute(insert(t["tecnica_mitre"]).values(codigo_tecnica="T1059.004",tecnica_padre_id="T1059",nombre="Unix Shell").on_conflict_do_nothing())
+                connection.execute(insert(t["tecnica_tactica"]).values(codigo_tecnica="T1059.004",codigo_tactica="TA0002").on_conflict_do_nothing())
 
                 class TransactionEngine:
                     @contextmanager
@@ -112,7 +134,7 @@ class LiveTests(unittest.TestCase):
 
     def test_sensitive_endpoint_restricted(self):
         with TestClient(app, client=("192.168.56.101", 50000)) as client:
-            self.assertEqual(client.get("/api/sesiones").status_code, 403)
+            self.assertEqual(client.get("/api/sesiones").status_code, 401)
             self.assertEqual(client.post("/api/ingesta/cowrie", files={"file": ("x.json", b"{}\n")}).status_code, 403)
 
 

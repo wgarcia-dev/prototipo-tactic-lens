@@ -30,7 +30,9 @@ def check_request(request):
             raise AuthError(403, "La protección de la página expiró. Recárguela.") from None
         if path.startswith("/api/auth/"):
             with transaction(request) as conn:
-                if path == "/api/auth/password/fortaleza":
+                if path == "/api/auth/actividad":
+                    rate(conn, request, "actividad_ip", ip_limit=600)
+                elif path == "/api/auth/password/fortaleza":
                     rate(conn, request, "fortaleza_ip", ip_limit=300)
                 else:
                     rate(conn, request, "autenticacion_ip", ip_limit=120)

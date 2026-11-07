@@ -2,7 +2,7 @@
 
 El acceso web requiere tres condiciones independientes: correo verificado, autorización administrativa y MFA confirmado. Los dos roles, **Administrador de seguridad** y **Analista de seguridad**, usan obligatoriamente Google Authenticator u otra aplicación TOTP estándar. No se utiliza OAuth ni una API de Google.
 
-**Registro público actualizado:** la verificación se realiza ahora en el mismo formulario, antes de crear la cuenta. Se envía una credencial temporal y se exige definir la contraseña en el primer ingreso. Administración permite aceptar o rechazar solicitudes. Consulte [el flujo vigente y sus pruebas](REGISTRO_GUIADO.md). Los pasos anteriores de contraseña/correo de esta guía siguen aplicando al bootstrap por CLI y a las cuentas existentes.
+**Flujo vigente:** el correo se verifica en el formulario antes de crear la cuenta. Los registros nuevos reciben un enlace para definir su contraseña después de la aprobación administrativa. La recuperación también requiere una solicitud aprobada. Consulte [Administración ampliada y recuperación supervisada](ADMINISTRACION.md). Las referencias a contraseñas temporales de la entrega anterior corresponden únicamente a compatibilidad con cuentas ya existentes; ya no se envían nuevas contraseñas por correo.
 
 ## Arquitectura y alcance
 
@@ -13,10 +13,9 @@ El servidor mantiene sesiones opacas en PostgreSQL. La cookie contiene un valor 
 ```mermaid
 flowchart TD
   E[Verificar código en el formulario de registro] --> R[Solicitud: Analista pendiente]
-  R --> I[Primer ingreso con credencial temporal de un solo uso]
-  I --> D[Crear contraseña definitiva con fortaleza mínima del 75%]
-  D --> A[Esperar autorización del administrador]
-  A --> P[Correo y contraseña correctos]
+  R --> A[Administrador autoriza y envía enlace personal]
+  A --> D[Definir contraseña con enlace de un solo uso]
+  D --> P[Correo y contraseña correctos]
   P --> M{MFA configurado}
   M -->|No| Q[QR y clave manual]
   Q --> C[Confirmar un TOTP real]

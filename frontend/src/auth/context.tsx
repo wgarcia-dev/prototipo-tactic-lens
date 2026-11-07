@@ -71,17 +71,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
   useEffect(() => {
     if (session?.etapa !== "completa") return;
-    let lastActivity = Date.now();
-    const activity = () => {
-      if (Date.now() - lastActivity < 60000) return;
-      lastActivity = Date.now();
-      void refresh();
-    };
-    window.addEventListener("pointerdown", activity, { passive: true });
-    window.addEventListener("keydown", activity);
+    let lastInteraction = 0;
+    const activity = () => { lastInteraction = Date.now(); };
+    const heartbeat = window.setInterval(() => {
+      if (document.visibilityState === "visible" && Date.now() - lastInteraction < 60000)
+        void mutate("/auth/actividad").catch(() => {});
+    }, 30000);
+    for (const event of ["pointerdown", "keydown", "scroll", "pointermove"])
+      window.addEventListener(event, activity, {passive:true});
     return () => {
-      window.removeEventListener("pointerdown", activity);
-      window.removeEventListener("keydown", activity);
+      window.clearInterval(heartbeat);
+      for (const event of ["pointerdown", "keydown", "scroll", "pointermove"])
+        window.removeEventListener(event, activity);
     };
   }, [session?.etapa, refresh]);
   const logout = useCallback(async () => {

@@ -1,6 +1,7 @@
 """All critical identity validation lives on the server."""
 import re
 import unicodedata
+from typing import Literal
 
 from email_validator import validate_email, EmailNotValidError
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
@@ -108,6 +109,25 @@ class PasswordReset(Payload):
         return self
 
 
+class PasswordToken(Payload):
+    token: SecretStr = Field(min_length=40, max_length=100)
+
+
+class AdministrativeAction(Reauthentication):
+    motivo: str = Field(min_length=10, max_length=300)
+
+    @field_validator("motivo")
+    @classmethod
+    def reason(cls, value):
+        if len(value.strip()) < 10:
+            raise ValueError("Indique un motivo de al menos diez caracteres")
+        return value.strip()
+
+
+class RecoveryDecision(AdministrativeAction):
+    decision: Literal["aprobar", "rechazar"]
+
+
 class InitialPassword(Payload):
     password: SecretStr = Field(max_length=128)
     confirmacion: SecretStr = Field(max_length=128)
@@ -146,11 +166,17 @@ class UserUpdate(SecondFactor):
     aprobar: bool = False
     rechazar: bool = False
     motivo_rechazo: str | None = Field(default=None, max_length=300)
+    accion: Literal["suspender", "bloquear", "reactivar"] | None = None
+    motivo: str | None = Field(default=None, min_length=10, max_length=300)
 
     @model_validator(mode="after")
     def decision(self):
         if self.aprobar and self.rechazar:
             raise ValueError("Elija aceptar o rechazar, no ambas opciones")
+        if self.accion and (self.aprobar or self.rechazar):
+            raise ValueError("No combine decisiones de registro con cambios de estado")
+        if self.accion in {"suspender", "bloquear"} and not self.motivo:
+            raise ValueError("Indique el motivo de la suspensión o bloqueo")
         if not self.aprobar and self.password is None:
             raise ValueError("Esta operación requiere su contraseña de administrador")
         if self.rechazar and (not self.motivo_rechazo or len(self.motivo_rechazo.strip()) < 10):

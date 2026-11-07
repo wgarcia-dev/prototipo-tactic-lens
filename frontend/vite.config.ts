@@ -4,5 +4,5 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig(({mode})=>{
   const env=loadEnv(mode,process.cwd(),'VITE_')
   const target=env.VITE_API_PROXY_TARGET||'http://127.0.0.1:8000'
-  return {plugins:[tailwindcss()],server:{host:'127.0.0.1',port:5173,proxy:{'/api':{target,changeOrigin:true}}}}
+  return {plugins:[tailwindcss()],server:{host:'127.0.0.1',port:5173,headers:{'Referrer-Policy':'no-referrer','Cache-Control':'no-store'},proxy:{'/api':{target,changeOrigin:true}}}}
 })

@@ -30,6 +30,8 @@ class Settings:
     reset_seconds: int
     registration_proof_seconds: int
     temporary_password_seconds: int
+    recovery_request_seconds: int
+    recent_activity_seconds: int
 
     @classmethod
     def load(cls):
@@ -61,7 +63,9 @@ class Settings:
                    integer("AUTH_MAX_ATTEMPTS", 5, maximum=20), integer("AUTH_CHALLENGE_SECONDS", 300),
                    integer("AUTH_SESSION_SECONDS", 28800), integer("AUTH_IDLE_SECONDS", 1800),
                    integer("AUTH_RESET_SECONDS", 900), integer("AUTH_REGISTRATION_PROOF_SECONDS", 900),
-                   integer("AUTH_TEMP_PASSWORD_SECONDS", 86400))
+                   integer("AUTH_TEMP_PASSWORD_SECONDS", 86400),
+                   integer("AUTH_RECOVERY_REQUEST_SECONDS", 86400),
+                   integer("AUTH_RECENT_ACTIVITY_SECONDS", 120, minimum=30, maximum=900))
 
 
 SESSION_COOKIE = "tacticlens_session"

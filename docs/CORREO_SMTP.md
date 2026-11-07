@@ -1,10 +1,10 @@
-# Correo SMTP de TacticLens
+# Correo SMTP de TacticLens con Resend
 
 ## Estado revisado
 
-El backend ya admite Gmail mediante `smtp.gmail.com`, puerto `587`, autenticación con contraseña de aplicación y STARTTLS. No se requieren dependencias nuevas, cambios de rutas ni cambios del servicio de correo. `backend/auth/mailer.py` utiliza `smtplib.SMTP`, establece TLS con un contexto que valida certificados, se autentica y envía el mensaje. Las operaciones de cuenta reutilizan ese mismo servicio.
+El backend ya admite Resend mediante `smtp.resend.com`, puerto `465`, usuario `resend` y API Key como contraseña. No se requieren dependencias nuevas ni cambios de rutas. `backend/auth/mailer.py` utiliza `smtplib.SMTP_SSL` con validación de certificados cuando `SMTP_SSL=true`. Con esta configuración no utiliza STARTTLS. Las operaciones de cuenta reutilizan ese mismo servicio. La configuración coincide con la [documentación oficial de Resend](https://resend.com/docs/send-with-smtp).
 
-En esta intervención no se modificó el `.env`, no se reemplazaron credenciales, no se reinició el backend ni se efectuaron conexiones o envíos SMTP. Se revisó la presencia de variables sin mostrar sus valores. En el momento de revisión había configuración del buzón local y faltaban las asignaciones `SMTP_*` en el `.env` principal.
+Se actualizaron las variables públicas de correo en el `.env` principal, conservando `SMTP_PASSWORD` sin mostrarlo. Si todavía contiene la contraseña anterior de Gmail, el titular debe sustituirla por su API Key de Resend. No se reinició el backend ni se efectuaron conexiones o envíos SMTP. El titular informó que el dominio ya está verificado en Resend; no se accedió a su cuenta para comprobarlo ni se modificó DNS en Cloudflare.
 
 ## Archivo que debes editar
 
@@ -14,29 +14,29 @@ C:\Users\user\Documents\tesis\prototipo-tactic-lens\.env
 
 Es el archivo de la raíz del repositorio, no `frontend/.env` ni `.env.example`. `backend/api.py` llama a `load_dotenv()` de `python-dotenv`; con la estructura actual encuentra este archivo porque no existe un `backend/.env` intermedio. Las variables que ya existan en el entorno del proceso tienen prioridad: el cargador no las sobrescribe.
 
-## Configuración para Gmail
+## Configuración para Resend
 
-Edita las asignaciones existentes de `MAIL_TRANSPORT` y `MAIL_FROM` y agrega las de `SMTP_*` que falten. Mantén una sola asignación de cada variable. No reemplaces todo el archivo: conserva PostgreSQL, claves de autenticación, TOTP y el resto de configuración.
+El bloque público ya está preparado. Solo debes colocar la API Key en la asignación existente de `SMTP_PASSWORD`. Mantén una sola asignación de cada variable y conserva PostgreSQL, claves de autenticación, TOTP y el resto de configuración. No hace falta una variable nueva llamada `RESEND_API_KEY`.
 
 ```dotenv
 MAIL_TRANSPORT=smtp
-MAIL_FROM="TacticLens <TU_CORREO@gmail.com>"
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=TU_CORREO@gmail.com
-SMTP_PASSWORD=TU_CONTRASENA_DE_APLICACION
-SMTP_STARTTLS=true
-SMTP_SSL=false
+MAIL_FROM="TacticLens <no-reply@tacticlens.app>"
+SMTP_HOST=smtp.resend.com
+SMTP_PORT=465
+SMTP_USER=resend
+SMTP_PASSWORD=PEGA_AQUI_TU_API_KEY_DE_RESEND
+SMTP_STARTTLS=false
+SMTP_SSL=true
 ```
 
 1. Abre el archivo `.env` indicado con tu editor local.
-2. Cambia `MAIL_TRANSPORT=file` por `MAIL_TRANSPORT=smtp`.
-3. Sustituye `TU_CORREO@gmail.com` en **ambos lugares** por la misma dirección completa de la cuenta Gmail remitente.
-4. Sustituye `TU_CONTRASENA_DE_APLICACION` por la contraseña de aplicación ya generada. Pega los 16 caracteres sin espacios de agrupación. No uses la contraseña habitual de tu cuenta ni un código de Google Authenticator.
-5. Conserva exactamente `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_STARTTLS=true` y `SMTP_SSL=false`. STARTTLS cifra la conexión; `SMTP_SSL=false` desactiva únicamente el TLS implícito de otro modo de conexión.
+2. Busca `SMTP_PASSWORD` y sustituye su valor por la API Key de Resend con permiso de envío para `tacticlens.app`. No uses la contraseña de Gmail, un código de Google Authenticator ni la contraseña de Cloudflare.
+3. No copies la clave en el chat, en `.env.example` ni en comandos de terminal. El ejemplo versionado conserva `SMTP_PASSWORD=` vacío.
+4. El remitente será `TacticLens <no-reply@tacticlens.app>`. Tu Gmail será el destinatario de la prueba.
+5. Conserva `MAIL_TRANSPORT=smtp`, `SMTP_HOST=smtp.resend.com`, `SMTP_PORT=465`, `SMTP_USER=resend`, `SMTP_STARTTLS=false` y `SMTP_SSL=true`. En este puerto la conexión se cifra desde el principio.
 6. Guarda el archivo. `MAIL_DEV_DIRECTORY=.local/mail` puede permanecer: no se usa cuando el transporte es `smtp`.
 
-No se necesita activar POP o IMAP para enviar. La configuración coincide con la [ayuda oficial de Gmail sobre SMTP y STARTTLS](https://support.google.com/mail/answer/7104828?hl=es). Google documenta el uso de [contraseñas de aplicación](https://support.google.com/accounts/answer/185833?hl=es).
+No se necesita activar POP/IMAP ni configurar OAuth o una contraseña de aplicación de Gmail para enviar desde Resend. Las comillas simples o dobles alrededor de los valores son compatibles con `python-dotenv`.
 
 ## Aplicar la configuración después de introducir credenciales
 
@@ -50,6 +50,31 @@ cd C:\Users\user\Documents\tesis\prototipo-tactic-lens
 Este comando conserva la dirección de API usada por el proxy Vite de esta instalación. No requiere reinstalar dependencias, aplicar migraciones ni reiniciar el frontend. Iniciar el backend no envía correos por sí solo; las operaciones de registro, recuperación y notificaciones sí pueden hacerlo con SMTP activo.
 
 No se ha realizado una prueba de entrega. Después de que el titular confirme que terminó de introducir las credenciales, se podrá acordar y ejecutar esa comprobación. Hasta entonces no se debe pulsar el envío de códigos ni realizar operaciones que generen notificaciones para probarlo.
+
+## Prueba posterior de un único correo real
+
+Solo después de guardar la clave y confirmar que terminó, desde la raíz:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.send_test_email
+```
+
+El script pide únicamente el Gmail destinatario y envía un mensaje de prueba reutilizando el servicio y la plantilla actuales. No recibe la clave por argumentos, no la imprime y no modifica usuarios, sesiones o contraseñas. No envía mensajes al importarse ni al iniciar FastAPI. No se ejecutó durante esta preparación.
+
+Compruebe el remitente y la recepción en Gmail, incluido Spam, y el estado del mensaje en la tabla de correos de Resend. La aceptación SMTP no garantiza entrega en la bandeja de entrada. Si falla la autenticación, revise `SMTP_USER=resend` y la API Key. Si falla la conexión, revise acceso saliente al puerto 465. No desactive la validación de certificados.
+
+## Verificación posterior del flujo de cuentas
+
+Después de comprobar el correo de prueba:
+
+1. Abra `http://127.0.0.1:5173/registro` sin una sesión completa y use datos autorizados no registrados. Si su Gmail ya pertenece a una cuenta, use otro buzón o un alias propio para la nueva solicitud.
+2. Pulse **Verificar correo**, compruebe el código recibido e introdúzcalo en el mismo formulario. El correo debe quedar bloqueado con opción de edición. El código caduca inicialmente en cinco minutos y no puede reutilizarse.
+3. Envíe la solicitud. Recibirá un aviso de recepción sin contraseña. Al aprobarse el registro, recibirá un enlace de un solo uso para definir una contraseña con fortaleza mínima de 75%.
+4. Un administrador acepta la solicitud usando su propio Google Authenticator. Compruebe el enlace y la notificación de autorización. El titular debe definir la contraseña e iniciar sesión para completar la configuración o desafío MFA antes de acceder a los módulos.
+5. Cierre sesión y abra `http://127.0.0.1:5173/recuperar`. Solicite recuperación para una cuenta existente. La respuesta es genérica. El administrador debe aprobarla desde Solicitudes de recuperación antes de que se envíe el enlace.
+6. Abra el enlace recibido dentro de su vigencia, cambie la contraseña e inicie sesión. Debe seguir exigiéndose Google Authenticator. El enlace usado no debe poder reutilizarse y las sesiones anteriores se revocan.
+
+`AUTH_PUBLIC_URL` determina el destino del enlace de recuperación. Consérvelo en la URL real del frontend local mientras la aplicación se ejecute localmente. Tener un dominio remitente no despliega la aplicación web en ese dominio.
 
 ## Protección de secretos y puntos de retorno
 
@@ -66,4 +91,4 @@ El primero debe listar los archivos ignorados; el segundo no debe devolver archi
 
 ## Cambio posterior de proveedor
 
-El servicio no está acoplado a Gmail. Para un dominio propio, cambia en el `.env` `MAIL_FROM`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` y los modos TLS según el proveedor. En puerto 587 suele utilizarse STARTTLS; para TLS implícito, configura `SMTP_SSL=true` y `SMTP_STARTTLS=false` con el puerto indicado por el proveedor. Conserva TLS. La configuración de dominio y sus registros de correo se realizará cuando se elija el proveedor.
+El servicio sigue siendo independiente del proveedor. Otro servicio puede configurarse cambiando `MAIL_FROM`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` y los modos TLS. Resend utiliza actualmente SSL directo en 465; para un proveedor que exija STARTTLS en 587 se configurarían `SMTP_SSL=false` y `SMTP_STARTTLS=true`. No se incorporó el SDK de Resend ni se hicieron cambios de infraestructura externa.

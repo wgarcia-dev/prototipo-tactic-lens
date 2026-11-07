@@ -37,7 +37,7 @@ def ip_hash(request):
 
 
 def audit(conn, request, kind, user_id=None, actor=None, **metadata):
-    allowed = {"reason", "rol", "referencia_hash", "session_id"}
+    allowed = {"reason", "rol", "referencia_hash", "session_id", "request_id", "resultado"}
     if set(metadata) - allowed:
         raise ValueError("Metadatos de auditoría no permitidos")
     conn.execute(table(request, "auth_auditoria").insert().values(
@@ -72,7 +72,7 @@ def identity(conn, request, user_id, lock=False):
 
 
 def eligible(user):
-    return bool(user and user.activo and user.rol_activo and user.autorizacion != "rechazado" and user.rol in {"administrador", "analista"})
+    return bool(user and user.activo and not user.restriccion_acceso and user.rol_activo and user.autorizacion != "rechazado" and user.rol in {"administrador", "analista"})
 
 
 def approved(user):
@@ -116,7 +116,11 @@ def new_session(conn, request, response, user, stage, old=None):
         id_usuario=user.id_usuario, token_hash=fingerprint(settings, "sesion", value), etapa=stage,
         primaria_en=now(), mfa_en=now() if stage == "completa" else None,
         vence_en=now() + timedelta(seconds=seconds), ultima_actividad=now(), ip_hash=ip_hash(request), creado_por=user.id_usuario,
+        dispositivo=device_label(request.headers.get("user-agent", "")),
     ))
+    if stage == "completa":
+        u = table(request, "usuario")
+        conn.execute(u.update().where(u.c.id_usuario == user.id_usuario).values(ultimo_acceso_en=now()))
     set_session_cookie(request, response, value, seconds)
 
 
@@ -147,6 +151,13 @@ def session(conn, request, stages=None, lock=True):
     if request.method not in {"GET", "HEAD", "OPTIONS"} or request.url.path == "/api/auth/me":
         conn.execute(t.update().where(t.c.id_sesion == row.id_sesion).values(ultima_actividad=moment))
     return row, user
+
+
+def device_label(agent):
+    # Store a coarse label, never the arbitrary raw UA or a fingerprint.
+    browser = next((label for marker, label in (("Edg/", "Edge"), ("Firefox/", "Firefox"), ("Chrome/", "Chrome"), ("Safari/", "Safari")) if marker in agent), "Navegador no identificado")
+    system = next((label for marker, label in (("Android", "Android"), ("iPhone", "iOS"), ("Windows", "Windows"), ("Macintosh", "macOS"), ("Linux", "Linux")) if marker in agent), "Sistema no identificado")
+    return browser + " · " + system
 
 
 def public_user(user):

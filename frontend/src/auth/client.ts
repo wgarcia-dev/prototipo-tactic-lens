@@ -59,13 +59,13 @@ export async function api<T>(
     } catch {
       /* Proxy failures can return plain text. */
     }
-    if (response.status === 401 && !path.startsWith("/auth/"))
+    if (response.status === 401 && (!path.startsWith("/auth/") || path.startsWith("/auth/admin/") || path === "/auth/actividad"))
       window.dispatchEvent(new Event("tacticlens:session-expired"));
     if (response.status === 403 && message.includes("Recarg"))
       csrfRequest = null;
     throw new ApiError(response.status, message);
   }
-  return response.json();
+  return response.status === 204 ? undefined as T : response.json();
 }
 
 export function mutate<T>(

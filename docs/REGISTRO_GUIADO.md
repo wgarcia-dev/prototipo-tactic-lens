@@ -1,16 +1,17 @@
 # Registro guiado y decisiones administrativas
 
-Este es el flujo vigente del registro público. Las cuentas existentes y el bootstrap local del primer administrador conservan sus contraseñas y estados.
+El flujo vigente mantiene la verificación en el formulario y ahora utiliza enlaces de contraseña después de la aprobación. Consulte [Administración y recuperación supervisada](ADMINISTRACION.md). Las cuentas existentes y el bootstrap local conservan sus contraseñas y estados.
 
 ## Registro en una pantalla
 
 1. Abrir `/registro` sin una sesión completa. La cédula se comprueba al completar diez dígitos, con un mensaje inmediato. Nombres, apellidos, usuario y formato del correo muestran correcciones durante la entrada. La validación matemática no certifica identidad oficial.
 2. Pulsar **Verificar correo** junto a la dirección. Se envía un código y aparece un campo debajo, en la misma pantalla. Al completar seis dígitos se verifica automáticamente. También hay confirmación manual para reintentar un fallo de conexión.
 3. Una verificación correcta oculta el código y deja el correo de solo lectura. **Editar correo** invalida la prueba anterior en el servidor y permite modificarlo; la dirección debe verificarse otra vez. Alterar atributos HTML o una bandera del cliente no sustituye esa prueba.
-4. Pulsar **Enviar solicitud de cuenta** cuando los datos y el correo sean válidos. No hay campos de contraseña en este formulario. Se crea un Analista con correo verificado y autorización pendiente, y se envía una credencial temporal aleatoria.
-5. Iniciar sesión con la credencial temporal. Caduca inicialmente en 24 horas y se consume en el primer ingreso correcto. Solo permite crear la contraseña definitiva; no habilita módulos ni sustituye MFA.
-6. Elegir y confirmar la contraseña definitiva. El porcentaje aparece junto al campo y se actualiza con una barra y condiciones. Se exige al menos 75%, entre 12 y 128 caracteres y confirmación coincidente. No se admite reutilizar la credencial enviada por correo.
-7. La cuenta espera autorización si está pendiente. Después de ser aceptada, debe configurar o validar Google Authenticator antes de entrar a los módulos.
+4. Pulsar **Enviar solicitud de cuenta** cuando los datos y el correo sean válidos. Se crea un Analista pendiente de autorización, sin enviar contraseñas por correo.
+5. Un administrador revisa la solicitud. Si la acepta, se envía un enlace personal de un solo uso para definir la contraseña, con vigencia inicial de quince minutos.
+6. Abrir el enlace, elegir y confirmar la contraseña. El porcentaje aparece junto al campo. Se exige al menos 75%, entre 12 y 128 caracteres y confirmación coincidente.
+7. Iniciar sesión y configurar o validar Google Authenticator antes de entrar a los módulos. Si el enlace caduca, solicitar recuperación para que otro administrador revise y emita uno nuevo.
+
 
 El porcentaje es una **estimación**, no una garantía ni una probabilidad de seguridad. Mapea el nivel 0–4 de zxcvbn a 0–100. El servidor calcula el porcentaje y aplica la misma política al guardar, considerando también los datos personales de la cuenta. Admite gestores, pegado y frases largas, sin imponer combinaciones arbitrarias de símbolos. Las evaluaciones usan el backend propio, no un servicio externo; no se guardan ni se registran las contraseñas evaluadas. Las solicitudes se retrasan 450 ms al escribir y se cancelan las anteriores.
 
@@ -27,15 +28,15 @@ Rechazar exige un motivo de 10 a 300 caracteres, sin documentos ni datos sensibl
 - Solo se rechazan solicitudes pendientes. Para cuentas autorizadas se usa la suspensión del estado general.
 - Un administrador no puede gestionar unilateralmente su propio rol o estado. Los Analistas no pueden ejecutar estas operaciones por HTTP directo.
 
-Los cambios administrativos revocan las sesiones previas. Si el primer acceso se revoca o caduca antes de guardar la contraseña definitiva, utilice **Recuperar acceso**. El enlace permite definir la contraseña, manteniendo los requisitos de autorización y MFA. La credencial temporal consumida no se reactiva.
+Los cambios administrativos revocan las sesiones previas. **Recuperar acceso** registra una solicitud pendiente; el enlace se envía exclusivamente después de la aprobación administrativa. Mantiene autorización y MFA y nunca reactiva cuentas suspendidas o bloqueadas.
 
 ## Correo y almacenamiento
 
-Se utiliza la configuración de correo existente, sin modificar credenciales SMTP. Con `MAIL_TRANSPORT=file`, código y contraseña temporal aparecen en **mensajes distintos** dentro de `.local/mail/*.eml`; con `smtp`, se usa el servidor configurado. La contraseña definitiva nunca se envía por correo.
+Se utiliza la configuración de correo existente, sin modificar credenciales SMTP. Con `MAIL_TRANSPORT=file`, el código de correo, el aviso de solicitud y el enlace aprobado aparecen en mensajes separados dentro de `.local/mail/*.eml`; con `smtp`, se usa el servidor configurado. La contraseña definitiva nunca se envía por correo.
 
-Si no puede entregarse el código, se devuelve un error y no se crea el usuario. Si falla el envío de la credencial después de crear la cuenta, la solicitud se conserva y la interfaz ofrece recuperación de acceso. Los fallos se auditan sin contenido del mensaje ni detalles sensibles del proveedor.
+Si no puede entregarse el código, se devuelve un error y no se crea el usuario. Si falla el envío del enlace después de aprobar la cuenta, se conserva la aprobación y queda una solicitud de origen alta pendiente para reintento administrativo. Los fallos se auditan sin contenido del mensaje ni detalles sensibles del proveedor.
 
-La credencial temporal contiene 144 bits aleatorios y se almacena únicamente con Argon2id. Se conserva su hash como historial para impedir que se reutilice como contraseña definitiva, incluso por recuperación o cambio posterior. Su validez se controla además por caducidad y fecha de uso: conservar el hash no vuelve a habilitarla.
+Solo para cuentas legadas: la credencial temporal anterior contenía 144 bits aleatorios y se almacena únicamente con Argon2id. Se conserva su hash como historial para impedir que se reutilice como contraseña definitiva, incluso por recuperación o cambio posterior. Su validez se controla además por caducidad y fecha de uso: conservar el hash no vuelve a habilitarla.
 
 ## Migraciones y arranque
 
@@ -78,7 +79,7 @@ Se conservan `AUTH_EMAIL_TTL_SECONDS=300`, `AUTH_MAX_ATTEMPTS=5` y `AUTH_RESEND_
 | GET `/api/auth/admin/usuarios?estado=pendiente` | Filtrar; también admite `aprobado` y `rechazado` |
 | PATCH `/api/auth/admin/usuarios/{id}` | Aceptar/rechazar con reautenticación |
 
-Las rutas anteriores de correo siguen disponibles para el bootstrap por CLI y las cuentas antiguas. El registro público no admite contraseña elegida por el cliente ni indicadores de correo verificado en el JSON.
+Las rutas anteriores de correo siguen disponibles para el bootstrap por CLI y las cuentas antiguas. El registro actual no emite credenciales temporales; las referencias históricas de versiones 003/004 documentan compatibilidad. La migración 005 y los endpoints vigentes se detallan en [Administración](ADMINISTRACION.md). El registro público no admite contraseña elegida por el cliente ni indicadores de correo verificado en el JSON.
 
 ## Validación ejecutada
 

@@ -36,7 +36,7 @@ export function RegistrationPage() {
   const [code, setCode] = useState("");
   const [cooldown, setCooldown] = useState(0);
   const [submitted, setSubmitted] = useState<{
-    credencial_enviada: boolean;
+    notificacion_enviada: boolean;
   } | null>(null);
   const version = useRef(0);
   const errors = registrationErrors(values);
@@ -159,9 +159,9 @@ export function RegistrationPage() {
         <div className="auth-step-note">
           <Mail size={24} />
           <span>
-            {submitted.credencial_enviada
-              ? "Le enviamos una contraseña temporal de un solo uso. En el primer ingreso deberá crear su contraseña definitiva."
-              : "La solicitud se guardó, pero no se pudo entregar la contraseña temporal. Use Recuperar acceso para establecer su contraseña."}
+            {submitted.notificacion_enviada
+              ? "Recibimos su solicitud. Tras la aprobación administrativa recibirá un enlace para definir su contraseña."
+              : "La solicitud se guardó, pero no se pudo entregar el aviso. Un administrador debe revisar su registro antes de habilitar el enlace de contraseña."}
           </span>
         </div>
         <p className="auth-help">
@@ -171,13 +171,13 @@ export function RegistrationPage() {
         <button
           className="btn auth-submit"
           onClick={() =>
-            navigate(submitted.credencial_enviada ? "/login" : "/recuperar", {
+            navigate("/login", {
               state: { correo: values.correo },
             })
           }
         >
-          {submitted.credencial_enviada
-            ? "Ir al primer inicio de sesión"
+          {submitted.notificacion_enviada
+            ? "Volver al inicio de sesión"
             : "Recuperar acceso"}
         </button>
       </AuthFrame>
@@ -187,7 +187,7 @@ export function RegistrationPage() {
     <AuthFrame
       step="SOLICITUD DE ACCESO"
       title="Crear una cuenta"
-      description="Complete sus datos y verifique el correo aquí mismo. Recibirá una contraseña temporal para su primer ingreso."
+      description="Complete sus datos y verifique el correo aquí mismo. Cuando se autorice su registro, recibirá un enlace para definir su contraseña."
     >
       <Status {...task} />
       <Form
@@ -352,8 +352,8 @@ export function RegistrationPage() {
         <div className="auth-step-note">
           <Mail size={20} />
           <span>
-            No necesita crear una contraseña en este formulario. Le enviaremos
-            una temporal; la definitiva se crea en el primer ingreso.
+            No enviamos contraseñas por correo. Tras la aprobación, recibirá
+            un enlace personal para definirla de forma segura.
           </span>
         </div>
         <Submit busy={task.busy} disabled={!ready || emailTask.busy}>

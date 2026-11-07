@@ -1,7 +1,6 @@
 """Spanish multipart email; development mailbox is explicit and never served by HTTP."""
 from email.message import EmailMessage
 from email.utils import format_datetime
-from html import escape
 import os
 from pathlib import Path
 import smtplib
@@ -9,6 +8,7 @@ import ssl
 from uuid import uuid4
 
 from .security import now
+from .email_templates import html_content, render_email
 
 
 def deliver(settings, recipient, subject, content):
@@ -18,11 +18,7 @@ def deliver(settings, recipient, subject, content):
     message["Subject"] = "TacticLens · " + subject
     message["Date"] = format_datetime(now())
     message.set_content(content + "\n\nTacticLens · Seguridad de la cuenta\nSi no solicitó esta operación, contacte al administrador.")
-    message.add_alternative("""<!doctype html><html lang="es"><body style="margin:0;background:#edf2f7;font-family:Arial,sans-serif;color:#14243a">
-      <main style="max-width:560px;margin:32px auto;background:white;padding:32px;border-top:4px solid #207b83">
-      <p style="font-weight:bold;color:#207b83">TACTICLENS · SEGURIDAD</p><h1 style="font-size:24px">%s</h1>
-      <p style="line-height:1.7;white-space:pre-wrap">%s</p><hr><p style="font-size:12px;color:#526579">
-      Nunca comparta su contraseña ni los códigos de Google Authenticator. Si no solicitó esta operación, contacte al administrador.</p></main></body></html>""" % (escape(subject), escape(content)), subtype="html")
+    message.add_alternative(render_email(subject, content), subtype="html")
     transport = os.getenv("MAIL_TRANSPORT", "smtp")
     if transport == "file" and not settings.production:
         directory = Path(os.getenv("MAIL_DEV_DIRECTORY", ".local/mail"))

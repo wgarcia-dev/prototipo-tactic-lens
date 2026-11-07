@@ -1,5 +1,7 @@
 # Entrega del módulo de autenticación de TacticLens
 
+Este informe conserva el detalle de la entrega inicial. La ampliación vigente, con 92 pruebas backend y recuperación aprobada mediante enlaces, está documentada en [Administración](ADMINISTRACION.md). Los registros nuevos ya no envían contraseñas temporales.
+
 ## Resultado
 
 Se implementaron registro validado, autorización administrativa, correo verificado, vinculación y acceso mediante TOTP obligatorio, recuperación, sesiones revocables, RBAC y administración. La implementación conserva React/TypeScript, FastAPI y SQLAlchemy Core; reutiliza los registros existentes de usuario y rol. No se modificaron el recolector ni las operaciones de eventos, sesiones, LLM, IoCs y MITRE, salvo la protección común de sus rutas y el cliente HTTP con CSRF.

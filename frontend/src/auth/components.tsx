@@ -232,12 +232,12 @@ export function AuthenticatorField() {
   );
 }
 
-export function ReauthFields() {
+export function ReauthFields({passwordLabel = "Contraseña actual"}: {passwordLabel?: string} = {}) {
   const [recovery, setRecovery] = useState(false);
   return (
     <>
       <PasswordField
-        label="Contraseña actual"
+        label={passwordLabel}
         name="password"
         autoComplete="current-password"
       />

@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI):
     app.state.auth_settings = Settings.load()
     engine = database_engine()
     meta = MetaData()
-    names = ("honeypot", "sesion", "evento", "modelo_llm", "analisis_llm", "accion_identificada", "accion_evento", "tipo_ioc", "ioc", "deteccion_ioc", "accion_ioc", "tactica_mitre", "tecnica_mitre", "tecnica_tactica", "mapeo_mitre", "usuario", "rol", "auth_factor", "auth_token", "auth_sesion", "auth_recuperacion", "auth_limite", "auth_auditoria")
+    names = ("honeypot", "sesion", "evento", "modelo_llm", "analisis_llm", "accion_identificada", "accion_evento", "tipo_ioc", "ioc", "deteccion_ioc", "accion_ioc", "tactica_mitre", "tecnica_mitre", "tecnica_tactica", "mapeo_mitre", "usuario", "rol", "auth_factor", "auth_token", "auth_sesion", "auth_recuperacion", "auth_limite", "auth_auditoria", "auth_solicitud_password")
     tables = {name: Table(name, meta, schema="honeypot", autoload_with=engine) for name in names}
     expected = {"sesion": {"id_sesion", "id_honeypot", "cowrie_session_id", "fecha_inicio", "ip_origen", "puerto_origen", "puerto_destino", "protocolo", "fecha_fin"}, "evento": {"id_evento", "id_sesion", "numero_secuencia", "tipo_evento", "fecha_hora", "datos_originales"}}
     for name, columns in expected.items():
@@ -185,6 +185,10 @@ from fastapi.responses import JSONResponse
 app.include_router(auth_router)
 from .auth.onboarding import router as onboarding_router
 app.include_router(onboarding_router)
+from .auth.recovery import router as recovery_router
+from .auth.administration import router as administration_router
+app.include_router(recovery_router)
+app.include_router(administration_router)
 app.add_middleware(AuthMiddleware)
 
 

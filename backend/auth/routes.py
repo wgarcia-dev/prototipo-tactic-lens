@@ -8,7 +8,7 @@ import secrets
 from uuid import UUID
 from typing import Literal
 
-from fastapi import APIRouter, Request, Response, Query
+from fastapi import APIRouter, BackgroundTasks, Request, Response, Query
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 import pyotp
 import qrcode
@@ -27,6 +27,7 @@ from .store import (AuthError, approved, audit, eligible, factor, identity, new_
 
 router = APIRouter(prefix="/api/auth", tags=["Autenticación"])
 GENERIC_EMAIL = {"mensaje": "Si la cuenta puede realizar esta operación, recibirá un correo con las instrucciones."}
+GENERIC_RECOVERY = {"mensaje": "Si la cuenta es elegible, su solicitud se procesará para revisión administrativa. Si se aprueba, recibirá instrucciones en su correo."}
 
 
 def csrf_serializer(request):
@@ -53,16 +54,17 @@ def register(payload: RegistrationProfile, request: Request, response: Response)
         proof = pending_proof(conn, request, lock=True)
         if not proof or proof.correo != payload.correo or not proof.verificado_en or proof.vence_en <= now():
             raise AuthError(403, "Verifique este correo en el formulario antes de enviar la solicitud.")
-        temporary = secrets.token_urlsafe(18)
-        user = create_account(conn, request, payload, temporary_password=temporary, verified_email=True)
+        user = create_account(conn, request, payload, passwordless=True, verified_email=True)
         t = table(request, "auth_token")
         conn.execute(t.update().where(t.c.id_token == proof.id_token).values(usado_en=now(), estado_registro="inactivo", modificado_por=user.id_usuario))
         audit(conn, request, "correo_verificado", user.id_usuario, actor=user.id_usuario)
-        audit(conn, request, "password_temporal_emitida", user.id_usuario, actor=user.id_usuario)
         response.delete_cookie(REGISTRATION_COOKIE, path="/api/auth")
-    delivered = notify(request, user.id_usuario, (user.correo, "Contraseña temporal para su primer ingreso",
-        f"Su contraseña temporal es: {temporary}\n\nCaduca en {request.app.state.auth_settings.temporary_password_seconds // 3600} horas y solo sirve para un primer ingreso restringido. Deberá crear una contraseña definitiva con fortaleza estimada mínima de 75%. Esta credencial no permite entrar a los módulos; también se requieren autorización administrativa y Google Authenticator. Si vence, utilice Recuperar acceso."))
-    return {"mensaje": "Solicitud registrada. Recibirá una contraseña temporal para crear su contraseña definitiva. El acceso a los módulos requiere aprobación administrativa y MFA.", "credencial_enviada": delivered}
+    delivered = notify(request, user.id_usuario, (user.correo, "Solicitud de registro recibida",
+        "Su correo está verificado y su solicitud está pendiente de autorización. Cuando un administrador la apruebe, "
+        "recibirá un enlace personal para definir su contraseña. No enviamos contraseñas por correo."))
+    return {"mensaje": "Solicitud registrada. Espere la aprobación administrativa y el enlace para definir su contraseña.",
+            "notificacion_enviada": delivered}
+
 
 
 @router.post("/correo/reenviar", status_code=202)
@@ -157,13 +159,8 @@ def initial_password(payload: InitialPassword, request: Request, response: Respo
 def assess_password(payload: PasswordAssessment, request: Request):
     with transaction(request) as conn:
         if payload.token:
-            t = table(request, "auth_token")
-            row = conn.execute(select(t).where(t.c.proposito == "password",
-                t.c.token_hash == fingerprint(request.app.state.auth_settings, "password", payload.token.get_secret_value()),
-                t.c.usado_en.is_(None), t.c.vence_en > now())).mappings().first()
-            user = identity(conn, request, row.id_usuario) if row else None
-            if not eligible(user):
-                raise AuthError(400, "Enlace inválido o vencido")
+            from .recovery import validated_token
+            user, _, _ = validated_token(conn, request, payload.token.get_secret_value())
         else:
             _, user = session(conn, request, {"crear_password", "completa"})
         rate(conn, request, "fortaleza", user.id_usuario, account_limit=120, ip_limit=300)
@@ -262,42 +259,41 @@ def regenerate_codes(payload: Reauthentication, request: Request):
 
 
 @router.post("/password/solicitar", status_code=202)
-def request_password(payload: EmailPayload, request: Request):
+def request_password(payload: EmailPayload, request: Request, background: BackgroundTasks):
     user, message = None, None
     with transaction(request) as conn:
         rate(conn, request, "solicitar_password", payload.correo, account_limit=5, ip_limit=20)
         u = table(request, "usuario")
         user_id = conn.scalar(select(u.c.id_usuario).where(u.c.correo == payload.correo))
         user = identity(conn, request, user_id) if user_id else None
-        if eligible(user):
+        if approved(user):
             message = issue_reset(conn, request, user)
-    notify(request, user.id_usuario if user else None, message)
-    return GENERIC_EMAIL
+    if message:
+        # Receipt contains no link/token. SMTP latency must not distinguish public responses.
+        background.add_task(notify, request, user.id_usuario, message)
+    return GENERIC_RECOVERY
 
 
 @router.post("/password/restablecer")
 def reset_password(payload: PasswordReset, request: Request):
     with transaction(request) as conn:
+        from .recovery import validated_token
         settings, t = request.app.state.auth_settings, table(request, "auth_token")
-        hashed = fingerprint(settings, "password", payload.token.get_secret_value())
-        rate(conn, request, "restablecer_password", hashed, account_limit=5)
-        query = select(t).where(t.c.token_hash == hashed, t.c.proposito == "password")
-        record = conn.execute(query).mappings().first()
-        if not record or record.usado_en or record.vence_en <= now():
-            raise AuthError(400, "Enlace inválido o vencido")
-        user = identity(conn, request, record.id_usuario, lock=True)
-        record = conn.execute(query.with_for_update()).mappings().first()
-        if not record or record.usado_en or record.vence_en <= now():
-            raise AuthError(400, "Enlace inválido o vencido")
-        if not eligible(user):
-            raise AuthError(400, "Enlace inválido o vencido")
+        rate(conn, request, "restablecer_password", fingerprint(settings, "password", payload.token.get_secret_value()), account_limit=5)
+        user, record, recovery = validated_token(conn, request, payload.token.get_secret_value())
         validate_new_password(payload.password.get_secret_value(), (user.nombres, user.apellidos, user.correo, user.nombre_usuario, user.cedula), user=user)
         conn.execute(t.update().where(t.c.id_usuario == user.id_usuario, t.c.proposito == "password", t.c.usado_en.is_(None)).values(usado_en=now(), estado_registro="inactivo", modificado_por=user.id_usuario))
         u = table(request, "usuario")
         conn.execute(u.update().where(u.c.id_usuario == user.id_usuario).values(password_hash=PASSWORDS.hash(payload.password.get_secret_value()),
             password_cambio_obligatorio=False, password_temporal_vence_en=None, modificado_por=user.id_usuario))
+        q = table(request, "auth_solicitud_password")
+        conn.execute(q.update().where(q.c.id_solicitud == recovery.id_solicitud).values(
+            estado="completada", completado_en=now(), estado_registro="inactivo", modificado_por=user.id_usuario))
+        from .recovery import cancel_requests
+        cancel_requests(conn, request, user.id_usuario)
         revoke(conn, request, user.id_usuario)
-        audit(conn, request, "password_restablecida", user.id_usuario, actor=user.id_usuario)
+        audit(conn, request, "password_restablecida", user.id_usuario, actor=user.id_usuario,
+              request_id=str(recovery.id_solicitud), resultado="completada")
     notify(request, user.id_usuario, (user.correo, "Contraseña restablecida", "Se restableció su contraseña y se cerraron sus sesiones. Google Authenticator permanece activo."))
     return {"mensaje": "Contraseña actualizada. Inicie sesión y complete Google Authenticator."}
 
@@ -312,6 +308,8 @@ def change_password(payload: PasswordChange, request: Request, response: Respons
         conn.execute(u.update().where(u.c.id_usuario == user.id_usuario).values(password_hash=PASSWORDS.hash(payload.nueva_password.get_secret_value()), modificado_por=user.id_usuario))
         tokens = table(request, "auth_token")
         conn.execute(tokens.update().where(tokens.c.id_usuario == user.id_usuario, tokens.c.proposito == "password", tokens.c.usado_en.is_(None)).values(usado_en=now(), estado_registro="inactivo", modificado_por=user.id_usuario))
+        from .recovery import cancel_requests
+        cancel_requests(conn, request, user.id_usuario)
         revoke(conn, request, user.id_usuario)
         audit(conn, request, "password_cambiada", user.id_usuario, actor=user.id_usuario)
         response.delete_cookie(SESSION_COOKIE, path="/api")
@@ -351,24 +349,21 @@ def roles(request: Request):
 
 @router.get("/admin/usuarios")
 def users(request: Request, limit: int = Query(25, ge=1, le=100), offset: int = Query(0, ge=0),
-          estado: Literal["pendiente", "aprobado", "rechazado"] | None = None):
+          estado: Literal["pendiente", "aprobado", "activo", "rechazado", "suspendido", "bloqueado"] | None = None,
+          q: str = Query("", max_length=120), rol: Literal["administrador", "analista"] | None = None,
+          orden: Literal["registro", "nombre", "ultimo_acceso", "actividad"] = "registro",
+          direccion: Literal["asc", "desc"] = "desc"):
+    from .administration import user_accounts
     with transaction(request) as conn:
         require_admin(conn, request)
-        u, r, f = table(request, "usuario"), table(request, "rol"), table(request, "auth_factor")
-        statement = select(u.c.id_usuario,u.c.nombres,u.c.apellidos,u.c.nombre_usuario,u.c.correo,u.c.activo,u.c.autorizacion,
-            u.c.correo_verificado_en,u.c.creado_en,u.c.rechazado_en,u.c.motivo_rechazo,
-            u.c.password_cambio_obligatorio,r.c.codigo.label("rol"),f.c.confirmado_en.label("mfa_confirmado_en"))
-        statement = statement.join(r,u.c.id_rol==r.c.id_rol).outerjoin(f,u.c.id_usuario==f.c.id_usuario)
-        if estado:
-            statement = statement.where(u.c.autorizacion == estado)
-        rows = conn.execute(statement.order_by(u.c.creado_en.desc(),u.c.id_usuario).limit(limit).offset(offset)).mappings()
-        return [{**dict(row), "id_usuario": str(row.id_usuario)} for row in rows]
+        return user_accounts(conn, request, limit, offset, estado, q, rol, orden, direccion)
 
 
 @router.patch("/admin/usuarios/{user_id}")
 def update_user(user_id: UUID, payload: UserUpdate, request: Request):
+    from .recovery import cancel_requests, create_request, send_approved_link
+    link_delivered = None
     with transaction(request) as conn:
-        # Serialize last-admin decisions across workers.
         conn.execute(text("SELECT pg_advisory_xact_lock(724610902)"))
         _, actor = require_admin(conn, request)
         target = identity(conn, request, user_id, lock=True)
@@ -377,7 +372,11 @@ def update_user(user_id: UUID, payload: UserUpdate, request: Request):
         if user_id == actor.id_usuario:
             raise AuthError(403, "Otro administrador debe gestionar su rol y estado")
         if payload.rechazar and target.autorizacion != "pendiente":
-            raise AuthError(409, "Solo se rechazan solicitudes pendientes. Para cuentas autorizadas use Suspender.")
+            raise AuthError(409, "Solo se rechazan solicitudes pendientes")
+        if payload.aprobar and target.autorizacion == "aprobado":
+            raise AuthError(409, "La cuenta ya fue autorizada; use una acción de estado")
+        if payload.accion and target.autorizacion != "aprobado":
+            raise AuthError(409, "Solo se cambia el estado general de cuentas autorizadas")
         if payload.aprobar and payload.activo and target.autorizacion == "pendiente":
             if payload.recuperacion:
                 raise AuthError(400, "Confirme la aprobación con el código actual de su Google Authenticator")
@@ -387,37 +386,58 @@ def update_user(user_id: UUID, payload: UserUpdate, request: Request):
                 raise AuthError(422, "Esta operación requiere su contraseña de administrador")
             reauthenticate(conn, request, actor, payload)
         u, r = table(request, "usuario"), table(request, "rol")
-        if target.rol == "administrador" and target.activo and (not payload.activo or payload.rol != "administrador"):
-            count = conn.scalar(select(func.count()).select_from(u.join(r,u.c.id_rol==r.c.id_rol)).where(r.c.codigo=="administrador",u.c.activo.is_(True),u.c.autorizacion=="aprobado"))
+        action = payload.accion or ("reactivar" if payload.activo and not target.activo and target.autorizacion == "aprobado" else "suspender" if not payload.activo and target.activo and not payload.rechazar else None)
+        enabled = False if action in {"suspender", "bloquear"} else True if action == "reactivar" else payload.activo
+        if action == "reactivar" and target.activo and not target.restriccion_acceso:
+            raise AuthError(409, "La cuenta ya está activa")
+        if target.rol == "administrador" and target.activo and (not enabled or payload.rol != "administrador"):
+            count = conn.scalar(select(func.count()).select_from(u.join(r, u.c.id_rol == r.c.id_rol)).where(
+                r.c.codigo == "administrador", u.c.activo.is_(True), u.c.autorizacion == "aprobado", u.c.restriccion_acceso.is_(None)))
             if count <= 1:
                 raise AuthError(409, "Debe conservarse al menos un administrador habilitado")
-        role_id = conn.scalar(select(r.c.id_rol).where(r.c.codigo==payload.rol,r.c.activo.is_(True)))
+        role_id = conn.scalar(select(r.c.id_rol).where(r.c.codigo == payload.rol, r.c.activo.is_(True)))
         if role_id is None:
             raise AuthError(400, "Rol no disponible")
-        values = {"id_rol": role_id,"activo":payload.activo,"desactivado_en":None if payload.activo else now(),"modificado_por":actor.id_usuario}
+        values = {"id_rol":role_id, "activo":enabled, "desactivado_en":None if enabled else now(), "modificado_por":actor.id_usuario}
+        if action in {"suspender", "bloquear"}:
+            if not payload.motivo or len(payload.motivo.strip()) < 10:
+                raise AuthError(422, "Indique un motivo de al menos diez caracteres")
+            values.update(restriccion_acceso="bloqueado" if action == "bloquear" else "suspendido",
+                          motivo_restriccion=payload.motivo.strip(), restriccion_por=actor.id_usuario, restriccion_en=now())
+        if action == "reactivar" or payload.aprobar:
+            values.update(restriccion_acceso=None, motivo_restriccion=None, restriccion_por=None, restriccion_en=None)
         if payload.aprobar:
             if not target.correo_verificado_en:
                 raise AuthError(409, "El usuario debe verificar primero su correo")
-            values.update(autorizacion="aprobado",autorizado_por=actor.id_usuario,autorizado_en=now())
-            values.update(rechazado_por=None, rechazado_en=None, motivo_rechazo=None)
-            audit(conn, request, "cuenta_autorizada",user_id,actor.id_usuario)
+            values.update(autorizacion="aprobado", autorizado_por=actor.id_usuario, autorizado_en=now(),
+                          rechazado_por=None, rechazado_en=None, motivo_rechazo=None)
+            audit(conn, request, "cuenta_autorizada", user_id, actor.id_usuario, resultado="aprobada")
         if payload.rechazar:
             values.update(autorizacion="rechazado", activo=False, desactivado_en=now(),
-                rechazado_por=actor.id_usuario, rechazado_en=now(), motivo_rechazo=payload.motivo_rechazo.strip())
-            audit(conn, request, "cuenta_rechazada", user_id, actor.id_usuario, reason="solicitud_rechazada")
-        conn.execute(u.update().where(u.c.id_usuario==user_id).values(**values))
+                          rechazado_por=actor.id_usuario, rechazado_en=now(), motivo_rechazo=payload.motivo_rechazo.strip())
+            audit(conn, request, "cuenta_rechazada", user_id, actor.id_usuario, reason=payload.motivo_rechazo.strip(), resultado="rechazada")
+        conn.execute(u.update().where(u.c.id_usuario == user_id).values(**values))
         revoke(conn, request, user_id, actor.id_usuario)
-        audit(conn, request, "cuenta_estado_actualizado",user_id,actor.id_usuario,reason="habilitada" if values["activo"] else "suspendida")
+        if not payload.aprobar:
+            cancel_requests(conn, request, user_id, actor.id_usuario)
+        if action:
+            kind = {"bloquear":"cuenta_bloqueada", "suspender":"cuenta_suspendida", "reactivar":"cuenta_reactivada"}[action]
+            audit(conn, request, kind, user_id, actor.id_usuario, reason=payload.motivo.strip() if payload.motivo else "reactivacion", resultado="aplicada")
+        audit(conn, request, "cuenta_estado_actualizado", user_id, actor.id_usuario, reason="habilitada" if values["activo"] else "suspendida")
         if target.rol != payload.rol:
-            audit(conn, request, "rol_cambiado",user_id,actor.id_usuario,rol=payload.rol)
-    if payload.rechazar:
-        notice = (target.correo, "Solicitud de cuenta no autorizada", "Un administrador rechazó su solicitud de acceso. No se habilitó el acceso a los módulos. Contacte al administrador de la organización si necesita una revisión.")
-    elif payload.aprobar:
-        notice = (target.correo, "Solicitud de cuenta autorizada", "Su solicitud fue autorizada por un administrador. Inicie sesión y complete los pasos pendientes de contraseña y Google Authenticator para acceder.")
-    else:
-        notice = (target.correo,"Estado de cuenta actualizado","Un administrador actualizó el estado o rol de su cuenta. Todas sus sesiones fueron revocadas.")
-    notify(request,user_id,notice)
-    return {"mensaje":"Cuenta actualizada; sus sesiones anteriores fueron revocadas"}
+            audit(conn, request, "rol_cambiado", user_id, actor.id_usuario, rol=payload.rol, resultado="aplicado")
+        if payload.aprobar and target.password_cambio_obligatorio:
+            updated = identity(conn, request, user_id)
+            record = create_request(conn, request, updated, origin="alta")
+            if record:
+                link_delivered = send_approved_link(conn, request, updated, record, actor.id_usuario, "Autorización administrativa del registro")
+    title = "Solicitud de cuenta rechazada" if payload.rechazar else "Solicitud de cuenta autorizada" if payload.aprobar else {"suspender":"Cuenta suspendida", "bloquear":"Cuenta bloqueada", "reactivar":"Cuenta reactivada"}.get(action, "Rol o estado de cuenta actualizado")
+    delivered = link_delivered
+    if link_delivered is None and target.correo_verificado_en:
+        delivered = notify(request, user_id, (target.correo, title,
+            title + ". Un administrador actualizó su cuenta. Sus sesiones previas fueron revocadas. "
+            "La recuperación de contraseña no permite eludir restricciones. Contacte al administrador por un canal conocido si necesita una revisión."))
+    return {"mensaje":"Cuenta actualizada; sus sesiones anteriores fueron revocadas", "notificacion_enviada":bool(delivered)}
 
 
 @router.post("/admin/usuarios/{user_id}/mfa/restablecer")
@@ -462,9 +482,17 @@ def replace_own_mfa(payload: Reauthentication, request: Request, response: Respo
 
 
 @router.get("/admin/auditoria")
-def security_audit(request: Request, limit: int = Query(50,ge=1,le=100), offset: int = Query(0,ge=0)):
+def security_audit(request: Request, limit: int = Query(50,ge=1,le=100), offset: int = Query(0,ge=0),
+                   usuario: UUID | None = None, tipo: str = Query("",max_length=80)):
     with transaction(request) as conn:
         require_admin(conn,request)
-        t=table(request,"auth_auditoria")
-        rows=conn.execute(select(t.c.id_auditoria,t.c.id_usuario,t.c.actor_id,t.c.tipo,t.c.fecha_evento,t.c.metadatos).order_by(t.c.fecha_evento.desc(),t.c.id_auditoria.desc()).limit(limit).offset(offset)).mappings()
-        return [{**dict(row),"id_auditoria":str(row.id_auditoria),"id_usuario":str(row.id_usuario) if row.id_usuario else None,"actor_id":str(row.actor_id) if row.actor_id else None} for row in rows]
+        t, u = table(request,"auth_auditoria"), table(request,"usuario")
+        actor, subject = u.alias("actor"), u.alias("afectado")
+        statement = select(t.c.id_auditoria,t.c.id_usuario,t.c.actor_id,t.c.tipo,t.c.fecha_evento,t.c.metadatos,
+            actor.c.nombre.label("administrador"),subject.c.nombre.label("usuario")).outerjoin(actor,t.c.actor_id==actor.c.id_usuario).outerjoin(subject,t.c.id_usuario==subject.c.id_usuario)
+        if usuario:
+            statement = statement.where(t.c.id_usuario==usuario)
+        if tipo:
+            statement = statement.where(t.c.tipo==tipo)
+        rows=conn.execute(statement.order_by(t.c.fecha_evento.desc(),t.c.id_auditoria.desc()).limit(limit).offset(offset)).mappings()
+        return [{**dict(row), "metadatos":{k:v for k,v in row.metadatos.items() if k in {"reason","rol","resultado","request_id"}}} for row in rows]

@@ -103,7 +103,7 @@ class IdentityTests(unittest.TestCase):
         self.assertIsNone(matching_interval(secret, "12345x", -1, at))
 
 
-class AuthIntegrationTests(unittest.TestCase):
+class AuthFixture(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.settings_patch = patch.dict("os.environ", {
@@ -112,6 +112,7 @@ class AuthIntegrationTests(unittest.TestCase):
             "AUTH_SECRET_KEY": secrets.token_urlsafe(48), "AUTH_TOTP_KEYS": Fernet.generate_key().decode(),
             "AUTH_MAX_ATTEMPTS": "5", "AUTH_IDLE_SECONDS": "1800", "AUTH_RESEND_SECONDS": "60",
             "AUTH_EMAIL_TTL_SECONDS": "300", "AUTH_CHALLENGE_SECONDS": "300", "MAIL_TRANSPORT": "file",
+            "AUTH_RESET_SECONDS": "900", "AUTH_RECOVERY_REQUEST_SECONDS": "86400", "AUTH_RECENT_ACTIVITY_SECONDS": "120",
         })
         cls.settings_patch.start()
         cls.context = TestClient(app, client=("127.0.0.1", 51000))
@@ -226,29 +227,54 @@ class AuthIntegrationTests(unittest.TestCase):
         self.post("/registro/correo/verificar",{"correo":data["correo"],"codigo":code})
         return data,code
 
-    def guided_signup(self, number=1):
+    def public_signup(self, number=1):
         data,_=self.verify_registration_email(number)
         result=self.post("/registro",data,201)
-        self.assertTrue(result.json()["credencial_enviada"])
-        temporary=re.search(r"temporal es: ([^\s]+)",self.messages[-1][2])[1]
-        self.assertNotIn(temporary,result.text)
+        self.assertTrue(result.json()["notificacion_enviada"])
+        self.assertNotIn("#token=",self.messages[-1][2])
+        self.assertNotIn("temporal es:",self.messages[-1][2])
         u=app.state.tables["usuario"]
         user_id=self.connection.scalar(select(u.c.id_usuario).where(u.c.correo==data["correo"]))
+        return user_id,data
+
+    def legacy_signup(self, number=1):
+        # Persisted accounts from the earlier release retain their one-use credential.
+        # No endpoint emails it: this trusted fixture simulates pre-migration history.
+        user_id,data=self.public_signup(number)
+        temporary=secrets.token_urlsafe(18)
+        u=app.state.tables["usuario"]
+        self.connection.execute(u.update().where(u.c.id_usuario==user_id).values(
+            password_temporal_hash=PASSWORDS.hash(temporary),password_temporal_vence_en=now()+timedelta(hours=24)))
         return user_id,data,temporary
 
+    def approved_reset_token(self, user_id):
+        # Legacy token consumption tests isolate the admin decision; the full HTTP
+        # approval path is exercised in test_administration.
+        from backend.auth.recovery import create_request, send_approved_link
+        from backend.auth.store import identity
+        request=Request({"type":"http","app":app,"client":("127.0.0.1",0),"headers":[],"path":"/cli/test-fixture","scheme":"http","server":("localhost",0),"query_string":b""})
+        user=identity(self.connection,request,user_id,lock=True)
+        q=app.state.tables["auth_solicitud_password"]
+        row=self.connection.execute(select(q).where(q.c.id_usuario==user_id,q.c.estado=="pendiente")).mappings().first()
+        row=row or create_request(self.connection,request,user)
+        self.assertIsNotNone(row)
+        self.assertTrue(send_approved_link(self.connection,request,user,row,user_id,"Aprobación de fixture para probar consumo"))
+        return re.search(r"#token=([^\s]+)",self.messages[-1][2])[1]
+
+class AuthIntegrationTests(AuthFixture):
     def test_guided_registration_requires_email_proof_and_rejects_client_flags(self):
         data=self.profile()
         self.post("/registro",data,403)
         self.post("/registro",{**data,"correo_verificado":True},422)
         self.post("/registro",{**data,"password":PASSWORD,"confirmacion":PASSWORD},422)
-        _,data,temporary=self.guided_signup()
+        _,data=self.public_signup()
         u=app.state.tables["usuario"]
         row=self.connection.execute(select(u).where(u.c.correo==data["correo"])).mappings().one()
         self.assertTrue(row.password_cambio_obligatorio)
         self.assertIsNotNone(row.correo_verificado_en)
         self.assertEqual(row.autorizacion,"pendiente")
-        self.assertTrue(verify_password(row.password_temporal_hash,temporary))
-        self.assertFalse(verify_password(row.password_hash,temporary))
+        self.assertIsNone(row.password_temporal_hash)
+        self.assertIsNone(row.password_temporal_vence_en)
         self.assertEqual(self.client.get("/api/sesiones").status_code,401)
         self.post("/registro",data,403)
 
@@ -294,7 +320,7 @@ class AuthIntegrationTests(unittest.TestCase):
         self.post("/registro",data,403)
 
     def test_temporary_password_is_one_use_and_cannot_access_modules(self):
-        user_id,data,temporary=self.guided_signup()
+        user_id,data,temporary=self.legacy_signup()
         self.assertEqual(self.post("/login",{"correo":data["correo"],"password":temporary}).json()["etapa"],"crear_password")
         u=app.state.tables["usuario"]
         row=self.connection.execute(select(u).where(u.c.id_usuario==user_id)).mappings().one()
@@ -313,22 +339,21 @@ class AuthIntegrationTests(unittest.TestCase):
         self.post("/login",{"correo":data["correo"],"password":temporary},401)
         self.login(data,"aprobacion")
 
-    def test_expired_temporary_password_recovers_without_approving_or_disabling_mfa(self):
-        user_id,data,temporary=self.guided_signup()
+    def test_pending_legacy_account_cannot_recover_before_administrative_approval(self):
+        user_id,data,temporary=self.legacy_signup()
         u=app.state.tables["usuario"]
         self.connection.execute(u.update().where(u.c.id_usuario==user_id).values(password_temporal_vence_en=now()-timedelta(seconds=1)))
         self.post("/login",{"correo":data["correo"],"password":temporary},401)
+        before=len(self.messages)
         self.post("/password/solicitar",{"correo":data["correo"]},202)
-        token=re.search(r"#token=([^\s]+)",self.messages[-1][2])[1]
-        self.post("/password/restablecer",{"token":token,"password":PASSWORD,"confirmacion":PASSWORD})
-        self.login(data,"aprobacion")
-        row=self.connection.execute(select(u).where(u.c.id_usuario==user_id)).mappings().one()
-        self.assertFalse(row.password_cambio_obligatorio)
-        self.assertEqual(row.autorizacion,"pendiente")
+        self.assertEqual(len(self.messages),before)
+        q=app.state.tables["auth_solicitud_password"]
+        self.assertEqual(self.connection.scalar(select(func.count()).select_from(q).where(q.c.id_usuario==user_id)),0)
+        self.assertEqual(self.connection.scalar(select(u.c.autorizacion).where(u.c.id_usuario==user_id)),"pendiente")
 
     def test_strength_meter_requires_proof_and_matches_final_75_percent_policy(self):
         self.post("/password/fortaleza",{"password":PASSWORD},401)
-        _,data,temporary=self.guided_signup()
+        _,data,temporary=self.legacy_signup()
         self.post("/login",{"correo":data["correo"],"password":temporary})
         weak=self.post("/password/fortaleza",{"password":"Contrasena123456!"}).json()
         self.assertLess(weak["porcentaje"],75)
@@ -340,18 +365,16 @@ class AuthIntegrationTests(unittest.TestCase):
         self.post("/password/inicial",{"password":PASSWORD,"confirmacion":PASSWORD})
 
     def test_admin_accepts_guided_signup_but_password_and_mfa_still_required(self):
-        target_id,data,temporary=self.guided_signup()
+        target_id,data=self.public_signup()
         _,_,secret,_=self.enroll(99,admin=True)
         self.advance()
         response=self.client.patch(f"/api/auth/admin/usuarios/{target_id}",json={"codigo":self.otp(secret),"rol":"analista","activo":True,"aprobar":True})
         self.assertEqual(response.status_code,200,response.text)
-        pending=self.client.get("/api/auth/admin/usuarios?estado=pendiente").json()
-        self.assertNotIn(str(target_id),[u["id_usuario"] for u in pending])
-        approved=self.client.get("/api/auth/admin/usuarios?estado=aprobado").json()
-        self.assertIn(str(target_id),[u["id_usuario"] for u in approved])
+        token=re.search(r"#token=([^\s]+)",self.messages[-1][2])[1]
+        self.post("/password/validar",{"token":token})
+        self.post("/password/restablecer",{"token":token,"password":PASSWORD,"confirmacion":PASSWORD})
         self.post("/logout")
-        self.assertEqual(self.post("/login",{"correo":data["correo"],"password":temporary}).json()["etapa"],"crear_password")
-        self.assertEqual(self.post("/password/inicial",{"password":PASSWORD,"confirmacion":PASSWORD}).json()["etapa"],"configurar_mfa")
+        self.login(data,"configurar_mfa")
         self.assertEqual(self.client.get("/api/sesiones").status_code,403)
         setup=self.post("/mfa/configuracion").json()
         self.post("/mfa/confirmar",{"codigo":self.otp(setup["clave_manual"])})
@@ -399,10 +422,10 @@ class AuthIntegrationTests(unittest.TestCase):
         _,_,secret,_=self.enroll(admin=True)
         self.advance()
         decision={"codigo":self.otp(secret),"rol":"administrador","activo":True,"aprobar":True}
-        self.assertEqual(self.client.patch(f"/api/auth/admin/usuarios/{target_id}",json=decision).status_code,422)
+        self.assertEqual(self.client.patch(f"/api/auth/admin/usuarios/{target_id}",json=decision).status_code,409)
         self.assertEqual(self.client.patch(f"/api/auth/admin/usuarios/{target_id}",json={**decision,"aprobar":False}).status_code,422)
         self.assertEqual(self.client.patch(f"/api/auth/admin/usuarios/{pending_id}",json={**decision,"aprobar":False,"rechazar":True,"motivo_rechazo":"Solicitud no autorizada"}).status_code,422)
-        self.assertEqual(self.client.patch(f"/api/auth/admin/usuarios/{target_id}",json={**decision,"password":PASSWORD}).status_code,200)
+        self.assertEqual(self.client.patch(f"/api/auth/admin/usuarios/{target_id}",json={**decision,"aprobar":False,"password":PASSWORD}).status_code,200)
 
     def test_approval_with_only_totp_still_requires_admin_role_and_full_session(self):
         target_id,_,_=self.account(2)
@@ -416,7 +439,7 @@ class AuthIntegrationTests(unittest.TestCase):
         self.assertEqual(self.client.patch(url,json=decision).status_code,403)
 
     def test_admin_rejects_pending_request_and_revokes_its_access(self):
-        target_id,data,temporary=self.guided_signup()
+        target_id,data,temporary=self.legacy_signup()
         self.post("/login",{"correo":data["correo"],"password":temporary})
         self.post("/password/inicial",{"password":PASSWORD,"confirmacion":PASSWORD})
         target_cookies=dict(self.client.cookies)
@@ -561,7 +584,7 @@ class AuthIntegrationTests(unittest.TestCase):
     def test_password_reset_preserves_mfa_revokes_sessions_and_token_is_single_use(self):
         user_id, data, secret, _ = self.enroll()
         self.post("/password/solicitar", {"correo": data["correo"]}, 202)
-        token = re.search(r"#token=([^\s]+)", self.messages[-1][2])[1]
+        token = self.approved_reset_token(user_id)
         self.post("/password/restablecer", {"token": token, "password": NEW_PASSWORD, "confirmacion": NEW_PASSWORD})
         self.assertEqual(self.client.get("/api/sesiones").status_code, 401)
         self.post("/password/restablecer", {"token": token, "password": NEW_PASSWORD, "confirmacion": NEW_PASSWORD}, 400)
@@ -588,7 +611,7 @@ class AuthIntegrationTests(unittest.TestCase):
         self.assertEqual(next(row["rol"] for row in listed if row["id_usuario"]==str(target_id)),"administrador")
         self.assertEqual(self.client.get("/api/auth/admin/roles").status_code, 200)
         self.advance()
-        response = self.client.patch(f"/api/auth/admin/usuarios/{target_id}",json={**self.reauth(secret),"rol":"analista","activo":False})
+        response = self.client.patch(f"/api/auth/admin/usuarios/{target_id}",json={**self.reauth(secret),"rol":"analista","activo":False,"motivo":"Suspensión documentada por el administrador"})
         self.assertEqual(response.status_code, 200, response.text)
         self.post("/logout")
         self.post("/login", {"correo":target_data["correo"],"password":PASSWORD}, 401)
@@ -607,7 +630,7 @@ class AuthIntegrationTests(unittest.TestCase):
 
     def test_admin_cannot_change_own_role_or_state(self):
         user_id,_,secret,_=self.enroll(admin=True)
-        response=self.client.patch(f"/api/auth/admin/usuarios/{user_id}",json={**self.reauth(secret),"rol":"analista","activo":False})
+        response=self.client.patch(f"/api/auth/admin/usuarios/{user_id}",json={**self.reauth(secret),"rol":"analista","activo":False,"motivo":"Suspensión documentada por el administrador"})
         self.assertEqual(response.status_code,403)
         self.assertEqual(self.client.get("/api/auth/me").json()["usuario"]["rol"],"administrador")
 
@@ -660,9 +683,9 @@ class AuthIntegrationTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/sesiones").status_code, 200)
 
     def test_password_change_requires_two_factors_and_invalidates_reset_links(self):
-        _, data, secret, _ = self.enroll()
+        user_id, data, secret, _ = self.enroll()
         self.post("/password/solicitar", {"correo": data["correo"]}, 202)
-        token = re.search(r"#token=([^\s]+)", self.messages[-1][2])[1]
+        token = self.approved_reset_token(user_id)
         self.post("/password/cambiar", {**self.reauth(secret), "nueva_password": NEW_PASSWORD, "confirmacion": NEW_PASSWORD})
         self.assertEqual(self.client.get("/api/sesiones").status_code, 401)
         self.post("/password/restablecer", {"token": token, "password": NEW_PASSWORD, "confirmacion": NEW_PASSWORD}, 400)
@@ -690,9 +713,9 @@ class AuthIntegrationTests(unittest.TestCase):
     def test_unauthenticated_admin_routes_and_expired_reset_are_rejected(self):
         self.assertEqual(self.client.get("/api/auth/admin/usuarios").status_code,401)
         self.assertEqual(self.client.get("/api/auth/admin/auditoria").status_code,401)
-        user_id, data, _ = self.account()
+        user_id, data, _ = self.account(approve=True)
         self.post("/password/solicitar", {"correo":data["correo"]},202)
-        token=re.search(r"#token=([^\s]+)", self.messages[-1][2])[1]
+        token=self.approved_reset_token(user_id)
         t=app.state.tables["auth_token"]
         self.connection.execute(t.update().where(t.c.id_usuario==user_id,t.c.proposito=="password").values(vence_en=now()-timedelta(seconds=1)))
         self.post("/password/restablecer",{"token":token,"password":NEW_PASSWORD,"confirmacion":NEW_PASSWORD},400)
@@ -704,7 +727,7 @@ class AuthIntegrationTests(unittest.TestCase):
         self.client.cookies.clear()
         self.client.headers["x-csrf-token"] = self.client.get("/api/auth/csrf").json()["csrf_token"]
         _, _, secret, _ = self.enroll(admin=True)
-        result=self.client.patch(f"/api/auth/admin/usuarios/{target_id}",json={**self.reauth(secret),"rol":"analista","activo":False})
+        result=self.client.patch(f"/api/auth/admin/usuarios/{target_id}",json={**self.reauth(secret),"rol":"analista","activo":False,"motivo":"Suspensión documentada por el administrador"})
         self.assertEqual(result.status_code,200,result.text)
         self.client.cookies.clear()
         self.client.cookies.update(target_cookies)

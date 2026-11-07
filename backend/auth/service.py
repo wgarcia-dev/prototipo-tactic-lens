@@ -13,7 +13,7 @@ from .security import PASSWORDS, fingerprint, matching_interval, now, opaque_tok
 from .store import AuthError, audit, clear_account_rate, factor, identity, rate, table
 
 
-def create_account(conn, request, data, admin=False, temporary_password=None, verified_email=False):
+def create_account(conn, request, data, admin=False, temporary_password=None, verified_email=False, passwordless=False):
     u, r = table(request, "usuario"), table(request, "rol")
     role = conn.scalar(select(r.c.id_rol).where(r.c.codigo == ("administrador" if admin else "analista"), r.c.activo.is_(True)))
     if role is None:
@@ -25,8 +25,8 @@ def create_account(conn, request, data, admin=False, temporary_password=None, ve
                 id_usuario=user_id, id_rol=role, nombre=data.nombres + " " + data.apellidos,
                 cedula=data.cedula, nombres=data.nombres, apellidos=data.apellidos,
                 nombre_usuario=data.nombre_usuario, correo=data.correo,
-                password_hash=PASSWORDS.hash(opaque_token() if temporary_password else data.password.get_secret_value()),
-                password_cambio_obligatorio=temporary_password is not None,
+                password_hash=PASSWORDS.hash(opaque_token() if temporary_password or passwordless else data.password.get_secret_value()),
+                password_cambio_obligatorio=passwordless or temporary_password is not None,
                 password_temporal_hash=PASSWORDS.hash(temporary_password) if temporary_password else None,
                 password_temporal_vence_en=now()+timedelta(seconds=request.app.state.auth_settings.temporary_password_seconds) if temporary_password else None,
                 correo_verificado_en=now() if verified_email else None,
@@ -63,7 +63,7 @@ def notify(request, user_id, message):
     try:
         mailer.deliver(request.app.state.auth_settings, *message)
         return True
-    except (OSError, smtplib.SMTPException, RuntimeError):
+    except (OSError, smtplib.SMTPException, RuntimeError, ValueError):
         # No exception string: an SMTP error can contain addresses or message contents.
         with request.app.state.engine.begin() as conn:
             audit(conn, request, "correo_entrega_fallida", user_id, reason="transporte")
@@ -71,19 +71,13 @@ def notify(request, user_id, message):
 
 
 def issue_reset(conn, request, user):
-    t, settings = table(request, "auth_token"), request.app.state.auth_settings
-    identity(conn, request, user.id_usuario, lock=True)
-    last = conn.execute(select(t).where(t.c.id_usuario == user.id_usuario, t.c.proposito == "password").order_by(t.c.creado_en.desc()).limit(1)).mappings().first()
-    if last and last.creado_en > now() - timedelta(seconds=settings.resend_seconds):
+    from .recovery import create_request
+    record = create_request(conn, request, user)
+    if record is None:
         return None
-    conn.execute(t.update().where(t.c.id_usuario == user.id_usuario, t.c.proposito == "password", t.c.usado_en.is_(None)).values(usado_en=now(), estado_registro="inactivo"))
-    token = opaque_token()
-    conn.execute(t.insert().values(id_usuario=user.id_usuario, proposito="password", token_hash=fingerprint(settings, "password", token),
-        vence_en=now() + timedelta(seconds=settings.reset_seconds), creado_por=user.id_usuario))
-    audit(conn, request, "recuperacion_password_solicitada", user.id_usuario)
-    link = settings.public_url + "/recuperar#token=" + token
-    return (user.correo, "Restablecimiento de contraseña",
-            f"Para establecer una nueva contraseña, abra este enlace:\n{link}\n\nCaduca en {settings.reset_seconds // 60} minutos. Google Authenticator seguirá siendo obligatorio.")
+    return (user.correo, "Solicitud de recuperación recibida",
+            "Su solicitud quedó pendiente de revisión administrativa. Si se aprueba, recibirá un enlace personal de un solo uso. "
+            "No se enviarán contraseñas por correo. Si no solicitó esta operación, contacte al administrador.")
 
 
 def verify_second_factor(conn, request, user, code, recovery=False):

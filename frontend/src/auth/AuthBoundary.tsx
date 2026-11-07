@@ -82,7 +82,7 @@ function Login() {
     <AuthFrame
       step="01 / IDENTIFICACIÓN"
       title="Iniciar sesión"
-      description="Use su correo y contraseña. En el primer ingreso utilice la contraseña temporal recibida; deberá crear la definitiva antes de continuar."
+      description="Use su correo y contraseña. Si su registro es nuevo, defina primero su contraseña con el enlace recibido tras la aprobación administrativa."
     >
       <Status {...task} />
       <Form
@@ -108,7 +108,7 @@ function Login() {
         <Submit busy={task.busy}>Continuar</Submit>
       </Form>
       <div className="auth-links">
-        <Link to="/recuperar">Olvidé mi contraseña</Link>
+        <Link to="/recuperar">¿Olvidaste tu contraseña?</Link>
         <Link to="/registro">Solicitar una cuenta</Link>
         <Link to="/verificar-correo">Verificar mi correo</Link>
       </div>
@@ -495,6 +495,13 @@ function PasswordRecovery() {
   );
   const [done, setDone] = useState(false);
   const [passwordReady, setPasswordReady] = useState(false);
+  const [linkState, setLinkState] = useState<"checking" | "valid" | "invalid">(token ? "checking" : "valid");
+  useEffect(() => {
+    if (!token) return;
+    let active = true;
+    void mutate("/auth/password/validar", {token}).then(() => { if(active)setLinkState("valid"); }).catch(() => { if(active)setLinkState("invalid"); });
+    return () => { active = false; };
+  }, [token]);
   useEffect(() => {
     if (token)
       window.history.replaceState(
@@ -507,10 +514,10 @@ function PasswordRecovery() {
     <AuthFrame
       step="RECUPERACIÓN DE CONTRASEÑA"
       title={token ? "Establecer nueva contraseña" : "Recuperar acceso"}
-      description="La recuperación cambia su contraseña y cierra las sesiones anteriores. Google Authenticator sigue siendo obligatorio."
+      description={token ? "El enlace aprobado permite definir su contraseña. Se cerrarán las sesiones anteriores y Google Authenticator seguirá siendo obligatorio." : "Solicite la revisión del administrador. Si se aprueba su solicitud, recibirá un enlace de un solo uso con vigencia limitada."}
     >
       <Status {...task} />
-      {done ? (
+      {token && linkState !== "valid" ? <p role="status" className="auth-message">{linkState === "checking" ? "Comprobando el enlace…" : "El enlace no es válido, expiró, fue utilizado o la cuenta no está habilitada. Solicite una nueva revisión administrativa."}</p> : done ? (
         <div className="auth-message" role="status">
           Contraseña actualizada. Inicie sesión con su nueva contraseña y su
           segundo factor.
@@ -553,7 +560,7 @@ function PasswordRecovery() {
           <Submit busy={task.busy} disabled={!!token && !passwordReady}>
             {token
               ? "Restablecer contraseña"
-              : "Solicitar enlace de recuperación"}
+              : "Solicitar revisión administrativa"}
           </Submit>
         </Form>
       )}

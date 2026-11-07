@@ -4,6 +4,7 @@ import {mutate} from "./client";
 import {useAuth} from "./context";
 import {Form, AuthenticatorField, ReauthFields, Status, Submit, reauthData, useTask} from "./components";
 import {AdminSessions, AdminRecovery, AdminHistory} from "./AdminSupervision";
+import {AdminNotifications} from "./AdminNotifications";
 import {AdminConfirmation, AdminPager, adminDate, connectionLabel, useAdminRows} from "./adminShared";
 
 type Account={id_usuario:string;nombres:string;apellidos:string;nombre_usuario:string;correo:string;rol:string;activo:boolean;autorizacion:string;estado_cuenta:string;creado_en:string;ultimo_acceso_en:string|null;ultima_actividad:string|null;conexion:string;sesiones_activas:number;correo_verificado_en:string|null;mfa_confirmado_en:string|null;motivo_restriccion:string|null;motivo_rechazo:string|null;password_cambio_obligatorio:boolean};
@@ -18,12 +19,13 @@ function AdminWorkspace(){
   const [tab,setTab]=useState("usuarios"),[focusUser,setFocusUser]=useState("");
   return <>
     <header className="auth-page-header"><p className="auth-kicker">ADMINISTRACIÓN DE SEGURIDAD</p><h1>Administración de usuarios</h1><p className="muted">Cuentas, actividad, sesiones y recuperaciones supervisadas.</p></header>
-    <nav className="flex flex-wrap gap-2 mb-5" aria-label="Secciones de administración">{[["usuarios","Usuarios"],["sesiones","Usuarios conectados"],["recuperaciones","Solicitudes de recuperación"],["historial","Historial administrativo"]].map(([key,label])=><button type="button" key={key} className={tab===key?"btn":"btn-secondary"} aria-pressed={tab===key} onClick={()=>{setTab(key);setFocusUser("");}}>{label}</button>)}</nav>
+    <nav className="flex flex-wrap gap-2 mb-5" aria-label="Secciones de administración">{[["usuarios","Usuarios"],["sesiones","Usuarios conectados"],["recuperaciones","Solicitudes de recuperación"],["historial","Historial administrativo"],["correo","Correo del sistema"]].map(([key,label])=><button type="button" key={key} className={tab===key?"btn":"btn-secondary"} aria-pressed={tab===key} onClick={()=>{setTab(key);setFocusUser("");}}>{label}</button>)}</nav>
     {focusUser&&<p className="auth-help mb-4">Mostrando la cuenta seleccionada. <button className="accent underline" onClick={()=>setFocusUser("")}>Mostrar todas</button></p>}
     {tab==="usuarios"&&<UserAccounts onSessions={id=>{setFocusUser(id);setTab("sesiones");}} onHistory={id=>{setFocusUser(id);setTab("historial");}}/>}
     {tab==="sesiones"&&<AdminSessions userId={focusUser}/>}
     {tab==="recuperaciones"&&<AdminRecovery/>}
     {tab==="historial"&&<AdminHistory userId={focusUser}/>}
+    {tab==="correo"&&<AdminNotifications/>}
   </>;
 }
 

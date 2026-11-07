@@ -1,5 +1,7 @@
 # Correo SMTP de TacticLens con Resend
 
+La integración vigente con `ADMIN_EMAIL`, `SUPPORT_EMAIL`, alertas, soporte y migración 006 se documenta en [Correo profesional](CORREO_PROFESIONAL.md). Los apartados siguientes conservan las instrucciones de configuración SMTP; esta ampliación sí requiere aplicar la migración y reiniciar el backend.
+
 ## Estado revisado
 
 El backend ya admite Resend mediante `smtp.resend.com`, puerto `465`, usuario `resend` y API Key como contraseña. No se requieren dependencias nuevas ni cambios de rutas. `backend/auth/mailer.py` utiliza `smtplib.SMTP_SSL` con validación de certificados cuando `SMTP_SSL=true`. Con esta configuración no utiliza STARTTLS. Las operaciones de cuenta reutilizan ese mismo servicio. La configuración coincide con la [documentación oficial de Resend](https://resend.com/docs/send-with-smtp).

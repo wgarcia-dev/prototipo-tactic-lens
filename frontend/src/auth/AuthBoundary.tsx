@@ -6,6 +6,7 @@ import { useAuth } from "./context";
 import { RegistrationPage } from "./RegistrationPage";
 import { InitialPasswordPage } from "./InitialPasswordPage";
 import { PasswordCreationFields } from "./PasswordCreationFields";
+import {SupportPage} from "./SupportPage";
 import {
   AuthFrame,
   Field,
@@ -20,6 +21,7 @@ import {
 export function AuthBoundary({ children }: { children: ReactNode }) {
   const auth = useAuth();
   const location = useLocation();
+  if(location.pathname==="/ayuda") return <SupportPage/>;
   if (auth.loading)
     return (
       <AuthFrame

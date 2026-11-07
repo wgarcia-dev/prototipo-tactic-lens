@@ -37,13 +37,16 @@ def ip_hash(request):
 
 
 def audit(conn, request, kind, user_id=None, actor=None, **metadata):
-    allowed = {"reason", "rol", "referencia_hash", "session_id", "request_id", "resultado"}
+    allowed = {"reason", "rol", "referencia_hash", "session_id", "request_id", "resultado", "notification_id"}
     if set(metadata) - allowed:
         raise ValueError("Metadatos de auditoría no permitidos")
-    conn.execute(table(request, "auth_auditoria").insert().values(
+    identifier = conn.scalar(table(request, "auth_auditoria").insert().values(
         id_usuario=user_id, actor_id=actor, tipo=kind,
         metadatos={"ip_hash": ip_hash(request), **metadata}, creado_por=actor,
-    ))
+    ).returning(table(request,"auth_auditoria").c.id_auditoria))
+    from .notifications import queue_event
+    queue_event(conn,request,identifier,kind,user_id,actor)
+    return identifier
 
 
 def rate(conn, request, scope, account=None, account_limit=10, ip_limit=40):
@@ -60,6 +63,13 @@ def rate(conn, request, scope, account=None, account_limit=10, ip_limit=40):
                                            "ventana": case((expired, moment), else_=t.c.ventana)})
         count = conn.scalar(stmt.returning(t.c.intentos))
         if count > maximum:
+            if scope in {"login","segundo_factor","reautenticacion"}:
+                user_id = None
+                u = table(request,"usuario")
+                if account:
+                    column = u.c.correo if scope=="login" else u.c.id_usuario
+                    user_id = conn.scalar(select(u.c.id_usuario).where(column==account))
+                audit(conn,request,"autenticacion_limitada",user_id,reason=scope,resultado="limitado_temporalmente")
             raise AuthError(429, "Demasiados intentos. Espere quince minutos antes de volver a intentar.", headers={"Retry-After": "900"})
 
 

@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { Activity, ShieldCheck } from "lucide-react";
+import {SupportContact} from "./SupportContact";
 import "./auth.css";
 
 export function Field({
@@ -210,6 +211,7 @@ export function AuthFrame({
           <h2>{title}</h2>
           <p className="auth-description">{description}</p>
           {children}
+          <SupportContact/>
         </div>
       </section>
     </main>

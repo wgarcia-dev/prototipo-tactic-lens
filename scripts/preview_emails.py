@@ -6,6 +6,14 @@ from backend.auth.email_templates import render_email
 
 
 SAMPLES = [
+    ("admin-registro", "Registro para administración", "Nueva solicitud de registro pendiente",
+     "Una cuenta verificada espera revisión.\n\nReferencia del evento: DEMO-1042\nUsuario: analista_demo\nFecha: 07/11/2026 10:30:00 America/Guayaquil (UTC-05:00)\nEstado en el momento del evento: Pendiente de revisión\n\nInicie sesión y complete MFA para revisar la cuenta. Responder a este correo no autoriza el acceso.\nhttps://tacticlens.example/usuarios"),
+    ("admin-alerta", "Alerta administrativa", "Alerta administrativa · Intentos reiterados de autenticación",
+     "Se alcanzó el umbral de intentos fallidos.\n\nReferencia del evento: DEMO-1043\nUsuario: analista_demo\nFecha: 07/11/2026 10:35:00 America/Guayaquil (UTC-05:00)\n\nRevise los detalles dentro de TacticLens. Este aviso no contiene contraseñas ni códigos.\nhttps://tacticlens.example/usuarios"),
+    ("soporte", "Consulta para soporte", "Nuevo mensaje de soporte · acceso",
+     "Una persona envió una solicitud de ayuda desde TacticLens.\n\nReferencia: DEMO-SOPORTE\nNombre: Persona de ejemplo\nIdentidad: Correo declarado sin verificación de identidad en este formulario\nCategoría: acceso\n\nDescripción:\nNo encuentro dónde consultar el estado de mi registro.\n\nResponda manualmente desde el buzón de soporte. Este mensaje no autoriza cambios de contraseña, permisos ni MFA."),
+    ("soporte-confirmacion", "Confirmación de soporte", "Confirmación de solicitud de soporte",
+     "Su consulta quedó registrada para remisión al canal de soporte.\n\nReferencia: DEMO-SOPORTE\nFecha: 07/11/2026 10:40:00 America/Guayaquil (UTC-05:00)\n\nEl personal de soporte responderá manualmente. Este aviso no confirma lectura ni resolución."),
     ("verificacion", "Verificación de correo", "Verifique su correo para registrarse",
      "Su código de verificación es: 482913\n\nCaduca en 5 minutos y solo puede usarse una vez. Escríbalo en el formulario de registro que tiene abierto. Si ya tiene cuenta, utilice el inicio de sesión o la recuperación de contraseña."),
     ("registro", "Registro recibido", "Solicitud de registro recibida",
@@ -35,7 +43,7 @@ def main():
     directory = Path(__file__).resolve().parents[1] / ".local" / "email-previews"
     directory.mkdir(parents=True, exist_ok=True)
     for slug, _, subject, content in SAMPLES:
-        (directory / (slug + ".html")).write_text(render_email(subject, content), encoding="utf-8")
+        (directory / (slug + ".html")).write_text(render_email(subject, content, support_email="soporte@tacticlens.example"), encoding="utf-8")
     links = "".join('<a href="' + slug + '.html" target="mail-preview">' + escape(label) + '</a>' for slug, label, _, _ in SAMPLES)
     gallery = '''<!doctype html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Correos de TacticLens · Vista previa</title><style>
       *{box-sizing:border-box}body{margin:0;background:#0b1423;color:#e9f0fa;font:14px/1.6 'Segoe UI',Arial,sans-serif}header{max-width:1200px;margin:auto;padding:28px 24px 20px}h1{font-size:26px;margin:8px 0}small{color:#43d7d4;letter-spacing:2px}p{color:#a0b3c8;margin:0}main{display:grid;grid-template-columns:220px minmax(0,1fr);gap:24px;max-width:1200px;margin:auto;padding:0 24px 28px}nav a{display:block;color:#c5d6e8;border-bottom:1px solid #20344d;padding:10px 12px;text-decoration:none}nav a:hover,nav a:focus{color:#43d7d4;background:#132238;outline:1px solid #43d7d4}iframe{display:block;width:100%;height:1250px;border:0;border-radius:12px;background:#edf2f7}@media(max-width:700px){main{grid-template-columns:1fr;padding:0 12px 20px;gap:16px}nav{display:flex;gap:8px;flex-wrap:wrap}nav a{font-size:12px;padding:6px 10px;border:1px solid #20344d;border-radius:5px}header{padding:20px 16px}iframe{height:1400px}}

@@ -48,6 +48,14 @@ class AuthMiddleware:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
         request = Request(scope)
+        try:
+            return await self.handle_http(scope,receive,send,request)
+        finally:
+            if getattr(request.state,"mail_jobs",None):
+                from .notifications import dispatch_scheduled
+                await run_in_threadpool(dispatch_scheduled,request)
+
+    async def handle_http(self, scope, receive, send, request):
 
         async def secure_send(message):
             if message["type"] == "http.response.start":

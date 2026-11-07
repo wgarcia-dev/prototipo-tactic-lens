@@ -28,6 +28,7 @@ export function SessionControls() {
         <ShieldCheck size={15} />
         Seguridad de mi cuenta
       </Link>
+      <Link to="/ayuda">Ayuda y soporte</Link>
       {session?.usuario.rol === "administrador" && (
         <Link to="/usuarios">
           <Users size={15} />

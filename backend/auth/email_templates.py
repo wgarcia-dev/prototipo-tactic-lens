@@ -30,10 +30,23 @@ class EmailPresentation:
     tone: str = "neutral"
     button: str = "Establecer mi contraseña"
     verification: bool = False
+    action_links: bool = True
 
 
 def presentation(subject):
     normalized = subject.casefold().strip()
+    if normalized.startswith("nueva solicitud de registro"):
+        return EmailPresentation("REVISIÓN ADMINISTRATIVA", "Hay un registro pendiente",
+            "Una cuenta verificada espera revisión en TacticLens.", button="Revisar en TacticLens")
+    if normalized.startswith("alerta administrativa"):
+        return EmailPresentation("ALERTA DE SEGURIDAD", subject,
+            "Un evento de seguridad requiere revisión en TacticLens.", tone="warning", button="Revisar evento")
+    if normalized.startswith("nuevo mensaje de soporte"):
+        return EmailPresentation("SOLICITUD DE SOPORTE", "Nuevo mensaje de soporte",
+            "Revise la solicitud. Responder al remitente no modifica permisos ni MFA.", action_links=False)
+    if normalized.startswith("confirmación de solicitud de soporte"):
+        return EmailPresentation("SOPORTE TACTICLENS", "Recibimos su consulta",
+            "Su consulta quedó registrada para revisión manual.", action_links=False)
     if normalized.startswith("verifique su correo"):
         return EmailPresentation("VERIFICACIÓN DE CORREO", "Confirme su correo electrónico",
             "Su código para continuar en TacticLens. Verifique su correo desde el formulario.", verification=True)
@@ -105,7 +118,7 @@ def message_parts(content, profile):
         match = re.fullmatch(r"Su código de verificación es: ([0-9]{6})", line.strip()) if profile.verification else None
         if match and code is None:
             code = match.group(1)
-        elif link is None and safe_link(line.strip()):
+        elif profile.action_links and link is None and safe_link(line.strip()):
             link = line.strip()
         else:
             body.append(line)
@@ -113,14 +126,18 @@ def message_parts(content, profile):
     return code, link, paragraphs
 
 
-def render_email(subject, content):
+def render_email(subject, content, *, support_email=None):
     profile = presentation(subject)
     code, link, paragraphs = message_parts(content, profile)
     tone, tint, tone_edge = TONES[profile.tone]
     p = PALETTE
+    support_contact = ('<p style="margin:12px 0 0;font-size:12px;line-height:20px;color:' + p["muted"]
+        + '">Canal oficial de soporte: <a style="color:' + p["teal"] + ';text-decoration:underline" href="mailto:'
+        + escape(support_email, quote=True) + '">' + escape(support_email) + '</a></p>') if support_email else ""
 
     def paragraph(value):
-        return '<p style="margin:0 0 20px;color:' + p["ink"] + ';font-size:15px;line-height:1.75;word-wrap:break-word">' + html_content(value).replace("\n", "<br>") + '</p>'
+        text = html_content(value) if profile.action_links else escape(value)
+        return '<p style="margin:0 0 20px;color:' + p["ink"] + ';font-size:15px;line-height:1.75;word-wrap:break-word">' + text.replace("\n", "<br>") + '</p>'
 
     body = ""
     if code:
@@ -168,6 +185,7 @@ def render_email(subject, content):
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:28px;border-top:1px solid {p['edge']}"><tr><td style="padding-top:24px;font-family:{FONT}">
     <p style="margin:0 0 7px;color:{p['ink']};font-size:12px;line-height:19px;font-weight:700">¿No reconoce esta solicitud o actividad?</p>
     <p style="margin:0;color:{p['muted']};font-size:12px;line-height:20px">No comparta contraseñas, enlaces personales ni códigos de acceso. Contacte al administrador de su organización por su canal habitual.</p>
+    {support_contact}
   </td></tr></table>
 </td></tr></table>
 <!--[if mso]></td></tr></table><![endif]-->

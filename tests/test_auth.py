@@ -113,6 +113,7 @@ class AuthFixture(unittest.TestCase):
             "AUTH_MAX_ATTEMPTS": "5", "AUTH_IDLE_SECONDS": "1800", "AUTH_RESEND_SECONDS": "60",
             "AUTH_EMAIL_TTL_SECONDS": "300", "AUTH_CHALLENGE_SECONDS": "300", "MAIL_TRANSPORT": "file",
             "AUTH_RESET_SECONDS": "900", "AUTH_RECOVERY_REQUEST_SECONDS": "86400", "AUTH_RECENT_ACTIVITY_SECONDS": "120",
+            "ADMIN_EMAIL":"", "SUPPORT_EMAIL":"",
         })
         cls.settings_patch.start()
         cls.context = TestClient(app, client=("127.0.0.1", 51000))
@@ -148,7 +149,7 @@ class AuthFixture(unittest.TestCase):
         self.client.cookies.clear()
         self.client.headers.update({"origin": "http://127.0.0.1:5173"})
         self.messages = []
-        self.mail = patch("backend.auth.mailer.deliver", side_effect=lambda settings, *message: self.messages.append(message))
+        self.mail = patch("backend.auth.mailer.deliver", side_effect=lambda settings, *message, **kwargs: self.messages.append(message))
         self.mail.start()
         self.clock = now()
         self.clock_patch = patch("backend.auth.security.now", side_effect=lambda: self.clock)

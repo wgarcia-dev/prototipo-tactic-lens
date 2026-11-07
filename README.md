@@ -12,6 +12,8 @@ TacticLens es un prototipo académico para observar intentos de acceso SSH en un
 
 **Correo real:** consulte [la configuración de Resend por SMTP para tacticlens.app](docs/CORREO_SMTP.md), con las variables actuales y sin incorporar credenciales al repositorio.
 
+**Buzones profesionales:** [integración administrativa, alertas y formulario de soporte](docs/CORREO_PROFESIONAL.md). Resend envía los mensajes; administración y soporte responden manualmente desde Zoho. Incluye auditoría y reintentos supervisados, sin acceso automático a los buzones.
+
 **Diseño de correos:** [plantillas TacticLens y galería local](docs/CORREOS.md), con códigos destacados, botones de acción y notificaciones adaptadas a cada estado.
 
 **Informes LLM:** consulte [el análisis detallado con evidencia y ampliación de resultados anteriores](docs/ANALISIS_LLM.md).

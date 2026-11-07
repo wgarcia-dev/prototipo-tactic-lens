@@ -25,7 +25,8 @@ class PasswordConcurrencyTests(unittest.TestCase):
     def test_two_simultaneous_resets_only_one_consumes_the_token(self):
         environment={"AUTH_ENV":"development","AUTH_COOKIE_SECURE":"false",
             "AUTH_PUBLIC_URL":"http://127.0.0.1:5173","AUTH_ALLOWED_ORIGINS":"http://127.0.0.1:5173",
-            "AUTH_SECRET_KEY":secrets.token_urlsafe(48),"AUTH_TOTP_KEYS":Fernet.generate_key().decode(),"MAIL_TRANSPORT":"file"}
+            "AUTH_SECRET_KEY":secrets.token_urlsafe(48),"AUTH_TOTP_KEYS":Fernet.generate_key().decode(),"MAIL_TRANSPORT":"file",
+            "ADMIN_EMAIL":"","SUPPORT_EMAIL":""}
         messages=[]
         with patch.dict("os.environ",environment), patch("backend.auth.mailer.deliver",side_effect=lambda settings,*message:messages.append(message)):
             with TestClient(app,client=("127.0.0.1",51010)) as client:

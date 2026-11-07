@@ -3,6 +3,7 @@ from datetime import timedelta
 import hmac
 import secrets
 import smtplib
+import os
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -62,6 +63,9 @@ def notify(request, user_id, message):
         return False
     try:
         mailer.deliver(request.app.state.auth_settings, *message)
+        with request.app.state.engine.begin() as conn:
+            audit(conn, request, "correo_aceptado", user_id,
+                  resultado="buzon_local" if os.getenv("MAIL_TRANSPORT")=="file" else "smtp_aceptado")
         return True
     except (OSError, smtplib.SMTPException, RuntimeError, ValueError):
         # No exception string: an SMTP error can contain addresses or message contents.

@@ -19,7 +19,7 @@ Los commits `ebf10b0`, `bcd1890` y `7e7c4a2` se comprobaron expresamente. Una se
 - Respaldo PostgreSQL previo: `.local/backups/antes-merge-colaborativo-20261112T073138Z.dump`.
 - Huellas y conteos previos, sin contenidos sensibles: `.local/backups/integracion-baseline.json`.
 
-Se utilizó `git merge --no-ff --no-commit origin/main`, seguido de resolución, pruebas y commit de merge. No se hizo rebase, reemplazo de carpetas, reset destructivo, limpieza de archivos ni publicación de credenciales. No se modificaron archivos `.env` ni la cola SQLite de Ubuntu. Las ramas principal local y remota se conservaron en sus respectivos puntos; no se ejecutó push.
+Se utilizó `git merge --no-ff --no-commit origin/main`, seguido de resolución, pruebas y commit de merge **`1a364bc`**, con padres `7e7c4a2` y `52a3f22`. No se hizo rebase, reemplazo de carpetas, reset destructivo, limpieza de archivos ni publicación de credenciales. No se modificaron archivos `.env` ni se editó o migró manualmente la cola SQLite de Ubuntu; su exportador siguió incorporando los eventos de la prueba. Las ramas principal local y remota se conservaron en sus respectivos puntos; no se ejecutó push.
 
 ## Comparación funcional
 
@@ -106,6 +106,6 @@ npm.cmd --prefix frontend run build
 
 ## Pendientes y propuesta de Pull Request
 
-No se han repetido físicamente el hotspot sin Internet ni la interrupción de la red tras este merge. La recuperación física anterior está documentada y las pruebas de desconexión, reintento y confirmación perdida vuelven a pasar; la nueva entrega física directa sí se ejecutó. Tampoco se enviaron correos reales, se invocó DeepSeek real o se realizó un inicio MFA nuevo desde cero en la interfaz: los flujos de autenticación se verificaron mediante la suite y una sesión real ya autenticada.
+No se han repetido físicamente el hotspot sin Internet ni la interrupción de la red tras este merge. La recuperación física anterior está documentada y las pruebas de desconexión, reintento y confirmación perdida vuelven a pasar; la nueva entrega física directa sí se ejecutó. No se volvió a consultar por SSH el contador final de SQLite después de generar los tres eventos nuevos; se comprobaron sus recibos persistidos y observaciones en PostgreSQL. Tampoco se enviaron correos reales, se invocó DeepSeek real o se realizó un inicio MFA nuevo desde cero en la interfaz: los flujos de autenticación se verificaron mediante la suite y una sesión real ya autenticada.
 
 La rama de integración queda local. Se recomienda revisarla con ambos integrantes y, cuando el usuario lo autorice, publicar **solo esa rama** y abrir un Pull Request hacia `main`. Título sugerido: «Integrar observables y revisión MITRE conservando ingesta HTTP de Cowrie». Incluir este informe, los resultados y la decisión de diferir la limpieza. Conservar el commit de merge para que ambos historiales queden presentes. No hacer push directo a `main` ni usar force push.

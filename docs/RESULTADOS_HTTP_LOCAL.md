@@ -32,6 +32,8 @@ El reinicio real imprimió «Regla de firewall verificada y reutilizada. No se s
 
 La comprobación posterior en PostgreSQL confirmó **29 eventos, 6 sesiones, 26 recibos de origen y cero secuencias duplicadas**. La sesión recuperada se abrió en React y se desplegó el JSON relevante: mostraba explícitamente `SSH-2.0-TacticLensDemo_1794cf10bc57` y sus tres eventos. La pestaña se dejó abierta para revisión del operador.
 
+El operador ejecutó una nueva sincronización y reinició `tacticlens-exportador.timer` y `tacticlens-exportador.service`. Las tres lecturas posteriores de SQLite coincidieron: **total_cola=26, enviados=26, pendientes=0, revision=0, revision_captura=0, errores_envio={}, reintento_desde=null**. La API seguía informando 29 eventos persistidos. Esto confirma la recuperación, conservación de las filas y funcionamiento después del reinicio del exportador, sin nuevos duplicados.
+
 Se repitió una petición HTTP real del evento ya persistido `TacticLensDemo_f7adf1a1d338`, conservando la identidad de origen. La API devolvió **insertados=0, duplicados=1, rechazados=0** y PostgreSQL mantuvo **29 eventos antes y después**. Esta comprobación de reintento se hizo desde loopback; la entrega original y la recuperación de pendientes sí procedieron del exportador Ubuntu por HTTP directo.
 
 La prueba física en el hotspot del celular **no se ha ejecutado**. El procedimiento está en `DEMO_LAPTOPS.md`; se deben comprobar las IP nuevas, UFW para SSH/2222 y que el hotspot permita comunicación entre clientes. No se declara aprobada por haber funcionado en la red Wi-Fi actual.

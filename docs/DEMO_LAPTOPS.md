@@ -16,7 +16,7 @@ La adaptación se basa en el **exportador real** de `/opt/tacticlens-cowrie/expo
 
 El diagnóstico también informa `GatewayPorts no`, `AllowTcpForwarding yes`, puerto administrativo 22 y UFW activo, permitiendo 22 y 2222 desde `192.168.0.0/24`. Es compatible con el túnel propuesto a nivel de configuración global. Una regla `Match` específica u otra restricción deberá validarse al abrirlo.
 
-**No se ha instalado el kit en Ubuntu ni se ha probado un túnel real desde este entorno:** la autenticación SSH no interactiva disponible fue rechazada (`Permission denied`). El operador debe introducir sus credenciales solo en su terminal. No se deshabilita la comprobación de host, UFW ni el segundo factor de TacticLens. La prueba en el hotspot requiere las dos laptops y el teléfono físicamente conectados.
+**El operador instaló el kit y confirmó el túnel con `verificar.sh`:** la API respondió con contrato v2 y PostgreSQL conectado. La primera sincronización conservó 20 eventos pendientes porque recibió HTTP 401; se comprobó que la clave del `.env` de Windows sí es reconocida por la API y se preparó la alineación segura del token de Ubuntu. La validación de entrega sigue pendiente hasta observar el marcador real en PostgreSQL y la interfaz. La autenticación SSH no interactiva del agente fue rechazada (`Permission denied`); el operador introduce sus credenciales solo en su terminal. No se deshabilita la comprobación de host, UFW ni el segundo factor de TacticLens. La prueba en el hotspot requiere las dos laptops y el teléfono físicamente conectados.
 
 ## Correcciones de ingesta
 
@@ -154,6 +154,18 @@ En Windows, otra terminal puede mostrar el estado:
 
 Abra `http://127.0.0.1:5173`, inicie sesión con su cuenta habilitada y Google Authenticator, y consulte Sesiones y eventos. El acceso administrativo SSH a Ubuntu es distinto del SSH simulado de Cowrie.
 
+### Si Ubuntu informa `http_401`
+
+El túnel puede funcionar correctamente y la clave de ingesta no coincidir. Los eventos deben permanecer pendientes. No cambie la autenticación de usuarios ni desactive MFA. Desde Windows, manteniendo el túnel abierto:
+
+```powershell
+.\scripts\windows\Sincronizar-ClaveUbuntu.ps1 -UbuntuHost IP_ACTUAL_UBUNTU
+```
+
+Este ayudante lee `INGEST_API_KEY` del `.env` privado, la transmite por stdin SSH cifrado y la recibe en un archivo temporal de permisos 0600 dentro de un directorio 0700 de Ubuntu. No la imprime, no la copia al portapapeles ni la incluye en argumentos. Usa dos conexiones SSH: sin una clave de usuario cargada puede pedir la contraseña dos veces y después la de sudo. El primer mensaje de recepción temporal no significa que haya terminado; espere a los contadores y al mensaje final de sincronización completada.
+
+Antes de modificar configuración, comprueba la clave contra la API real del túnel mediante un evento deliberadamente inválido, que no crea registros. Si la clave no es reconocida, se detiene. Si coincide, respalda la configuración, alinea solo `TACTICLENS_TOKEN` y la URL loopback, reintenta pendientes y elimina el archivo temporal. Se mantiene el sensor y el timer. No hace falta volver a copiar manualmente el valor de la clave.
+
 ## Demostración y desconexión
 
 1. Confirme `verificar.sh`, `database: connected` y los contadores iniciales.
@@ -194,6 +206,8 @@ npm.cmd run build
 
 Se ejecutaron 144 pruebas Python, incluidas concurrencia PostgreSQL, identidad histórica, dos ocurrencias idénticas, respuesta perdida después del commit, SQLite → API real → PostgreSQL → consultas con autenticación, rotaciones múltiples, gzip, cuarentena y rollback del cursor. Las llamadas externas de correo/LLM se simulan. Se corrigió el aislamiento de las pruebas de correo para que no contaran avisos reales anteriores; no se borraron esos avisos. También se ejecutaron 7 pruebas frontend y el build, con los avisos previos de tamaño de bundle/React Router.
 
-La sintaxis PowerShell y Bash se comprobó con las herramientas ya instaladas; OpenSSH `-G` confirmó la configuración del reenvío, sin abrirlo. No se declaran aprobados el despliegue remoto, túnel real, captura en hardware ni hotspot: requieren ejecución manual con las credenciales del operador.
+La sintaxis PowerShell y Bash se comprobó con las herramientas ya instaladas; OpenSSH `-G` confirmó la configuración del reenvío, sin abrirlo. El operador confirmó instalación y acceso HTTP por el túnel; se generó una conexión real a Cowrie con marcador único y banner Debian 12. No se declaran aprobadas su persistencia extremo a extremo, la recuperación real tras reinicios ni el hotspot hasta completar las comprobaciones pendientes.
+
+El ayudante de alineación incorpora además tres pruebas con transporte SSH y API simulados: secreto ausente de argumentos, validación previa a cambios y conservación de configuración ante una clave rechazada.
 
 Archivos principales: `backend/ingestion.py`, integración en `backend/api.py`, `backend/routes.py` y el límite del middleware; migración 007; `collector/exportar_eventos.py` y `sqlite_sender.py`; retiro del arranque de `collector/collector.py`; scripts de Windows/Ubuntu; `scripts/configure_sensor.py`, `scripts/demo_status.py`; pruebas `test_ingestion.py`, `test_sqlite_capture.py`, `test_sqlite_sender.py`; aislamiento en `test_professional_mail.py`; proxy de ejemplo, README, `.gitattributes` y esta guía. No se modifica el análisis LLM, IoCs ni MITRE.

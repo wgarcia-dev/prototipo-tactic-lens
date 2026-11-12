@@ -9,17 +9,23 @@ from urllib.parse import urlparse
 from collections import Counter
 from datetime import datetime, timezone
 from uuid import UUID
+from typing import Literal
 
 import httpx
 from fastapi import Depends, File, Header, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.dialects.postgresql import insert
 
 from .api import app, local_only, persist_events, safe
 from .analysis_state import public_state, states_for_sessions
 from .analysis_report import (BehaviorReport, REPORT_VERSION, analysis_instruction,
                               needs_report_upgrade, observation_context, validate_report_evidence)
+from .intelligence import observables
+from .auth.store import require_admin, audit
+
+COWRIE_TECHNIQUES = {"T1110", "T1110.001", "T1059.004", "T1105", "T1082", "T1083",
+                     "T1016", "T1033", "T1057", "T1005"}
 
 
 def table(name):
@@ -136,25 +142,8 @@ class AnalysisResult(BaseModel):
 
 
 def extract_iocs(command, event_id):
-    found = []
-    for token in re.findall(r"https?://[^\s'\"<>]+", command):
-        value = token.rstrip(".,;)")
-        host = urlparse(value).hostname
-        if host:
-            found.append({"tipo": "URL", "valor": value, "evento": event_id})
-    for token in re.findall(r"\b(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,63}\b", command):
-        if not any(token.lower() in x["valor"].lower() for x in found):
-            found.append({"tipo": "Dominio", "valor": token.lower(), "evento": event_id})
-    for token in re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", command):
-        try:
-            ipaddress.ip_address(token)
-            if not any(token in x["valor"] for x in found):
-                found.append({"tipo": "IP", "valor": token, "evento": event_id})
-        except ValueError:
-            pass
-    for token in re.findall(r"\b(?:[A-Fa-f0-9]{64}|[A-Fa-f0-9]{40}|[A-Fa-f0-9]{32})\b", command):
-        found.append({"tipo": "Hash", "valor": token.lower(), "evento": event_id})
-    return found
+    return [{"tipo": kind, "valor": value, "evento": event_id}
+            for kind, value, _ in observables({"eventid": "cowrie.command.input", "input": command})]
 
 
 def real_result(events):
@@ -164,7 +153,14 @@ def real_result(events):
     if not key or not model:
         raise ValueError("Configure LLM_API_KEY y LLM_MODEL")
     facts = [{"id_evento": x.id_evento, "tipo": x.tipo_evento, "fecha": x.fecha_hora.isoformat(), "datos": safe(x.datos_originales)} for x in events]
-    payload = {"contexto_calculado": observation_context(events), "eventos": facts}
+    tt, tech, tac = (table(n) for n in ("tecnica_tactica", "tecnica_mitre", "tactica_mitre"))
+    with app.state.engine.connect() as conn:
+        catalog = conn.execute(select(tech.c.codigo_tecnica, tech.c.nombre, tac.c.nombre.label("tactica"))
+            .join(tt, tech.c.codigo_tecnica == tt.c.codigo_tecnica)
+            .join(tac, tac.c.codigo_tactica == tt.c.codigo_tactica)
+            .where(tech.c.codigo_tecnica.in_(COWRIE_TECHNIQUES))).mappings().all()
+    payload = {"contexto_calculado": observation_context(events), "eventos": facts,
+               "tecnicas_mitre_permitidas": [dict(row) for row in catalog]}
     response = httpx.post(base + "/chat/completions", headers={"Authorization": f"Bearer {key}"}, json={"model": model, "temperature": 0, "thinking": {"type": "disabled"}, "response_format": {"type": "json_object"}, "max_tokens": 8192, "messages": [{"role": "system", "content": analysis_instruction()}, {"role": "user", "content": json.dumps(payload, ensure_ascii=False, default=str)}]}, timeout=float(os.getenv("LLM_TIMEOUT_SECONDS", "60")))
     response.raise_for_status()
     choice = response.json()["choices"][0]
@@ -240,13 +236,26 @@ def analyze(id_sesion: UUID, actualizar_informe: bool = False):
                 raise ValueError("El IoC no cita una evidencia de la accion")
             if any(ioc.valor.lower() not in event_text[ioc.evento] for ioc in action.iocs):
                 raise ValueError("El IoC no aparece en el evento citado")
+        tt = table("tecnica_tactica")
+        with app.state.engine.connect() as conn:
+            allowed = set(conn.scalars(select(tt.c.codigo_tecnica).where(
+                tt.c.codigo_tecnica.in_(COWRIE_TECHNIQUES))).all())
+        discarded = []
+        for action in result.acciones:
+            valid = []
+            for mapping in action.mitre:
+                if mapping.codigo in allowed and mapping.justificacion.strip():
+                    valid.append(mapping)
+                else:
+                    discarded.append({"codigo": mapping.codigo, "motivo": "Código ausente del catálogo o justificación insuficiente"})
+            action.mitre = valid
         # Results and all linked findings commit together. A failure leaves no partial IoCs.
         with app.state.engine.begin() as conn:
             conn.execute(a.update().where(a.c.id_analisis == analysis_id).values(
                 estado="completado", fecha_fin=func.clock_timestamp(), resumen=result.resumen,
                 resultado_estructurado={**result.model_dump(exclude_none=True), "eventos_analizados": len(events),
                     "version_informe": REPORT_VERSION if result.informe else 1,
-                    "contexto_observado": observation_context(events)},
+                    "contexto_observado": observation_context(events), "mapeos_descartados": discarded},
                 actualizado_en=func.clock_timestamp()
             ))
             persist_findings(conn, analysis_id, result, events)
@@ -322,11 +331,21 @@ def get_analysis(id_analisis: UUID):
 
 @app.get("/api/iocs", dependencies=[Depends(local_only)])
 def list_iocs(limit: int = 100, offset: int = 0):
-    i, typ, det, event = (table(n) for n in ("ioc", "tipo_ioc", "deteccion_ioc", "evento"))
-    origin = select(det.c.id_evento).where(det.c.id_ioc == i.c.id_ioc).order_by(det.c.detectado_en).limit(1).correlate(i).scalar_subquery().label("id_evento")
-    session = select(event.c.id_sesion).join(det, det.c.id_evento == event.c.id_evento).where(det.c.id_ioc == i.c.id_ioc).limit(1).correlate(i).scalar_subquery().label("id_sesion")
+    i, typ, obs, event = (table(n) for n in ("ioc", "tipo_ioc", "observacion_ioc", "evento"))
+    origin = select(obs.c.id_evento).where(obs.c.id_ioc == i.c.id_ioc).order_by(obs.c.creado_en).limit(1).correlate(i).scalar_subquery().label("id_evento")
+    session = select(event.c.id_sesion).join(obs, event.c.id_evento == obs.c.id_evento).where(obs.c.id_ioc == i.c.id_ioc).order_by(obs.c.creado_en).limit(1).correlate(i).scalar_subquery().label("id_sesion")
+    evidence = select(obs.c.evidencia).where(obs.c.id_ioc == i.c.id_ioc).order_by(obs.c.creado_en).limit(1).correlate(i).scalar_subquery().label("evidencia")
     with app.state.engine.connect() as conn:
-        rows = conn.execute(select(i.c.id_ioc, typ.c.nombre.label("tipo"), i.c.valor, i.c.primera_observacion, origin, session, func.count(det.c.id_deteccion).label("evidencias")).join(typ, i.c.id_tipo_ioc == typ.c.id_tipo_ioc).outerjoin(det, det.c.id_ioc == i.c.id_ioc).group_by(i.c.id_ioc, typ.c.nombre).order_by(i.c.primera_observacion.desc()).limit(min(max(limit, 1), 200)).offset(max(offset, 0))).mappings().all()
+        rows = conn.execute(select(i.c.id_ioc, typ.c.nombre.label("tipo"),
+            i.c.valor, i.c.primera_observacion, origin, session, evidence,
+            func.count(obs.c.id_observacion).label("evidencias"),
+            case((func.min(obs.c.estado_revision) == func.max(obs.c.estado_revision),
+                  func.min(obs.c.estado_revision)), else_="mixto").label("estado_revision"))
+            .join(typ, i.c.id_tipo_ioc == typ.c.id_tipo_ioc)
+            .join(obs, obs.c.id_ioc == i.c.id_ioc)
+            .group_by(i.c.id_ioc, typ.c.nombre)
+            .order_by(i.c.ultima_observacion.desc(), i.c.id_ioc)
+            .limit(min(max(limit, 1), 200)).offset(max(offset, 0))).mappings().all()
     return [plain(x) for x in rows]
 
 
@@ -334,5 +353,30 @@ def list_iocs(limit: int = 100, offset: int = 0):
 def list_mappings(limit: int = 100, offset: int = 0):
     m, tt, tech, tac, act, analysis = (table(n) for n in ("mapeo_mitre", "tecnica_tactica", "tecnica_mitre", "tactica_mitre", "accion_identificada", "analisis_llm"))
     with app.state.engine.connect() as conn:
-        rows = conn.execute(select(m.c.id_mapeo, tech.c.codigo_tecnica, tech.c.nombre.label("tecnica"), tac.c.nombre.label("tactica"), m.c.evidencia, m.c.justificacion, m.c.confianza, act.c.id_analisis, analysis.c.id_sesion).join(tt, m.c.id_vinculo == tt.c.id_vinculo).join(tech, tt.c.codigo_tecnica == tech.c.codigo_tecnica).join(tac, tt.c.codigo_tactica == tac.c.codigo_tactica).join(act, m.c.id_accion == act.c.id_accion).join(analysis, act.c.id_analisis == analysis.c.id_analisis).order_by(m.c.fecha_mapeo.desc()).limit(min(max(limit, 1), 200)).offset(max(offset, 0))).mappings().all()
+        rows = conn.execute(select(m.c.id_mapeo, tech.c.codigo_tecnica, tech.c.nombre.label("tecnica"), tac.c.nombre.label("tactica"), m.c.evidencia, m.c.justificacion, m.c.confianza, m.c.estado_revision, m.c.motivo_revision, act.c.id_analisis, analysis.c.id_sesion).join(tt, m.c.id_vinculo == tt.c.id_vinculo).join(tech, tt.c.codigo_tecnica == tech.c.codigo_tecnica).join(tac, tt.c.codigo_tactica == tac.c.codigo_tactica).join(act, m.c.id_accion == act.c.id_accion).join(analysis, act.c.id_analisis == analysis.c.id_analisis).order_by(m.c.fecha_mapeo.desc()).limit(min(max(limit, 1), 200)).offset(max(offset, 0))).mappings().all()
     return [plain(x) for x in rows]
+
+
+class ReviewDecision(BaseModel):
+    estado: Literal["confirmado", "descartado"]
+    motivo: str = Field(min_length=10, max_length=500)
+
+
+@app.patch("/api/inteligencia/{kind}/{item_id}/revision", dependencies=[Depends(local_only)])
+def review_intelligence(kind: Literal["ioc", "mitre"], item_id: UUID,
+                        decision: ReviewDecision, request: Request):
+    target = table("ioc" if kind == "ioc" else "mapeo_mitre")
+    key = target.c.id_ioc if kind == "ioc" else target.c.id_mapeo
+    with app.state.engine.begin() as conn:
+        _, actor = require_admin(conn, request)
+        existing = conn.execute(select(target).where(key == item_id).with_for_update()).mappings().first()
+        if existing is None:
+            raise HTTPException(404, "Hallazgo no encontrado")
+        reviewed = table("observacion_ioc") if kind == "ioc" else target
+        review_key = reviewed.c.id_ioc if kind == "ioc" else key
+        conn.execute(reviewed.update().where(review_key == item_id).values(
+            estado_revision=decision.estado, motivo_revision=decision.motivo.strip(),
+            revisado_por=actor.id_usuario, revisado_en=func.now()))
+        audit(conn, request, "inteligencia_revisada", actor=actor.id_usuario,
+              reason=f"{kind}:{item_id}:{decision.estado}")
+    return {"estado": decision.estado}

@@ -113,6 +113,8 @@ REQUISITOS DEL INFORME:
 - Usa exclusivamente IDs proporcionados en fases, hipótesis, acciones e IoCs. No uses IDs del ejemplo.
 - Para IoCs incluye tipo (IP, Dominio, URL o Hash), valor literal presente, evento, evidencia y confianza.
   No conviertas automáticamente cada dirección o archivo en malicioso: explica su papel observado.
-- Para MITRE incluye codigo, justificacion y confianza. Solo técnicas sustentadas; no inventes códigos.
+- Para MITRE incluye codigo, justificacion y confianza. Usa exclusivamente códigos de
+  tecnicas_mitre_permitidas incluidos en la entrada y solo si los eventos sustentan la acción.
+  Si no hay técnica adecuada, devuelve mitre=[]. No infieras cuentas reales a partir del SSH emulado.
   No infieras ejecución o persistencia únicamente por encontrar una URL o un nombre de archivo.
 """

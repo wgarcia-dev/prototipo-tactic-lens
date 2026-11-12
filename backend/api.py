@@ -18,6 +18,7 @@ from pgvector.sqlalchemy import VECTOR  # registers pgvector type for reflection
 from .analysis_state import public_state, states_for_sessions
 from .db import database_engine
 from .auth.config import Settings
+from .intelligence import persist_observables
 
 load_dotenv()
 
@@ -74,7 +75,7 @@ async def lifespan(app: FastAPI):
     app.state.mail_config = MailConfig.load()
     engine = database_engine()
     meta = MetaData()
-    names = ("honeypot", "sesion", "evento", "modelo_llm", "analisis_llm", "accion_identificada", "accion_evento", "tipo_ioc", "ioc", "deteccion_ioc", "accion_ioc", "tactica_mitre", "tecnica_mitre", "tecnica_tactica", "mapeo_mitre", "usuario", "rol", "auth_factor", "auth_token", "auth_sesion", "auth_recuperacion", "auth_limite", "auth_auditoria", "auth_solicitud_password", "auth_soporte", "auth_notificacion")
+    names = ("honeypot", "sesion", "evento", "modelo_llm", "analisis_llm", "accion_identificada", "accion_evento", "tipo_ioc", "ioc", "observacion_ioc", "deteccion_ioc", "accion_ioc", "tactica_mitre", "tecnica_mitre", "tecnica_tactica", "mapeo_mitre", "usuario", "rol", "auth_factor", "auth_token", "auth_sesion", "auth_recuperacion", "auth_limite", "auth_auditoria", "auth_solicitud_password", "auth_soporte", "auth_notificacion")
     tables = {name: Table(name, meta, schema="honeypot", autoload_with=engine) for name in names}
     expected = {"sesion": {"id_sesion", "id_honeypot", "cowrie_session_id", "fecha_inicio", "ip_origen", "puerto_origen", "puerto_destino", "protocolo", "fecha_fin"}, "evento": {"id_evento", "id_sesion", "numero_secuencia", "tipo_evento", "fecha_hora", "datos_originales"}}
     for name, columns in expected.items():
@@ -145,6 +146,7 @@ def _persist_events(events):
             result = conn.execute(stmt)
             if result.rowcount:
                 inserted += 1
+                persist_observables(conn, app.state.tables, original, event_id, when)
             else:
                 existing = conn.execute(select(evento.c.id_sesion, evento.c.numero_secuencia, evento.c.datos_originales).where(evento.c.id_evento == event_id)).one()
                 if existing.id_sesion != session_id or existing.numero_secuencia != sequence or existing.datos_originales != original:

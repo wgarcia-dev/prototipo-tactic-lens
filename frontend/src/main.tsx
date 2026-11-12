@@ -4,7 +4,7 @@ import {BrowserRouter, Link, NavLink, Route, Routes, useNavigate, useParams} fro
 import {Activity, ArrowLeft, Database, FileUp, Fingerprint, LayoutDashboard, Search, Shield, Workflow} from 'lucide-react'
 import {Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis} from 'recharts'
 import './index.css'
-import {api} from './auth/client'
+import {api, mutate} from './auth/client'
 import {AuthProvider, useAuth} from './auth/context'
 import {AuthBoundary} from './auth/AuthBoundary'
 import {SecurityPage, SessionControls} from './auth/SecurityPage'
@@ -206,8 +206,22 @@ function AnalysisPage(){
   </>
 }
 function ImportPage(){const [file,setFile]=useState<File|null>(null),[result,setResult]=useState<unknown>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);async function submit(){if(!file)return;setBusy(true);setError('');try{const body=new FormData();body.append('file',file);setResult(await api('/ingesta/cowrie',{method:'POST',body}))}catch(e){setError((e as Error).message)}finally{setBusy(false)}}return <><Header title="Importar registros Cowrie" description="Carga un archivo JSONL para incorporar sesiones y eventos reales"/><div className="panel p-6 max-w-2xl"><div className="flex items-start gap-4"><FileUp size={30} className="accent"/><div><h2 className="font-semibold">Archivo cowrie.json</h2><p className="muted text-sm mt-1">Máximo 10 MB. Cada línea se valida de forma independiente. La reimportación evita duplicados.</p></div></div><input type="file" accept=".json,.jsonl" className="block mt-7 text-sm" onChange={e=>setFile(e.target.files?.[0]||null)}/><button className="btn mt-6" disabled={!file||busy} onClick={submit}>{busy?'Importando…':'Importar eventos'}</button>{error&&<div className="mt-5"><ErrorBox error={error}/></div>}{result!==null&&<pre className="bg-[#0c1728] p-4 rounded mt-5 overflow-auto text-sm">{JSON.stringify(result,null,2)}</pre>}</div></>}
-type IocRow={id_ioc:string,tipo:string,valor:string,primera_observacion:string,id_evento:number,id_sesion:string,evidencias:number}
-type MitreRow={id_mapeo:string,codigo_tecnica:string,tecnica:string,tactica:string,evidencia:string,justificacion:string,confianza:number,id_sesion:string}
+type ReviewState='pendiente'|'confirmado'|'descartado'|'mixto'
+type IocRow={id_ioc:string,tipo:string,valor:string,primera_observacion:string,id_evento:number|null,id_sesion:string|null,evidencia:string|null,evidencias:number,estado_revision:ReviewState}
+type MitreRow={id_mapeo:string,codigo_tecnica:string,tecnica:string,tactica:string,evidencia:string,justificacion:string,confianza:number,id_sesion:string,estado_revision:ReviewState,motivo_revision:string|null}
+function ReviewControls({kind,id,state}:{kind:'ioc'|'mitre',id:string,state:ReviewState}){
+  const {session}=useAuth(),[busy,setBusy]=useState(false),[error,setError]=useState('')
+  const [decision,setDecision]=useState<'confirmado'|'descartado'|null>(null)
+  const [reason,setReason]=useState('')
+  async function review(){
+    const motivo=reason.trim()
+    if(!decision||motivo.length<10){setError('Escriba un motivo de al menos 10 caracteres.');return}
+    setBusy(true);setError('')
+    try{await mutate(`/inteligencia/${kind}/${id}/revision`,{estado:decision,motivo},'PATCH');setDecision(null);setReason('')}
+    catch(e){setError((e as Error).message)}finally{setBusy(false)}
+  }
+  return <div className="mt-2"><span className="badge">{state}</span>{session?.usuario.rol==='administrador'&&<div className="flex gap-2 mt-2"><button className="btn text-xs" disabled={busy} onClick={()=>setDecision('confirmado')}>Confirmar</button><button className="btn text-xs" disabled={busy} onClick={()=>setDecision('descartado')}>Descartar</button></div>}{decision&&<div className="mt-2"><label className="block text-xs muted" htmlFor={`review-${id}`}>Motivo para {decision}</label><textarea id={`review-${id}`} className="w-full bg-[#0d192a] border line rounded p-2 mt-1 text-sm" maxLength={500} value={reason} onChange={e=>setReason(e.target.value)}/><div className="flex gap-2 mt-2"><button className="btn text-xs" disabled={busy||reason.trim().length<10} onClick={review}>Guardar revisión</button><button className="btn text-xs" disabled={busy} onClick={()=>{setDecision(null);setReason('');setError('')}}>Cancelar</button></div></div>}{error&&<p className="text-red-300 text-xs mt-2">{error}</p>}</div>
+}
 function ListingPage({kind}:{kind:'iocs'|'mitre'}){
   const [page,setPage]=useState(0)
   const [selected,setSelected]=useState<MitreRow|null>(null)
@@ -218,23 +232,23 @@ function ListingPage({kind}:{kind:'iocs'|'mitre'}){
   const maps=rows as MitreRow[]
   useEffect(()=>{if(kind==='mitre')setSelected(previous=>maps.find(row=>row.id_mapeo===previous?.id_mapeo)||maps[0]||null)},[rows,kind])
   if(kind==='iocs')return <>
-    <Header title="Indicadores de compromiso" description="Consulta los IoCs identificados y su relación con sesiones y eventos"/>
+    <Header title="Observables de Cowrie" description="Valores registrados en eventos; la revisión humana determina su relevancia"/>
     {error&&<ErrorBox error={error}/>}
-    <section className="panel p-5"><div className="flex flex-wrap justify-between gap-3 mb-5"><div><h2 className="font-semibold">Indicadores identificados</h2><p className="muted text-xs mt-1">Cada indicador conserva referencias a su evidencia de origen</p></div><span className="badge">{iocs.length} en esta página</span></div>
-      {loading?<p className="muted text-sm py-8">Cargando indicadores…</p>:<div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-[#1b3049] text-left text-xs muted"><tr><th className="p-3">Tipo</th><th className="p-3">Valor identificado</th><th className="p-3">Evento de origen</th><th className="p-3">Sesión</th><th className="p-3">Evidencias</th></tr></thead><tbody>{iocs.map(x=><tr key={x.id_ioc} className="table-row border-b line"><td className="p-3 accent">{x.tipo}</td><td className="p-3 break-all">{x.valor}</td><td className="p-3">#{x.id_evento}</td><td className="p-3"><Link className="accent hover:underline" to={'/sesiones/'+x.id_sesion}>{x.id_sesion?.slice(0,8)}…</Link></td><td className="p-3">{x.evidencias}</td></tr>)}</tbody></table>{!iocs.length&&<p className="muted text-sm p-5 text-center">Sin IoCs registrados. Analice una sesión con indicadores observables.</p>}</div>}
+    <section className="panel p-5"><div className="flex flex-wrap justify-between gap-3 mb-5"><div><h2 className="font-semibold">Valores observados</h2><p className="muted text-xs mt-1">Cada valor conserva el evento y el contexto de origen</p></div><span className="badge">{iocs.length} en esta página</span></div>
+      {loading?<p className="muted text-sm py-8">Cargando indicadores…</p>:<div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-[#1b3049] text-left text-xs muted"><tr><th className="p-3">Tipo</th><th className="p-3">Valor identificado</th><th className="p-3">Evento de origen</th><th className="p-3">Sesión</th><th className="p-3">Contexto y revisión</th></tr></thead><tbody>{iocs.map(x=><tr key={x.id_ioc} className="table-row border-b line"><td className="p-3 accent">{x.tipo}</td><td className="p-3 break-all">{x.valor}</td><td className="p-3">{x.id_evento != null ? '#'+x.id_evento : '—'}</td><td className="p-3">{x.id_sesion && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(x.id_sesion) ? <Link className="accent hover:underline" to={'/sesiones/'+x.id_sesion}>{x.id_sesion.slice(0,8)}…</Link> : '—'}</td><td className="p-3">{x.evidencia||'Sin evidencia de evento'}<p className="muted text-xs mt-1">{x.evidencias} evento(s)</p><ReviewControls kind="ioc" id={x.id_ioc} state={x.estado_revision}/></td></tr>)}</tbody></table>{!iocs.length&&<p className="muted text-sm p-5 text-center">Sin observables todavía. Importe o capture eventos de Cowrie.</p>}</div>}
       <Pager page={page} pageSize={PAGE_SIZE} count={iocs.length} hasNext={hasNext} onChange={setPage} label="indicadores"/>
-      <div className="bg-[#0d192a] rounded p-4 mt-6 text-xs muted"><span className="accent font-semibold">TRAZABILIDAD</span><p className="mt-2">IoC → detección → evento → sesión. Un valor aislado no demuestra compromiso.</p></div>
+      <div className="bg-[#0d192a] rounded p-4 mt-6 text-xs muted"><span className="accent font-semibold">TRAZABILIDAD</span><p className="mt-2">Valor observado → evento → sesión. Una IP o URL registrada no demuestra compromiso ni malicia.</p></div>
     </section>
   </>
   return <>
     <Header title="MITRE ATT&CK" description="Consulta técnicas, tácticas y evidencias vinculadas a eventos analizados"/>
     {error&&<ErrorBox error={error}/>}
     <div className="grid lg:grid-cols-[1.4fr_1fr] gap-5">
-      <section className="panel p-5"><div className="flex flex-wrap justify-between gap-3 mb-5"><div><h2 className="font-semibold">Técnicas identificadas</h2><p className="muted text-xs mt-1">Mapeos guardados con evidencia verificable</p></div><span className="badge">{maps.length} en esta página</span></div>
+      <section className="panel p-5"><div className="flex flex-wrap justify-between gap-3 mb-5"><div><h2 className="font-semibold">Técnicas identificadas</h2><p className="muted text-xs mt-1">Propuestas del análisis con evidencia y revisión humana</p></div><span className="badge">{maps.length} en esta página</span></div>
         {loading?<p className="muted text-sm py-8">Cargando mapeos…</p>:<div className="overflow-auto"><table className="w-full text-sm"><thead className="bg-[#1b3049] text-left text-xs muted"><tr><th className="p-3">Código</th><th className="p-3">Técnica</th><th className="p-3">Táctica</th></tr></thead><tbody>{maps.map(x=><tr key={x.id_mapeo} className={'table-row border-b line '+(selected?.id_mapeo===x.id_mapeo?'bg-[#1b3049]':'')}><td className="p-3"><button className="accent font-mono text-left hover:underline" onClick={()=>setSelected(x)} aria-label={'Ver mapeo '+x.codigo_tecnica}>{x.codigo_tecnica}</button></td><td className="p-3">{x.tecnica}</td><td className="p-3 muted">{x.tactica}</td></tr>)}</tbody></table>{!maps.length&&<p className="muted text-sm p-5 text-center">Aún no hay mapeos registrados.</p>}</div>}
         <Pager page={page} pageSize={PAGE_SIZE} count={maps.length} hasNext={hasNext} onChange={setPage} label="mapeos MITRE"/>
       </section>
-      <section className="panel p-5"><h2 className="font-semibold">Detalle de técnica</h2><p className="muted text-xs mt-1">Mapeo seleccionado · evidencia verificable</p>{selected?<><h3 className="text-2xl font-bold mt-9">{selected.tecnica}</h3><span className="badge mt-4">{selected.codigo_tecnica} · {selected.tactica}</span><div className="border-t line mt-8 pt-5 text-sm"><p className="muted text-xs mb-2">Sesión vinculada</p><Link to={'/sesiones/'+selected.id_sesion} className="accent">{selected.id_sesion}</Link></div><div className="border-t line mt-6 pt-5 text-sm"><p className="muted text-xs mb-2">Evidencia registrada</p>{selected.evidencia}</div><div className="border-t line mt-6 pt-5 text-sm"><p className="muted text-xs mb-2">Justificación del mapeo</p>{selected.justificacion}</div><p className="muted text-xs mt-8">Propuesta para revisión · {Math.round(selected.confianza*100)}% confianza</p></>:<p className="muted text-sm mt-8">Seleccione un mapeo para ver su evidencia.</p>}</section>
+      <section className="panel p-5"><h2 className="font-semibold">Detalle de técnica</h2><p className="muted text-xs mt-1">Mapeo seleccionado · evidencia verificable</p>{selected?<><h3 className="text-2xl font-bold mt-9">{selected.tecnica}</h3><span className="badge mt-4">{selected.codigo_tecnica} · {selected.tactica}</span><div className="border-t line mt-8 pt-5 text-sm"><p className="muted text-xs mb-2">Sesión vinculada</p><Link to={'/sesiones/'+selected.id_sesion} className="accent">{selected.id_sesion}</Link></div><div className="border-t line mt-6 pt-5 text-sm"><p className="muted text-xs mb-2">Evidencia registrada</p>{selected.evidencia}</div><div className="border-t line mt-6 pt-5 text-sm"><p className="muted text-xs mb-2">Justificación del mapeo</p>{selected.justificacion}</div><p className="muted text-xs mt-8">Propuesta del modelo · {Math.round(selected.confianza*100)}% confianza declarada</p><ReviewControls kind="mitre" id={selected.id_mapeo} state={selected.estado_revision}/>{selected.motivo_revision&&<p className="muted text-xs mt-2">{selected.motivo_revision}</p>}</>:<p className="muted text-sm mt-8">Seleccione un mapeo para ver su evidencia.</p>}</section>
     </div>
   </>
 }

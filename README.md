@@ -1,8 +1,8 @@
 # TacticLens
 
-TacticLens es un prototipo académico para observar intentos de acceso SSH en un entorno controlado. Cowrie simula un servidor SSH y registra conexiones, autenticaciones y comandos; un recolector envía esos eventos a FastAPI, que los conserva en PostgreSQL. La interfaz React permite revisar sesiones históricas, ejecutar un análisis con DeepSeek y consultar indicadores de compromiso (IoCs) y asociaciones propuestas con MITRE ATT&CK. Un IoC es un valor observable, como una IP, dominio, URL o hash; un mapeo MITRE describe la técnica que podría explicar una acción. Ambos se muestran junto a su evidencia para revisión humana.
+TacticLens es un prototipo académico para observar intentos de acceso SSH en un entorno controlado. Cowrie simula un servidor SSH y registra conexiones, autenticaciones y comandos; un recolector envía esos eventos a FastAPI, que los conserva en PostgreSQL. La interfaz React permite revisar sesiones históricas, ejecutar un análisis con DeepSeek y consultar valores observados y asociaciones propuestas con MITRE ATT&CK. Una IP, dominio, URL o hash pasa a ser un indicador de compromiso útil cuando su contexto y evidencia justifican esa conclusión; el sistema permite esa revisión humana. Un mapeo MITRE propone la técnica que podría explicar una acción registrada.
 
-**Implementado:** ingesta automática o importación manual, deduplicación de eventos, consulta y paginación, análisis manual de cualquier sesión con eventos, reutilización de resultados vigentes, reintento de fallos, bloqueo de análisis simultáneos por sesión, aviso cuando llegan eventos nuevos, IoCs y mapeos con evidencia. También incluye registro con autorización administrativa, verificación de correo, Google Authenticator obligatorio, recuperación, sesiones revocables, roles y auditoría. **Pendiente:** análisis automático al cerrar una sesión, despliegue público y monitoreo de producción. La ingesta funciona aunque DeepSeek esté indisponible.
+**Implementado:** ingesta automática o importación manual, deduplicación de eventos, consulta y paginación, análisis manual de cualquier sesión con eventos, reutilización de resultados vigentes, reintento de fallos, bloqueo de análisis simultáneos por sesión, aviso cuando llegan eventos nuevos, extracción de observables independiente del LLM, mapeos MITRE con evidencia y revisión administrativa auditada. También incluye registro con autorización administrativa, verificación de correo, Google Authenticator obligatorio, recuperación, sesiones revocables, roles y auditoría. **Pendiente:** análisis automático al cerrar una sesión, despliegue público y monitoreo de producción. La ingesta funciona aunque DeepSeek esté indisponible.
 
 **Autenticación:** consulte [la guía de configuración, primer administrador y prueba manual](docs/AUTENTICACION.md). Todas las pantallas privadas requieren correo verificado, autorización y segundo factor. El recolector conserva su autenticación independiente mediante `X-API-Key`.
 
@@ -247,7 +247,17 @@ En el `.env` **del backend Windows**, configure `LLM_MODE=real`, `LLM_PROVIDER=d
 
 En **Sesiones y eventos** puede buscar, paginar y abrir cualquier sesión registrada. Las sesiones muestran `Pendiente`, `En proceso`, `Analizada` o `Error`. **Analizar** funciona también en sesiones antiguas y usa los eventos ya guardados. Un resultado completo que cubre el conteo actual de eventos se muestra desde PostgreSQL, sin otra llamada a DeepSeek. Si llegan nuevos eventos, la sesión queda marcada `Desactualizado` y puede actualizarse el análisis; el resultado anterior sigue visible como referencia. Los fallos permiten **Reintentar**. Un intento activo impide un segundo análisis simultáneo; un intento abandonado se considera vencido tras un plazo basado en el timeout. La interfaz refresca los estados periódicamente.
 
-FastAPI envía al LLM eventos seleccionados de la sesión con credenciales ocultas, pide JSON estructurado, valida formato y referencias a eventos, y guarda análisis, acciones, IoCs y mapeos MITRE. Una respuesta inválida o un error del proveedor queda como intento fallido, sin resultados parciales. Errores de autenticación, límite de uso o saldo requieren revisar la cuenta y `LLM_API_KEY`; la ingesta sigue operativa.
+FastAPI envía al LLM eventos seleccionados de la sesión con credenciales ocultas, pide JSON estructurado, valida formato y referencias a eventos, y guarda análisis, acciones y propuestas MITRE. Los observables literales se extraen durante la ingesta, independientemente de DeepSeek. Una respuesta inválida o un error del proveedor queda como intento fallido, sin resultados parciales del análisis. Errores de autenticación, límite de uso o saldo requieren revisar la cuenta y `LLM_API_KEY`; la ingesta sigue operativa.
+
+Para actualizar el catálogo ATT&CK y procesar los eventos históricos después de `scripts.migrate`:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.seed_catalog
+.\.venv\Scripts\python.exe -m scripts.backfill_observables
+.\.venv\Scripts\python.exe -m scripts.backfill_mappings
+```
+
+**Observables de Cowrie** muestra valores únicos con su cantidad de eventos y revisión humana. **MITRE ATT&CK** presenta propuestas del análisis vinculadas a evidencia y permite revisarlas. Una IP o URL observada no demuestra por sí sola compromiso; una autenticación en Cowrie no demuestra acceso a un servidor real. Consulte [la guía de inteligencia](docs/INTELIGENCIA.md) para el alcance, las decisiones de revisión y los límites.
 
 ## 7. Prueba del flujo completo
 
@@ -264,7 +274,7 @@ SELECT id_evento, id_sesion, tipo_evento, fecha_hora
 FROM honeypot.evento ORDER BY fecha_hora DESC LIMIT 20;
 ```
 
-6. Pulse **Analizar**, consulte el resumen y la evidencia, luego abra **Indicadores de compromiso** y **MITRE ATT&CK**. Es posible que una sesión sin indicadores observables no genere IoCs.
+6. Abra **Observables de Cowrie** para revisar IP y valores extraídos de comandos. Pulse **Analizar**, consulte el resumen y la evidencia, luego abra **MITRE ATT&CK**. Una sesión sin acciones sustentadas puede no generar mapeos.
 7. Abra una sesión histórica pendiente y analícela. Vuelva a la sesión analizada: verá **Ver resultado**, sin consumir una llamada nueva. Si la sesión recibe eventos adicionales, verá el aviso **Desactualizado**.
 8. Sin VM, use **Importar Cowrie** con un JSONL real de hasta 10 MB o, desde la raíz Windows, `.\.venv\Scripts\python.exe -m scripts.import_cowrie .\cowrie.json`. La importación manual no necesita la clave del recolector.
 

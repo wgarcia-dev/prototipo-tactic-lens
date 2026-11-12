@@ -825,6 +825,36 @@ class AuthIntegrationTests(AuthFixture):
             promote_registered_account(self.connection,request,data["correo"],PASSWORD)
         self.assertEqual(identity(self.connection,request,user_id).rol,"analista")
 
+    def test_admin_reviews_observable_with_audited_reason(self):
+        from backend.intelligence import persist_observables
+        self.enroll(admin=True)
+        t = app.state.tables
+        session_id = self.connection.scalar(t["sesion"].insert().values(
+            id_honeypot=app.state.honeypot_id,
+            cowrie_session_id="review-" + uuid4().hex,
+            fecha_inicio=now(), protocolo="ssh", ip_origen="192.0.2.18"
+        ).returning(t["sesion"].c.id_sesion))
+        event_id = secrets.randbits(62)
+        raw = {"eventid":"cowrie.session.connect", "src_ip":"192.0.2.18"}
+        self.connection.execute(t["evento"].insert().values(
+            id_evento=event_id, id_sesion=session_id, numero_secuencia=1,
+            tipo_evento=raw["eventid"], fecha_hora=now(), datos_originales=raw))
+        persist_observables(self.connection, t, raw, event_id, now())
+        listed = self.client.get("/api/iocs")
+        self.assertEqual(listed.status_code, 200, listed.text)
+        row = next(item for item in listed.json() if item["valor"] == "192.0.2.18")
+        self.assertEqual(row["estado_revision"], "pendiente")
+        self.assertEqual(row["evidencias"], 1)
+        endpoint = f"/api/inteligencia/ioc/{row['id_ioc']}/revision"
+        self.assertEqual(self.client.patch(endpoint, json={"estado":"confirmado", "motivo":"corto"}).status_code, 422)
+        reviewed = self.client.patch(endpoint, json={"estado":"confirmado", "motivo":"Origen observado en Cowrie"})
+        self.assertEqual(reviewed.status_code, 200, reviewed.text)
+        observation = t["observacion_ioc"]
+        self.assertEqual(self.connection.scalar(select(observation.c.estado_revision).where(
+            observation.c.id_evento == event_id)), "confirmado")
+        self.assertEqual(next(item for item in self.client.get("/api/iocs").json()
+                              if item["valor"] == "192.0.2.18")["estado_revision"], "confirmado")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -34,7 +34,11 @@ def plain(row):
 def health():
     with app.state.engine.connect() as conn:
         conn.execute(select(1))
-    return {"status": "ok", "database": "connected", "llm_mode": "real", "collector_last_seen": getattr(app.state, "collector_last_seen", None)}
+        e,s=table("evento"),table("sesion")
+        stats=conn.execute(select(func.count().label("eventos"),func.max(e.c.ingresado_en).label("ultima_ingesta"))
+            .select_from(e.join(s,e.c.id_sesion==s.c.id_sesion)).where(s.c.id_honeypot==app.state.honeypot_id)).mappings().one()
+    return {"status": "ok", "database": "connected", "llm_mode": "real", "collector_last_seen": getattr(app.state, "collector_last_seen", None),
+            "contrato_ingesta":"tacticlens.ingesta.v2","ingestion":dict(stats)}
 
 
 @app.post("/api/ingesta/heartbeat")

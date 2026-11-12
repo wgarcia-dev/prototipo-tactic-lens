@@ -1,213 +1,167 @@
-# Demostración TacticLens entre dos laptops
+# Demostración de TacticLens entre dos laptops: HTTP local
 
-## Implementación y estado comprobado
+La modalidad vigente es **HTTP directo de demostración**, sin túnel SSH. Se utiliza el backend real y la base existente:
 
-Se conserva FastAPI, PostgreSQL, React, los roles y MFA existentes. No se crea otro receptor. Flujo:
+`Cowrie → cowrie.json → cola.sqlite3 → POST /api/ingesta/eventos → PostgreSQL → React`
 
-```text
-Cowrie → cowrie.json y rotaciones → events en cola.sqlite3
-       → API POST /api/ingesta/eventos por SSH inverso
-       → PostgreSQL → proxy local de Vite → interfaz React
-```
+Punto de retorno antes de esta adaptación: **ebf10b0**. Los commits anteriores `44c45db` y `acbacf2` conservan la implementación previa. Git restaura código; no revierte PostgreSQL ni SQLite. No restaure respaldos sobre datos nuevos.
 
-Punto de retorno Git creado antes de editar: `f636248`, cuyo contenido corresponde al estado anterior `b6a01db`. Antes de la migración se generó además un respaldo privado de PostgreSQL en `.local/backups/antes-ingesta-*.dump`, excluido de Git. Git restaura código, no revierte las bases ni recupera automáticamente cambios posteriores; no restaure un respaldo sobre datos nuevos sin conservarlos primero.
+## Preparación e inicio en Windows
 
-La adaptación se basa en el **exportador real** de `/opt/tacticlens-cowrie/exportar_eventos.py` adjunto en `diagnostico_tacticlens.json`, SHA-256 `36f42dc347ef33d4899536ce2bba7a17bd8f0268fc023b8fe0142d9ea7c17003`. El diagnóstico confirmó 17 filas en `events`, las tablas `events(id,payload,created_at)` y `cursor(name,inode,offset)`, servicio root y timer cada 30 segundos. El programa anterior usaba `events`/Bearer y eliminaba filas tras HTTP 2xx: era incompatible con la API real y no distinguía todas las ocurrencias idénticas.
-
-El diagnóstico también informa `GatewayPorts no`, `AllowTcpForwarding yes`, puerto administrativo 22 y UFW activo, permitiendo 22 y 2222 desde `192.168.0.0/24`. Es compatible con el túnel propuesto a nivel de configuración global. Una regla `Match` específica u otra restricción deberá validarse al abrirlo.
-
-**El operador instaló el kit y confirmó el túnel con `verificar.sh`:** la API respondió con contrato v2 y PostgreSQL conectado. La primera sincronización conservó 20 eventos pendientes porque recibió HTTP 401; se comprobó que la clave del `.env` de Windows sí es reconocida por la API y se preparó la alineación segura del token de Ubuntu. La validación de entrega sigue pendiente hasta observar el marcador real en PostgreSQL y la interfaz. La autenticación SSH no interactiva del agente fue rechazada (`Permission denied`); el operador introduce sus credenciales solo en su terminal. No se deshabilita la comprobación de host, UFW ni el segundo factor de TacticLens. La prueba en el hotspot requiere las dos laptops y el teléfono físicamente conectados.
-
-## Correcciones de ingesta
-
-- Migración aditiva `007_ingesta_identidad.sql`, aplicada localmente: amplía `numero_secuencia` a bigint y agrega `evento_origen`, con origen completo, sensor, referencia única al evento, huella del contenido y fecha. Los IDs y secuencias históricos no se renumeran.
-- Los eventos nuevos usan el generador de IDs PostgreSQL y una secuencia por sesión asignada bajo bloqueo de ingesta del sensor. Se elimina el hash de 31 bits como orden. Los reintentos concurrentes se serializan.
-- Una identidad repetida con contenido distinto se rechaza. Dos ocurrencias nuevas distintas con JSON idéntico se conservan. La compatibilidad histórica exige que coincida la identidad de origen anterior; nunca adopta una fila PostgreSQL solo por tener JSON igual. Si una captura histórica perdió su identidad, no se infiere que otra ocurrencia sea la misma.
-- El endpoint conserva `{"eventos":[...]}` y `X-API-Key`. Responde `contrato: "tacticlens.ingesta.v2"`, contadores y `confirmaciones` por índice/origen. Cada confirmación indica `insertado`, `duplicado` o `rechazado`; los aceptados incluyen `id_evento`. Las confirmaciones se publican después de confirmar la transacción.
-- Se usan savepoints para aislar eventos inválidos. Un lote parcialmente válido obtiene 200 con sus resultados individuales; si todos son inválidos obtiene 422 con el mismo contrato. Los fallos de infraestructura producen 503 y el emisor conserva el lote.
-- El emisor comprueba contrato, índices, identidades, IDs persistidos y contadores. No basta HTTP 200. No sigue redirecciones ni proxies ambientales; solo acepta la URL loopback de la API real. Hay límites de bytes por petición y adaptación del tamaño del lote.
-
-`/api/health` añade el contrato, cantidad de eventos y última ingesta persistida. Un heartbeat sigue indicando solamente actividad del proceso, no entrega de datos.
-
-## Exportador real y conservación de SQLite
-
-`collector/exportar_eventos.py` sustituye el programa inspeccionado después de respaldarlo. `collector/sqlite_sender.py` es su módulo de entrega, no otro lector ni otro backend. Se mantienen la unidad `tacticlens-exportador.service`, su timer, la base y las variables reales `TACTICLENS_*`.
-
-Se conservan las tablas originales y sus filas. Se añaden solo metadatos a la misma base:
-
-| Tabla | Uso |
-|---|---|
-| `tacticlens_envio_meta` | UUID durable de la cola y versión de captura |
-| `tacticlens_entregas` | Pendiente, enviado o revisión; intentos y confirmación PostgreSQL |
-| `tacticlens_archivos` | Cursor independiente por generación de archivo, inode y huellas |
-| `tacticlens_captura_origen` | Correspondencia entre ocurrencia física y fila original |
-| `tacticlens_legacy` | Conjunto inicial de filas históricas que se adoptan una vez |
-| `tacticlens_captura_revision` | Líneas inválidas retenidas para revisión, sin bloquear líneas posteriores |
-
-La identidad de envío usa el UUID persistente de SQLite y la clave de la fila. El cursor y la nueva ocurrencia se confirman en una transacción durable. Se revisan todas las rotaciones disponibles, incluidas `.gz`; la compresión entre consultas se reconoce mediante el prefijo completo de bytes ya confirmado. Las líneas incompletas esperan; las inválidas quedan conservadas en SQLite antes de avanzar el cursor. Un fallo de escritura revierte ambos.
-
-Los 17 IDs históricos se conservan: una revisión inicial del log asocia las filas antiguas una sola vez. Las ocurrencias posteriores idénticas generan filas nuevas. No se ejecuta `DELETE FROM events` al enviar. `--status` distingue pendientes, enviados y revisión; por eso el total conservado puede crecer después de sincronizar.
-
-La captura continúa aunque falte el túnel. Los fallos de transporte reciben espera progresiva y reintentos por el timer existente. Los eventos rechazados se conservan para revisión. No se imprimen payloads, contraseñas capturadas, claves ni respuestas de error sin filtrar. El contenido original de Cowrie, incluidos intentos de contraseña, permanece en el SQLite privado y en PostgreSQL como antes; proteja ambos respaldos.
-
-No hay garantía frente a disco agotado o logs eliminados antes de ser leídos. Mantenga la retención de rotaciones suficiente para cubrir el intervalo del timer y las interrupciones. Una reescritura completamente idéntica tras `copytruncate` entre dos observaciones puede ser indistinguible de un archivo sin cambios; la rotación por renombrado y la compresión están cubiertas por pruebas. No copie archivos de respaldo adicionales dentro del patrón `cowrie.json*` de captura.
-
-## Preparación en Windows
-
-Desde PowerShell, en la raíz:
+Abra PowerShell como usuario normal en el proyecto:
 
 ```powershell
 cd C:\Users\user\Documents\tesis\prototipo-tactic-lens
 .\scripts\windows\Comprobar-Requisitos.ps1
 ```
 
-La migración 007 ya está aplicada en esta PC. En otra instalación existente respalde PostgreSQL antes de ejecutar:
+Conserve PostgreSQL activo. Cierre con Ctrl+C el backend anterior que utilice 8000 y la ventana antigua `Abrir-Tunel.ps1`, si sigue abierta. Cancele también sincronizaciones antiguas que aún esperen contraseña. Conserve SSH administrativo; no se modifica sshd ni UFW.
 
 ```powershell
-.\.venv\Scripts\python.exe -m scripts.migrate
+.\scripts\windows\Iniciar-DemoHTTP.ps1 -UbuntuHost 192.168.0.110
 ```
 
-Se conserva `HONEYPOT_ID` y el sensor lógico `Cowrie-Prototipo-01`. Se actualizaron solamente sus metadatos a host `192.168.0.110` y versión declarada `3.1.6`, sin cambiar sesiones/eventos. La IP de ese campo es descriptiva; no dirige el transporte. Si necesita actualizarla posteriormente:
+Este script detecta la dirección e interfaz de Windows mediante la ruta local hacia Ubuntu. En la red actual son `192.168.0.111` y Ethernet. Rechaza rutas que pasen por una puerta de enlace; las laptops deben compartir la red local.
+
+- Ejecuta **una instancia** de la aplicación existente en `127.0.0.1:8000` y en la IP LAN seleccionada. No escucha en `0.0.0.0` ni en la interfaz VirtualBox.
+- Crea una clave exclusiva en `.local/demo-http/ingest.key`, con ACL privada. No cambia `INGEST_API_KEY` del `.env` ni la autenticación de usuarios.
+- Comprueba la regla antes de elevar permisos. Si coincide, muestra «Regla de firewall verificada y reutilizada. No se solicita UAC».
+- Solo si falta o cambia el alcance, solicita UAC para el firewall. Activa el perfil de esa interfaz, bloquea entrada por defecto y permite **TCP/8000 desde la IP exacta de Ubuntu, a la IP exacta de Windows y por esa interfaz**. Conserva otras reglas y perfiles. Se guarda el estado previo en `.local/demo-http/firewall-previo.json`.
+- En LAN, la aplicación solo acepta `/api/health` (GET) y `/api/ingesta/eventos` y `/api/ingesta/heartbeat` (POST), desde Ubuntu. No expone login, documentación ni módulos privados por esa interfaz. Ignora encabezados de proxy para identificar al cliente.
+- Si la configuración no queda confirmada, no inicia el servidor LAN. Ctrl+C lo detiene.
+
+El proceso de FastAPI continúa como usuario normal; solo el proceso breve del firewall se eleva. Las comprobaciones no generan nuevos avisos UAC. Si cambia la IP o interfaz, hará falta actualizar la regla una vez.
+
+En otra PowerShell normal:
 
 ```powershell
-.\.venv\Scripts\python.exe -m scripts.configure_sensor --host IP_ACTUAL_UBUNTU --version 3.1.6
+.\scripts\windows\Iniciar-Frontend.ps1
+.\scripts\windows\Estado-Ingesta.ps1
 ```
 
-El `.env` de la raíz conserva PostgreSQL, `INGEST_API_KEY`, correo y claves MFA. No genere claves nuevas. El proxy local quedó en `frontend/.env` y su ejemplo usa `VITE_API_PROXY_TARGET=http://127.0.0.1:8000`. El script de arranque además lo establece únicamente para el proceso Vite, evitando que una configuración antigua tenga prioridad.
+Mantenga el frontend en su propia terminal. La interfaz es `http://127.0.0.1:5173`, con proxy al backend de loopback. Correo, aprobación y Google Authenticator permanecen intactos.
 
-## Instalar la adaptación en Ubuntu: una vez
+## Instalar/actualizar Ubuntu y alinear la clave
 
-Prepare un kit que contiene únicamente los archivos enumerados, sin `.env`, claves privadas ni respaldos:
+Con el backend anterior activo, desde otra PowerShell normal:
+
+```powershell
+.\scripts\windows\Configurar-UbuntuHTTP.ps1 -UbuntuHost 192.168.0.110
+```
+
+Esto utiliza **SSH administrativo para instalar archivos**, no un túnel. El código y la clave exclusiva viajan por stdin cifrado; la clave no aparece en argumentos, consola ni repositorio. Puede pedir la contraseña SSH dos veces y luego sudo. No terminó al aparecer «entrada temporal recibida»: espere «Configuracion HTTP completada» y los contadores finales.
+
+Primero se comprueba la clave contra la API existente usando un evento deliberadamente inválido que no inserta filas. Si obtiene 401 o no alcanza la API, no modifica la configuración. Después se respalda y actualiza el exportador inspeccionado y su biblioteca, se realiza un respaldo SQLite mediante su API de backup y se conservan filas, UUID de cola, cursores y metadatos de entrega.
+
+La configuración resultante en `/etc/tacticlens-cowrie/exportador.env` es:
+
+```dotenv
+TACTICLENS_URL=http://192.168.0.111:8000/api/ingesta/eventos
+TACTICLENS_TRANSPORT=demo-http
+TACTICLENS_TOKEN=<clave exclusiva, sincronizada automáticamente>
+TACTICLENS_SENSOR_ID=<valor existente, conservado>
+```
+
+No copie el marcador de ejemplo como clave. No necesita editar varios archivos ni compartir secretos en el chat. El archivo queda con permisos 0600. No se toca la contraseña SSH ni el MFA de TacticLens.
+
+Se conservan `cowrie-tacticlens.service`, `tacticlens-exportador.service`, su timer de 30 segundos, `/home/cowrie/honeypot/var/log/cowrie/cowrie.json` y `/var/lib/tacticlens-cowrie/cola.sqlite3`. Se desactiva exclusivamente el recolector antiguo `cowrie-ingest.service`, si existe, para impedir dos emisores.
+
+### Alternativa de instalación manual
+
+El kit sin secretos puede prepararse y transferirse así:
 
 ```powershell
 .\scripts\windows\Preparar-KitUbuntu.ps1
-scp -r .\.local\kit-cowrie tacticadmin@192.168.0.110:~/
+scp -r .\.local\kit-cowrie tacticadmin@192.168.0.110:~/kit-cowrie-http
 ssh -t tacticadmin@192.168.0.110
 ```
-
-En la sesión administrativa Ubuntu:
-
-```bash
-cd ~/kit-cowrie
-sudo bash scripts/ubuntu/configurar.sh "$PWD"
-```
-
-El instalador solicita de forma oculta la **`INGEST_API_KEY` del `.env` privado de Windows**. Introdúzcala solo en la terminal de Ubuntu. La almacena como `TACTICLENS_TOKEN`, respetando el nombre real del exportador, y configura:
-
-```dotenv
-TACTICLENS_URL=http://127.0.0.1:18765/api/ingesta/eventos
-TACTICLENS_TOKEN=LA_MISMA_CLAVE_PRIVADA_INGEST_API_KEY_DE_WINDOWS
-TACTICLENS_SENSOR_ID=tacticlens-cowrie-01
-```
-
-`TACTICLENS_SENSOR_ID` existente se conserva; no sustituye al UUID del sensor de PostgreSQL ni debe cambiar por cada Wi-Fi. No copie los marcadores ni introduzca las claves en argumentos o en el chat.
-
-Antes de tocar la cola, el instalador comprueba el hash del programa inspeccionado, el esquema real y la unidad oneshot. Pausa el timer y espera a que termine la ejecución activa. Respalda script/configuración y usa la API de backup de SQLite, incluyendo datos comprometidos en WAL; no copia solo el archivo `.sqlite3` mientras está activo. Prepara metadatos, actualiza el programa y su módulo y deshabilita `cowrie-ingest.service` si existe. El servicio y timer originales quedan como único mecanismo automático. No cambia Cowrie, UFW ni SSH.
-
-Si el hash o esquema difieren, se detiene para otra revisión. Si falla después de pausar el timer, restaura script/configuración y deja el timer pausado para evitar envíos al receptor anterior; Cowrie sigue registrando. Revise el mensaje y el respaldo antes de reactivarlo. No ejecute manualmente el lector anterior ni otro emisor sobre la misma cola.
-
-## Arranque diario: tres terminales Windows
-
-**Terminal 1 — backend local:**
-
-```powershell
-cd C:\Users\user\Documents\tesis\prototipo-tactic-lens
-.\scripts\windows\Iniciar-Backend.ps1
-```
-
-**Terminal 2 — frontend:**
-
-```powershell
-cd C:\Users\user\Documents\tesis\prototipo-tactic-lens
-.\scripts\windows\Iniciar-Frontend.ps1
-```
-
-**Terminal 3 — túnel:**
-
-```powershell
-cd C:\Users\user\Documents\tesis\prototipo-tactic-lens
-.\scripts\windows\Abrir-Tunel.ps1 -UbuntuHost 192.168.0.110
-```
-
-Puede omitir `-UbuntuHost` para introducir la IP actual. `-Reconectar` reintenta si cae SSH; si cambió la IP de Ubuntu, cierre con Ctrl+C y vuelva a indicarla. `-IdentityFile RUTA` permite usar una clave privada ya autorizada sin incluir su contenido en el script. También admite autenticación interactiva, sin guardar la contraseña.
-
-El túnel ejecuta OpenSSH con `-N -T -R 127.0.0.1:18765:127.0.0.1:8000`, comprobación de host, `ExitOnForwardFailure` y keepalive. Usa el alias de host `tacticlens-cowrie` para conservar la verificación de identidad al cambiar la IP. Verifique la huella pública desde la consola Ubuntu si es el primer acceso; no acepte cambios inesperados ni desactive la comprobación.
-
-No se abre 8000 en la LAN ni 18765 fuera de Ubuntu. No hace falta una regla Windows de entrada para FastAPI: Windows inicia la conexión SSH saliente. Mantenga las tres terminales abiertas.
 
 En Ubuntu:
 
 ```bash
-cd ~/kit-cowrie
-bash scripts/ubuntu/verificar.sh
-sudo bash scripts/ubuntu/sincronizar.sh
-sudo bash scripts/ubuntu/estado.sh
+cd ~/kit-cowrie-http
+sudo bash scripts/ubuntu/configurar-http.sh "$PWD" 192.168.0.111
 ```
 
-`verificar.sh` rechaza un túnel publicado fuera de `127.0.0.1`, comprueba la API real y detecta el recolector anterior activo. `sincronizar.sh` pausa el timer, espera a que termine cualquier ejecución activa y llama al mismo exportador con un reintento inmediato supervisado; después restaura el timer. No ejecuta dos lectores ni detiene Cowrie. El timer repite automáticamente cada 30 segundos, además de la espera progresiva del envío, de hasta cinco minutos. `--status` muestra la fecha del próximo reintento.
+Esta alternativa pide la clave de demostración de forma oculta; la ruta local donde reside es `.local/demo-http/ingest.key`. Prefiera el método automático para evitar copiarla manualmente. Nunca use `set -x` ni muestre el archivo de configuración.
 
-En Windows, otra terminal puede mostrar el estado:
+## Comprobaciones reales
 
-```powershell
-.\scripts\windows\Estado-Ingesta.ps1 -Seguir
-```
-
-Abra `http://127.0.0.1:5173`, inicie sesión con su cuenta habilitada y Google Authenticator, y consulte Sesiones y eventos. El acceso administrativo SSH a Ubuntu es distinto del SSH simulado de Cowrie.
-
-### Si Ubuntu informa `http_401`
-
-El túnel puede funcionar correctamente y la clave de ingesta no coincidir. Los eventos deben permanecer pendientes. No cambie la autenticación de usuarios ni desactive MFA. Desde Windows, manteniendo el túnel abierto:
-
-```powershell
-.\scripts\windows\Sincronizar-ClaveUbuntu.ps1 -UbuntuHost IP_ACTUAL_UBUNTU
-```
-
-Este ayudante lee `INGEST_API_KEY` del `.env` privado, la transmite por stdin SSH cifrado y la recibe en un archivo temporal de permisos 0600 dentro de un directorio 0700 de Ubuntu. No la imprime, no la copia al portapapeles ni la incluye en argumentos. Usa dos conexiones SSH: sin una clave de usuario cargada puede pedir la contraseña dos veces y después la de sudo. El primer mensaje de recepción temporal no significa que haya terminado; espere a los contadores y al mensaje final de sincronización completada.
-
-Antes de modificar configuración, comprueba la clave contra la API real del túnel mediante un evento deliberadamente inválido, que no crea registros. Si la clave no es reconocida, se detiene. Si coincide, respalda la configuración, alinea solo `TACTICLENS_TOKEN` y la URL loopback, reintenta pendientes y elimina el archivo temporal. Se mantiene el sensor y el timer. No hace falta volver a copiar manualmente el valor de la clave.
-
-## Demostración y desconexión
-
-1. Confirme `verificar.sh`, `database: connected` y los contadores iniciales.
-2. Desde Windows abra `ssh -p 2222 root@IP_UBUNTU`; dentro de Cowrie ejecute `whoami`, `pwd` y `exit`.
-3. Espere el timer o ejecute `sincronizar.sh`. La nueva sesión debe aparecer en TacticLens. SQLite conserva sus filas y aumenta `enviados`.
-4. Cierre solo el túnel con Ctrl+C. Genere otra sesión controlada. Cowrie debe seguir funcionando y el timer debe aumentar `pendientes`.
-5. En Ubuntu ejecute `sudo bash scripts/ubuntu/probar-reconexion.sh antes`.
-6. Reabra el túnel, espere la sincronización y ejecute `sudo bash scripts/ubuntu/probar-reconexion.sh despues`. El script exige confirmaciones de todos los pendientes de la muestra, sin disminución de filas ni registros en revisión.
-7. Consulte nuevamente la sesión en la web. Si se perdió una respuesta después de guardar PostgreSQL, la reentrega obtiene recibos de duplicado y no crea otra ocurrencia.
-
-## Hotspot sin Internet
-
-Conecte ambas laptops al mismo hotspot. Obtenga las direcciones con `ipconfig` en Windows e `ip -br address` en Ubuntu. No asuma que el teléfono mantiene `192.168.0.*` ni que permite comunicación entre clientes.
-
-UFW actualmente permite solo `192.168.0.0/24`. Desde la **consola física de Ubuntu**, autorice exclusivamente la nueva dirección privada de Windows:
+En Ubuntu, después de instalar:
 
 ```bash
-cd ~/kit-cowrie
-sudo bash scripts/ubuntu/autorizar-windows.sh IP_PRIVADA_ACTUAL_WINDOWS
+sudo bash /opt/tacticlens-cowrie/scripts/verificar.sh
+sudo bash /opt/tacticlens-cowrie/scripts/estado.sh
+sudo bash /opt/tacticlens-cowrie/scripts/sincronizar.sh
+curl --noproxy '*' --fail --max-time 5 http://192.168.0.111:8000/api/health
 ```
 
-El script añade acceso a 22 y 2222 para esa dirección; no deshabilita UFW ni abre 18765, y no borra reglas anteriores. Al terminar revise las reglas antiguas según su política; este kit no las elimina automáticamente.
+`verificar.sh` comprueba Cowrie, timer, contrato v2 y PostgreSQL mediante HTTP directo. `sincronizar.sh` pausa el timer, espera al envío en curso, reintenta con el mismo exportador y restaura el timer. No borra la cola. Un latido o una respuesta de salud no demuestran persistencia de eventos.
 
-Abra nuevamente `Abrir-Tunel.ps1 -UbuntuHost IP_ACTUAL_UBUNTU`. No cambie URLs del exportador, clave, UUID del sensor ni el proxy. Repita la demostración con los datos móviles desactivados. Si falla TCP/22 aun con reglas correctas, compruebe aislamiento entre clientes del hotspot.
-
-DeepSeek y Resend requieren Internet. Para esta prueba bastan captura, SQLite, ingesta, PostgreSQL, consulta y cuentas previamente autorizadas con MFA. TOTP funciona localmente, pero ambos relojes deben estar correctos. No intente completar registro por correo ni análisis nuevos de DeepSeek como parte de la prueba offline.
-
-## Pruebas y archivos
-
-Pruebas automáticas:
+En Windows, genere una conexión inocua nueva en Cowrie, sin contraseñas ni comandos:
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests
-cd frontend
-npm.cmd test
-npm.cmd run build
+.\.venv\Scripts\python.exe -m scripts.cowrie_demo generar --ubuntu 192.168.0.110
 ```
 
-Se ejecutaron 144 pruebas Python, incluidas concurrencia PostgreSQL, identidad histórica, dos ocurrencias idénticas, respuesta perdida después del commit, SQLite → API real → PostgreSQL → consultas con autenticación, rotaciones múltiples, gzip, cuarentena y rollback del cursor. Las llamadas externas de correo/LLM se simulan. Se corrigió el aislamiento de las pruebas de correo para que no contaran avisos reales anteriores; no se borraron esos avisos. También se ejecutaron 7 pruebas frontend y el build, con los avisos previos de tamaño de bundle/React Router.
+Copie el marcador `TacticLensDemo_...` que imprime. Espere al timer o sincronice desde Ubuntu y verifique:
 
-La sintaxis PowerShell y Bash se comprobó con las herramientas ya instaladas; OpenSSH `-G` confirmó la configuración del reenvío, sin abrirlo. El operador confirmó instalación y acceso HTTP por el túnel; se generó una conexión real a Cowrie con marcador único y banner Debian 12. No se declaran aprobadas su persistencia extremo a extremo, la recuperación real tras reinicios ni el hotspot hasta completar las comprobaciones pendientes.
+```powershell
+.\.venv\Scripts\python.exe -m scripts.cowrie_demo verificar --marker TacticLensDemo_REEMPLAZAR
+.\scripts\windows\Estado-Ingesta.ps1
+```
 
-El ayudante de alineación incorpora además tres pruebas con transporte SSH y API simulados: secreto ausente de argumentos, validación previa a cambios y conservación de configuración ante una clave rechazada.
+El verificador solo consulta PostgreSQL. Exige origen `sqlite:`, muestra la sesión y sus eventos y comprueba secuencias duplicadas. Código de salida 2 significa que el marcador aún no tiene recibo persistido; no significa éxito.
 
-Archivos principales: `backend/ingestion.py`, integración en `backend/api.py`, `backend/routes.py` y el límite del middleware; migración 007; `collector/exportar_eventos.py` y `sqlite_sender.py`; retiro del arranque de `collector/collector.py`; scripts de Windows/Ubuntu; `scripts/configure_sensor.py`, `scripts/demo_status.py`; pruebas `test_ingestion.py`, `test_sqlite_capture.py`, `test_sqlite_sender.py`; aislamiento en `test_professional_mail.py`; proxy de ejemplo, README, `.gitattributes` y esta guía. No se modifica el análisis LLM, IoCs ni MITRE.
+Inicie sesión en React con su cuenta y Google Authenticator. En «Sesiones y eventos», busque el `cowrie_session_id` obtenido, abra la sesión y despliegue el JSON relevante del evento de versión del cliente. Debe aparecer el marcador. No pulse «Analizar» para esta prueba offline.
+
+Ejecute la sincronización otra vez: los mismos orígenes no deben aumentar los eventos en PostgreSQL. Guarde los contadores reales. El exportador solo marca enviado tras recibir confirmación v2 por cada identidad y un ID persistido. Un HTTP 200 genérico no basta.
+
+## Interrupción, reinicio y hotspot sin Internet
+
+1. Detenga FastAPI con Ctrl+C; deje Cowrie y su timer activos.
+2. Genere otra conexión con `cowrie_demo generar`. Espere al timer: los nuevos eventos deben quedar pendientes en SQLite, sin eliminar filas.
+3. En Ubuntu: `sudo bash /opt/tacticlens-cowrie/scripts/probar-reconexion.sh antes`.
+4. Inicie de nuevo `Iniciar-DemoHTTP.ps1` con la misma IP de Ubuntu. La clave se conserva y, si la regla coincide, no solicita UAC.
+5. Espere al timer o ejecute `sincronizar.sh`; después `sudo bash /opt/tacticlens-cowrie/scripts/probar-reconexion.sh despues`.
+6. Contraste el marcador con PostgreSQL y React. Repita la sincronización y compruebe que no hay aumento por duplicados.
+7. Para probar reinicio del exportador: `sudo systemctl restart tacticlens-exportador.timer` y `sudo systemctl start tacticlens-exportador.service`; consulte `estado.sh`. No reinicie ni reinstale Cowrie innecesariamente.
+
+Para cambiar al hotspot, conecte ambas laptops, obtenga la nueva IP de Ubuntu (`hostname -I`) y ejecute los dos scripts de Windows con esa IP. Windows detecta su propia dirección; el instalador cambia una sola URL de Ubuntu y conserva la clave/cola. Si UFW permite SSH/2222 únicamente desde la subred anterior, agregue reglas de origen exacto para la nueva IP de Windows desde la consola Ubuntu:
+
+```bash
+sudo ufw allow from IP_WINDOWS_ACTUAL to any port 22 proto tcp
+sudo ufw allow from IP_WINDOWS_ACTUAL to any port 2222 proto tcp
+sudo ufw status
+```
+
+No necesita abrir 8000 entrante en Ubuntu: el exportador realiza conexiones salientes. No desactive UFW. Algunos hotspots aíslan clientes; si no hay conectividad entre equipos, debe desactivarse ese aislamiento en el punto de acceso o utilizarse una red local que permita comunicación entre clientes. Las dependencias deben estar instaladas previamente. DeepSeek y el envío de correo pueden requerir Internet; no forman parte de esta prueba.
+
+## Integridad y seguridad conservadas
+
+La migración **007**, ya aplicada en esta máquina, amplía `evento.numero_secuencia` a bigint y agrega `evento_origen`. Esta adaptación HTTP no necesita otra migración. No renumera ni elimina datos históricos. Se mantiene `Cowrie-Prototipo-01` y el mismo `HONEYPOT_ID`.
+
+Las ocurrencias nuevas usan identidad durable de SQLite y orden secuencial por sesión; dos JSON iguales en posiciones distintas no se descartan. El backend serializa la ingesta concurrente por sensor y rechaza cambios de contenido para una identidad ya usada. Los registros inválidos quedan en revisión y no bloquean eventos válidos posteriores. Los cursores se confirman después de guardar duraderamente cada ocurrencia. Se recuperan rotaciones disponibles, incluidas gzip.
+
+HTTP sin cifrar se permite solo con `demo-http`, IPv4 RFC1918 y puerto 8000; el backend exige `AUTH_ENV=development`. Fuera de esa modalidad, la ingesta remota por HTTP se rechaza. No utilice esta modalidad en redes públicas ni producción. La clave de demo es exclusiva y no sustituye la configuración SMTP, LLM o de usuarios. No se confía en X-Forwarded-For ni se siguen redirecciones/proxies en el emisor.
+
+Para retirar la exposición de demostración, detenga su backend y ejecute en PowerShell administrativa, con las IP/interfaz actuales:
+
+```powershell
+.\scripts\windows\Configurar-FirewallDemo.ps1 -LocalIP 192.168.0.111 -UbuntuIP 192.168.0.110 -InterfaceIndex 19 -Quitar
+```
+
+Esto elimina únicamente la regla propia. No desactiva el firewall. El backend habitual vuelve a iniciarse con `Iniciar-Backend.ps1`; el exportador conserva pendientes mientras no exista un receptor compatible con su clave y URL.
+
+## Pruebas automatizadas
+
+Desde la raíz:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/test_firewall_demo.ps1
+npm.cmd --prefix frontend test
+npm.cmd --prefix frontend run build
+```
+
+Se utilizan fixtures transaccionales/esquemas aislados y mocks de correo/servicios externos. No se envían correos reales ni se omite MFA. Los resultados entre laptops y el estado observado se documentan en `docs/RESULTADOS_HTTP_LOCAL.md`; una prueba automatizada no sustituye la demostración física.

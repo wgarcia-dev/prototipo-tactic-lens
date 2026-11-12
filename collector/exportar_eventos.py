@@ -163,8 +163,8 @@ def full_status(conn):
     return result
 
 
-def heartbeat(url,key):
-    delivery.validate_endpoint(url,key)
+def heartbeat(url,key,transport='ssh-loopback'):
+    delivery.validate_endpoint(url,key,transport)
     request=delivery.urllib.request.Request(url.rsplit('/',1)[0]+'/heartbeat',data=b'{}',method='POST',headers={'Content-Type':'application/json','X-API-Key':key})
     opener=delivery.urllib.request.build_opener(delivery.urllib.request.ProxyHandler({}),delivery.NoRedirect())
     with opener.open(request,timeout=5) as response:
@@ -190,12 +190,15 @@ def main():
         if args.retry_now:
             conn.execute("UPDATE tacticlens_entregas SET proximo_intento=0 WHERE estado='pendiente'")
         url=config.get('TACTICLENS_URL','').strip();key=config.get('TACTICLENS_TOKEN','').strip()
+        transport=config.get('TACTICLENS_TRANSPORT','ssh-loopback')
+        if url and not args.capture_only:
+            delivery.validate_endpoint(url,key,transport)
         result=ingest(conn,max_pending=int(config.get('TACTICLENS_MAX_PENDING','50000')))
         if url and not args.capture_only:
             size=max(1,min(200,int(config.get('TACTICLENS_BATCH_SIZE','50'))))
-            delivery.deliver_pending(conn,mapping(conn),url,key,size)
+            delivery.deliver_pending(conn,mapping(conn),url,key,size,transport=transport)
             try:
-                heartbeat(url,key)
+                heartbeat(url,key,transport)
             except (OSError,ValueError,RuntimeError):
                 pass
         print(json.dumps({**result,**full_status(conn)}))

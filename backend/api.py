@@ -58,6 +58,8 @@ class Batch(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from .ingest_transport import validate_demo_settings
+    validate_demo_settings()
     required = ["DATABASE_NAME", "DATABASE_USER", "DATABASE_PASSWORD", "DATABASE_HOST", "INGEST_API_KEY", "HONEYPOT_ID"]
     missing = [name for name in required if not os.getenv(name)]
     if missing:
@@ -84,6 +86,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+from .ingest_transport import IngestTransportMiddleware
+app.add_middleware(IngestTransportMiddleware)
 
 
 @app.post("/api/ingesta/eventos")

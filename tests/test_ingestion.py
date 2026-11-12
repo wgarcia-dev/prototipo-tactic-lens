@@ -125,7 +125,7 @@ class IngestionTests(fixtures.AuthFixture):
 
 class ConcurrentIngestionTests(unittest.TestCase):
     def test_two_connections_retry_same_and_distinct_events_without_duplicates(self):
-        with patch.dict('os.environ',{'ADMIN_EMAIL':'','SUPPORT_EMAIL':'','MAIL_TRANSPORT':'file'}),TestClient(app) as client:
+        with patch.dict('os.environ',{'ADMIN_EMAIL':'','SUPPORT_EMAIL':'','MAIL_TRANSPORT':'file'}),TestClient(app,client=('127.0.0.1',51002)) as client:
             engine,original=app.state.engine,app.state.tables
             schema='test_ingestion_'+uuid4().hex
             meta=MetaData()

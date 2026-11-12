@@ -8,6 +8,7 @@ import argparse
 from contextlib import contextmanager
 from datetime import datetime,timezone
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -101,16 +102,26 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def validate_endpoint(url,key):
+def validate_endpoint(url,key,transport='ssh-loopback'):
     parsed=urlsplit(url)
-    if parsed.scheme!='http' or parsed.hostname!='127.0.0.1' or parsed.port!=18765 or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path!='/api/ingesta/eventos':
-        raise ValueError('El destino debe ser el loopback del túnel SSH y la API real')
+    if parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path!='/api/ingesta/eventos':
+        raise ValueError('Destino de ingesta no válido')
+    if transport=='demo-http':
+        host=ipaddress.ip_address(parsed.hostname or '')
+        private=host.version==4 and any(host in ipaddress.ip_network(net) for net in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16'))
+        if parsed.scheme!='http' or parsed.port!=8000 or not private:
+            raise ValueError('HTTP de demostración requiere una IPv4 privada y puerto 8000')
+    elif transport=='ssh-loopback':
+        if parsed.scheme!='http' or parsed.hostname!='127.0.0.1' or parsed.port!=18765:
+            raise ValueError('HTTP directo requiere activar explícitamente demo-http')
+    else:
+        raise ValueError('Modalidad de transporte no reconocida')
     if not key or any(ord(c)<33 or ord(c)>126 for c in key):
         raise ValueError('Clave de ingesta no válida')
 
 
-def post(url,key,events):
-    validate_endpoint(url,key)
+def post(url,key,events,transport='ssh-loopback'):
+    validate_endpoint(url,key,transport)
     body=json.dumps({'eventos':events},allow_nan=False,separators=(',',':'),ensure_ascii=False).encode()
     if len(body)>2_000_000:
         raise ValueError('Lote demasiado grande; reduzca BATCH_SIZE')
@@ -147,7 +158,7 @@ def validate_receipts(result,events):
     return receipts
 
 
-def deliver_pending(conn,mapping,url,key,batch_size=50):
+def deliver_pending(conn,mapping,url,key,batch_size=50,transport='ssh-loopback'):
     validate_mapping(conn,mapping)
     queue_uuid=conn.execute("SELECT valor FROM tacticlens_envio_meta WHERE clave='queue_uuid'").fetchone()[0]
     if conn.execute("SELECT valor FROM tacticlens_envio_meta WHERE clave='source_table'").fetchone()[0]!=mapping['table']:
@@ -189,7 +200,8 @@ def deliver_pending(conn,mapping,url,key,batch_size=50):
     if not events:
         return 0
     try:
-        receipts=validate_receipts(post(url,key,events),events)
+        result=post(url,key,events,transport=transport) if transport!='ssh-loopback' else post(url,key,events)
+        receipts=validate_receipts(result,events)
     except (OSError,ValueError,RuntimeError,TimeoutError) as exc:
         error=str(exc) if re.fullmatch(r'http_[1-5][0-9][0-9]',str(exc)) else 'transporte_o_confirmacion'
         conn.execute('BEGIN IMMEDIATE')

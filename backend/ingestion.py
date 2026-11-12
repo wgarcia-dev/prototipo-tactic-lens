@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DataError, IntegrityError, SQLAlchemyError
+from .intelligence import persist_observables
 
 CONTRACT = "tacticlens.ingesta.v2"
 
@@ -88,6 +89,9 @@ def save_event(conn, tables, sensor, raw, prepared):
         if event_id is None:
             raise RuntimeError("identity_sequence_busy")
         state="insertado"
+    # Observables, event and receipt are one transaction. An exporter must never
+    # receive a durable acknowledgement for only part of the ingestion work.
+    persist_observables(conn,tables,original,event_id,when)
     conn.execute(o.insert().values(id_honeypot=sensor,origen_id=origin,id_evento=event_id,contenido_sha256=digest))
     if raw["eventid"]=="cowrie.session.closed":
         conn.execute(s.update().where(s.c.id_sesion==sid,s.c.fecha_inicio<=when).values(

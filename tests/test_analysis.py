@@ -39,6 +39,10 @@ class AnalysisReportTests(unittest.TestCase):
                                               "LLM_BASE_URL": "https://example.invalid/v1"})
         self.env.start()
         self.addCleanup(self.env.stop)
+        self.catalog = patch('backend.routes.mitre_catalog', return_value=[{
+            'codigo_tecnica':'T1059.004','nombre':'Unix Shell','tactica':'Execution'}])
+        self.catalog.start()
+        self.addCleanup(self.catalog.stop)
 
     def provider(self, content, finish="stop"):
         response = Mock()
@@ -56,6 +60,7 @@ class AnalysisReportTests(unittest.TestCase):
         self.assertNotIn("captured-token", request["messages"][1]["content"])
         self.assertEqual(facts["eventos"][0]["datos"]["password"], "[REDACTED]")
         self.assertEqual(facts["contexto_calculado"]["comandos"], 1)
+        self.assertEqual(facts['tecnicas_mitre_permitidas'][0]['codigo_tecnica'],'T1059.004')
         self.assertEqual(request["max_tokens"], 8192)
         self.assertEqual(request["response_format"], {"type": "json_object"})
 

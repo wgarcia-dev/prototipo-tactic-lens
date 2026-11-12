@@ -8,9 +8,13 @@ from sqlalchemy import text
 from backend.db import database_engine
 
 MIGRATIONS = Path(__file__).resolve().parents[1] / "database" / "migrations"
+# Keep the published SQL and its checksum for collaborators who already applied
+# it. New installations must not delete historical evidence during integration.
+DEFERRED_DATA_MIGRATIONS = {"008_limpieza_dominios.sql"}
 
 
 def migrate(engine):
+    applied, deferred = [], []
     with engine.begin() as conn:
         conn.execute(text("SELECT pg_advisory_xact_lock(724610901)"))
         conn.execute(text("""CREATE TABLE IF NOT EXISTS honeypot.schema_migration (
@@ -24,6 +28,9 @@ def migrate(engine):
                 if previous != digest:
                     raise RuntimeError("Migración aplicada modificada: " + path.name)
                 continue
+            if path.name in DEFERRED_DATA_MIGRATIONS:
+                deferred.append(path.name)
+                continue
             collision = conn.scalar(text("""SELECT count(*) FROM
                 (SELECT lower(btrim(correo)) FROM honeypot.usuario
                  GROUP BY lower(btrim(correo)) HAVING count(*)>1) c"""))
@@ -32,13 +39,17 @@ def migrate(engine):
             # psycopg's simple-query protocol supports the reviewed multi-statement SQL.
             conn.connection.driver_connection.execute(sql, prepare=False)
             conn.execute(text("INSERT INTO honeypot.schema_migration(version,checksum) VALUES(:v,:c)"), {"v": path.name, "c": digest})
+            applied.append(path.name)
+    return {"applied": applied, "deferred": deferred}
 
 
 if __name__ == "__main__":
     load_dotenv()
     engine = database_engine()
     try:
-        migrate(engine)
+        result = migrate(engine)
         print("Migraciones aplicadas. Los datos existentes se conservan.")
+        if result['deferred']:
+            print("Limpieza destructiva NO ejecutada: " + ", ".join(result['deferred']))
     finally:
         engine.dispose()

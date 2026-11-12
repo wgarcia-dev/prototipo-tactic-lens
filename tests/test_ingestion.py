@@ -129,13 +129,14 @@ class ConcurrentIngestionTests(unittest.TestCase):
             engine,original=app.state.engine,app.state.tables
             schema='test_ingestion_'+uuid4().hex
             meta=MetaData()
-            names=('rol','usuario','honeypot','sesion','evento','evento_origen')
+            names=('rol','usuario','honeypot','sesion','evento','evento_origen','tipo_ioc','ioc','observacion_ioc')
             copied={n:original[n].to_metadata(meta,schema=schema,referred_schema_fn=lambda *args:schema) for n in names}
             created=False
             try:
                 with engine.begin() as conn:
                     conn.execute(CreateSchema(schema));meta.create_all(conn)
                     conn.execute(copied['honeypot'].insert().values(id_honeypot=app.state.honeypot_id,nombre='Prueba aislada',host='loopback'))
+                    conn.execute(copied['tipo_ioc'].insert().values(id_tipo_ioc=1,nombre='IP'))
                 created=True
                 app.state.tables={**original,**copied}
                 barrier=Barrier(2)

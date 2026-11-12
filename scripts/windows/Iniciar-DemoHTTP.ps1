@@ -15,7 +15,8 @@ $interfaceIndex = $source.InterfaceIndex
 if ($LASTEXITCODE -ne 0) { throw 'Esta modalidad requiere AUTH_ENV=development' }
 & $python -m scripts.demo_status --database
 if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL o esquema no disponibles' }
-if (Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue) {
+& $python -m scripts.serve_demo --local-ip $localIP --ubuntu-ip $UbuntuHost --check-ports
+if ($LASTEXITCODE -ne 0) {
     throw 'El puerto 8000 esta ocupado. Detenga con Ctrl+C el backend anterior antes de iniciar esta modalidad.'
 }
 # Only the dedicated ingestion tunnel is eligible for automatic termination.

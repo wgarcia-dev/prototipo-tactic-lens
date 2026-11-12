@@ -11,13 +11,14 @@ def main():
     try:
         with engine.connect() as conn:
             conn.execute(text('SET TRANSACTION READ ONLY'))
-            if not inspect(conn).has_table('evento_origen',schema='honeypot'):
-                raise RuntimeError('Falta migracion 007; respalde y ejecute python -m scripts.migrate')
+            missing=[name for name in ('evento_origen','observacion_ioc') if not inspect(conn).has_table(name,schema='honeypot')]
+            if missing:
+                raise RuntimeError('Faltan tablas de migraciones 007: '+', '.join(missing)+'; respalde y ejecute python -m scripts.migrate')
             result=conn.execute(text('SELECT nombre,host,version FROM honeypot.honeypot WHERE id_honeypot=CAST(:sensor AS uuid)'),
                 {'sensor':__import__('os').environ['HONEYPOT_ID']}).mappings().first()
             if not result:
                 raise RuntimeError('HONEYPOT_ID no corresponde a un sensor registrado')
-            print('PostgreSQL disponible; migracion 007 presente; sensor:',result['nombre'])
+            print('PostgreSQL disponible; migraciones de ingesta y observables presentes; sensor:',result['nombre'])
             print('Metadatos del sensor:',result['host'],result['version'])
     finally:
         engine.dispose()

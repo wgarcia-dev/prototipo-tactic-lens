@@ -81,6 +81,10 @@ async def lifespan(app: FastAPI):
         if conn.execute(select(tables["honeypot"].c.id_honeypot).where(tables["honeypot"].c.id_honeypot == app.state.honeypot_id)).scalar_one_or_none() is None:
             raise RuntimeError("HONEYPOT_ID no existe")
     app.state.engine, app.state.tables = engine, tables
+    from .monitoring import SnapshotCache
+    app.state.dashboard_cache = SnapshotCache()
+    from .realtime import MonitorHub
+    app.state.monitor_hub = MonitorHub()
     yield
     engine.dispose()
 
@@ -103,7 +107,13 @@ def ingest(batch: Batch, x_api_key: str | None = Header(default=None)):
 
 def persist_events(events, *, partial=False):
     from .ingestion import persist
-    return persist(app.state.engine, app.state.tables, app.state.honeypot_id, events, partial=partial)
+    received_at = datetime.now(timezone.utc).isoformat()
+    result = persist(app.state.engine, app.state.tables, app.state.honeypot_id, events, partial=partial)
+    if result['insertados'] and getattr(app.state, 'dashboard_cache', None):
+        app.state.dashboard_cache.invalidate()
+    if result['insertados'] and getattr(app.state, 'monitor_hub', None):
+        app.state.monitor_hub.publish(result, received_at)
+    return result
 
 
 @app.get("/api/sesiones")
@@ -148,6 +158,8 @@ app.include_router(administration_router)
 from .auth.support import router as support_router
 app.include_router(support_router)
 app.add_middleware(AuthMiddleware)
+from .realtime import monitor_socket
+app.add_api_websocket_route('/api/monitor/ws', monitor_socket)
 
 
 @app.exception_handler(RequestValidationError)

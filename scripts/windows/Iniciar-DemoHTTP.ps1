@@ -11,7 +11,7 @@ $hop = $route | Where-Object DestinationPrefix | Select-Object -First 1
 if (-not $source -or $hop.NextHop -ne '0.0.0.0') { throw 'Ubuntu debe estar en la red local directa; revise la IP y la conexion Wi-Fi/hotspot.' }
 $localIP = $source.IPAddress
 $interfaceIndex = $source.InterfaceIndex
-& $python -c 'from dotenv import load_dotenv; import os; load_dotenv(); assert os.getenv("AUTH_ENV")=="development", "Demo HTTP prohibida en produccion"'
+& $python -m scripts.demo_prepare --check-environment
 if ($LASTEXITCODE -ne 0) { throw 'Esta modalidad requiere AUTH_ENV=development' }
 & $python -m scripts.demo_status --database
 if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL o esquema no disponibles' }
@@ -33,7 +33,7 @@ $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 if ($LASTEXITCODE -ne 0) { throw 'No se pudieron proteger los secretos locales' }
 $keyPath = Join-Path $private 'ingest.key'
 if (-not (Test-Path -LiteralPath $keyPath)) {
-    & $python -c 'import secrets,sys; from pathlib import Path; p=Path(sys.argv[1]); p.write_text(secrets.token_urlsafe(32),encoding="ascii")' $keyPath
+    & $python -m scripts.demo_prepare --create-key $keyPath
     if ($LASTEXITCODE -ne 0) { throw 'No se pudo crear la clave exclusiva' }
 }
 & icacls.exe $keyPath /inheritance:r /grant:r "*${sid}:F" '*S-1-5-18:F' '*S-1-5-32-544:F' | Out-Null

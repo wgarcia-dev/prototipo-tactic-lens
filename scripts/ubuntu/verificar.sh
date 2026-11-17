@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 systemctl is-active cowrie-tacticlens.service
-systemctl is-active tacticlens-exportador.timer
+if [[ $(systemctl show tacticlens-exportador.service -p Type --value) == simple ]]; then
+    systemctl is-active tacticlens-exportador.service
+    if systemctl is-active --quiet tacticlens-exportador.timer; then
+        echo 'El modo inotify requiere el timer desactivado; revise antes de continuar'; exit 1
+    fi
+else
+    systemctl is-active tacticlens-exportador.timer
+fi
 ss -lnt | grep -E ':2222[[:space:]]' >/dev/null || { echo 'Cowrie no escucha en 2222'; exit 1; }
 sudo python3 - <<'PY'
 import json,sys,urllib.request

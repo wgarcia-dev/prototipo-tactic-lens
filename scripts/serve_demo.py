@@ -53,7 +53,8 @@ def main():
     os.environ['INGEST_API_KEY'] = key
     with bound_listeners(args.local_ip) as listeners:
         # Do not trust X-Forwarded-For from the LAN client.
-        server = uvicorn.Server(uvicorn.Config('backend.api:app', proxy_headers=False, access_log=False))
+        server = uvicorn.Server(uvicorn.Config('backend.api:app', proxy_headers=False, access_log=False,
+            ws_max_size=1024, ws_max_queue=4, ws_ping_interval=20, ws_ping_timeout=20))
         server.run(sockets=listeners)
 
 

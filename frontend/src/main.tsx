@@ -11,13 +11,15 @@ import {SecurityPage, SessionControls} from './auth/SecurityPage'
 import {AdminUsers} from './auth/AdminUsers'
 import {AdminOnly} from './auth/AdminOnly'
 import {AnalysisNarrative, hasDetailedReport, type AnalysisPayload} from './analysis/AnalysisNarrative'
+import {useMonitorQuery as usePolling, RealtimeProvider, useRealtime} from './monitoring/Realtime'
+import {sameSnapshot} from './monitoring/polling'
 
 type Session = {id_sesion:string,cowrie_session_id:string,ip_origen:string|null,fecha_inicio:string,fecha_fin:string|null,protocolo?:string,eventos?:number,estado_analisis?:'pendiente'|'en_proceso'|'analizada'|'error',analisis_desactualizado?:boolean,analisis?:{id_analisis:string,estado:string}|null,ultimo_intento?:{id_analisis:string,estado:string,mensaje_error:string|null}|null}
 type Event = {id_evento:number,tipo_evento:string,fecha_hora:string,datos_originales:Record<string,unknown>}
-type Dashboard = {sesiones:number,eventos:number,sesiones_analizadas:number,iocs:number,tecnicas_mitre:number,actividad:{dia:string,total:number}[],tipos_evento:{tipo_evento:string,total:number}[],ultimo_evento:string|null,collector_last_seen:string|null}
+type RecentCommand = {id_evento:number,id_sesion:string,fecha_hora:string,comando:string}
+type Dashboard = {ultimos_comandos:RecentCommand[],sesiones:number,eventos:number,sesiones_analizadas:number,iocs:number,tecnicas_mitre:number,actividad:{dia:string,total:number}[],tipos_evento:{tipo_evento:string,total:number}[],ultimo_evento:string|null,collector_last_seen:string|null}
 type Analysis = {id_analisis:string,estado:string,resumen:string|null,mensaje_error:string|null,resultado_estructurado?:AnalysisPayload,acciones:{id_accion:string,tipo_accion:string,descripcion:string,confianza:number,eventos:number[],mitre:{codigo_tecnica:string,tecnica:string,tactica:string,justificacion:string,confianza:number}[]}[]}
 
-function usePolling(refresh:()=>void,delay=5000){const callback=useRef(refresh);callback.current=refresh;useEffect(()=>{callback.current();const timer=window.setInterval(()=>callback.current(),delay);return()=>window.clearInterval(timer)},[delay])}
 const date=(v?:string|null)=>v?new Date(v).toLocaleString('es-EC',{dateStyle:'short',timeStyle:'short'}):'—'
 const badge=(status?:string|null)=><span className={'badge '+(['fallido','error'].includes(status||'')?'error':['pendiente','en_proceso'].includes(status||'')?'warn':'')}>{status==='analizada'||status==='completado'?'Analizada':status==='en_proceso'?'En proceso':status==='error'||status==='fallido'?'Error':'Pendiente'}</span>
 const analysisActionLabel=(session:Session)=>session.estado_analisis==='error'?'Reintentar':session.analisis_desactualizado?'Actualizar análisis':'Analizar'
@@ -27,8 +29,25 @@ function Shell({children}:{children:React.ReactNode}){const {session}=useAuth();
 function Header({title,description,action}:{title:string,description:string,action?:React.ReactNode}){return <div className="flex flex-wrap items-start justify-between gap-4 pb-6 border-b line mb-7"><div><h1 className="text-2xl md:text-3xl font-bold tracking-tight">{title}</h1><p className="muted text-sm mt-1">{description}</p></div>{action}</div>}
 function Metric({label,value,sub,color='cyan'}:{label:string,value:number|string,sub:string,color?:string}){return <div className={`panel p-5 border-l-[3px] ${color==='blue'?'border-l-blue-500':color==='purple'?'border-l-violet-400':color==='green'?'border-l-emerald-400':'border-l-cyan-400'}`}><div className="muted text-[11px] tracking-wide uppercase">{label}</div><div className="text-3xl font-bold mt-3">{value}</div><div className="muted text-xs mt-2">{sub}</div></div>}
 function ErrorBox({error}:{error:string}){return <div className="panel p-4 border-red-700 text-red-200">{error}</div>}
-function LiveStatus(){const [seen,setSeen]=useState<string|null>(null);usePolling(()=>{api<{collector_last_seen:string|null}>('/health').then(x=>setSeen(x.collector_last_seen)).catch(()=>setSeen(null))});const active=!!seen&&Date.now()-new Date(seen).getTime()<45000;return <span className={'badge '+(active?'':'warn')}>{active?'RECOLECTOR CONECTADO':'SIN SEÑAL DEL RECOLECTOR'}</span>}
-function DashboardPage(){const [data,setData]=useState<Dashboard|null>(null),[sessions,setSessions]=useState<Session[]>([]),[error,setError]=useState('');usePolling(()=>{api<Dashboard>('/dashboard/resumen').then(setData).catch(e=>setError(e.message));api<Session[]>('/sesiones?limit=5').then(setSessions).catch(e=>setError(e.message))});return <><Header title="Panel principal" description="Resumen de sesiones, eventos y resultados del análisis del honeypot" action={<span className="badge">PROTOTIPO · DATOS REALES</span>}/>{error&&<ErrorBox error={error}/>}<div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-4 mb-5"><Metric label="Sesiones registradas" value={data?.sesiones??'—'} sub="Sesiones almacenadas"/><Metric label="Eventos recibidos" value={data?.eventos??'—'} sub="Vinculados a sesiones" color="blue"/><Metric label="Sesiones analizadas" value={data?.sesiones_analizadas??'—'} sub="Análisis completados" color="green"/><Metric label="IoCs identificados" value={data?.iocs??'—'} sub="Con evidencia" color="purple"/><Metric label="Técnicas MITRE" value={data?.tecnicas_mitre??'—'} sub="Asociaciones registradas" color="green"/></div><div className="grid lg:grid-cols-[1.7fr_1fr] gap-5 mb-5"><section className="panel p-5"><h2 className="font-semibold">Actividad de eventos</h2><p className="muted text-xs mt-1">Cantidad de eventos registrados por día</p><div className="h-60 mt-5">{data?.actividad.length?<ResponsiveContainer width="100%" height="100%"><BarChart data={data.actividad}><CartesianGrid stroke="#20344d" vertical={false}/><XAxis dataKey="dia" tick={{fill:'#8ea3bb',fontSize:11}}/><YAxis tick={{fill:'#8ea3bb',fontSize:11}}/><Tooltip contentStyle={{background:'#16273f',border:'1px solid #27415c',color:'#fff'}}/><Bar dataKey="total" fill="#4180aa" radius={[4,4,0,0]}/></BarChart></ResponsiveContainer>:<div className="muted text-sm pt-20 text-center">Sin eventos todavía</div>}</div></section><section className="panel p-5"><h2 className="font-semibold">Eventos por tipo</h2><p className="muted text-xs mt-1">Distribución observada en PostgreSQL</p><div className="mt-6 space-y-4">{data?.tipos_evento.map(x=><div key={x.tipo_evento}><div className="flex justify-between text-xs mb-2 gap-3"><span className="truncate">{x.tipo_evento}</span><span className="accent">{x.total}</span></div><div className="h-2 rounded-full bg-[#24384f]"><div className="h-2 rounded-full bg-[#42caca]" style={{width:`${Math.max(4,(x.total/(data.tipos_evento[0]?.total||1))*100)}%`}}/></div></div>)}</div></section></div><section className="panel p-5"><div className="flex justify-between items-start mb-4"><div><h2 className="font-semibold">Sesiones recientes</h2><p className="muted text-xs mt-1">Accesos capturados por Cowrie</p></div><Link className="btn text-xs" to="/sesiones">Ver todas</Link></div><SessionTable sessions={sessions}/></section></>}
+function LiveStatus(){const [seen,setSeen]=useState<string|null>(null);usePolling(async signal=>{try{const x=await api<{collector_last_seen:string|null}>('/health',{signal});if(!signal.aborted)setSeen(x.collector_last_seen)}catch(e){if(!signal.aborted)setSeen(null);throw e}},5000);const active=!!seen&&Date.now()-new Date(seen).getTime()<15000;return <span className={'badge '+(active?'':'warn')}>{active?'RECOLECTOR CONECTADO':'SIN SEÑAL DEL RECOLECTOR'}</span>}
+function DashboardPage(){
+  const realtime=useRealtime()
+  const [data,setData]=useState<Dashboard|null>(null),[sessions,setSessions]=useState<Session[]>([]),[error,setError]=useState('')
+  usePolling(async signal=>{
+    try {
+      const results=await Promise.allSettled([api<Dashboard>('/dashboard/resumen',{signal}),api<Session[]>('/sesiones?limit=5',{signal})])
+      if(signal.aborted)return
+      const [summary,recent]=results
+      if(summary.status==='rejected')throw summary.reason
+      if(recent.status==='rejected')throw recent.reason
+      setData(previous=>sameSnapshot(previous,{...summary.value,
+        actividad:sameSnapshot(previous?.actividad??[],summary.value.actividad),
+        tipos_evento:sameSnapshot(previous?.tipos_evento??[],summary.value.tipos_evento),
+        ultimos_comandos:sameSnapshot(previous?.ultimos_comandos??[],summary.value.ultimos_comandos)}))
+      setSessions(previous=>sameSnapshot(previous,recent.value));setError('')
+    }catch(e){if(!signal.aborted)setError((e as Error).message);throw e}
+  })
+  return <><Header title="Panel principal" description="Resumen de sesiones, eventos y resultados del análisis del honeypot" action={<span className={"badge "+(realtime.connected?"":"warn")}>{realtime.connected?"EN VIVO · WEBSOCKET":"RECONECTANDO · RESPALDO HTTP"}</span>}/>{error&&<ErrorBox error={error}/>}<div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-4 mb-5"><Metric label="Sesiones registradas" value={data?.sesiones??'—'} sub="Sesiones almacenadas"/><Metric label="Eventos recibidos" value={data?.eventos??'—'} sub="Vinculados a sesiones" color="blue"/><Metric label="Sesiones analizadas" value={data?.sesiones_analizadas??'—'} sub="Análisis completados" color="green"/><Metric label="IoCs identificados" value={data?.iocs??'—'} sub="Con evidencia" color="purple"/><Metric label="Técnicas MITRE" value={data?.tecnicas_mitre??'—'} sub="Asociaciones registradas" color="green"/></div><div className="grid lg:grid-cols-[1.7fr_1fr] gap-5 mb-5"><section className="panel p-5"><h2 className="font-semibold">Actividad de eventos</h2><p className="muted text-xs mt-1">Cantidad de eventos registrados por día</p><div className="h-60 mt-5">{data?.actividad.length?<ResponsiveContainer width="100%" height="100%"><BarChart data={data.actividad}><CartesianGrid stroke="#20344d" vertical={false}/><XAxis dataKey="dia" tick={{fill:'#8ea3bb',fontSize:11}}/><YAxis tick={{fill:'#8ea3bb',fontSize:11}}/><Tooltip contentStyle={{background:'#16273f',border:'1px solid #27415c',color:'#fff'}}/><Bar isAnimationActive={false} dataKey="total" fill="#4180aa" radius={[4,4,0,0]}/></BarChart></ResponsiveContainer>:<div className="muted text-sm pt-20 text-center">Sin eventos todavía</div>}</div></section><section className="panel p-5"><h2 className="font-semibold">Eventos por tipo</h2><p className="muted text-xs mt-1">Distribución observada en PostgreSQL</p><div className="mt-6 space-y-4">{data?.tipos_evento.map(x=><div key={x.tipo_evento}><div className="flex justify-between text-xs mb-2 gap-3"><span className="truncate">{x.tipo_evento}</span><span className="accent">{x.total}</span></div><div className="h-2 rounded-full bg-[#24384f]"><div className="h-2 rounded-full bg-[#42caca]" style={{width:`${Math.max(4,(x.total/(data.tipos_evento[0]?.total||1))*100)}%`}}/></div></div>)}</div></section></div><section className="panel p-5"><div className="flex justify-between items-start mb-4"><div><h2 className="font-semibold">Sesiones recientes</h2><p className="muted text-xs mt-1">Accesos capturados por Cowrie</p></div><Link className="btn text-xs" to="/sesiones">Ver todas</Link></div><SessionTable sessions={sessions}/></section><section className="panel p-5 mt-5" aria-label="Comandos recientes"><h2 className="font-semibold">Últimos comandos observados</h2><p className="muted text-xs mt-1">Actualizaciones por WebSocket · el análisis LLM se ejecuta manualmente</p><ul className="mt-4 space-y-3" aria-live="polite">{data?.ultimos_comandos?.map(command=><li key={command.id_evento} data-evento={command.id_evento} ref={node=>{if(node&&!node.dataset.renderizadoEn){node.dataset.renderizadoEn=new Date().toISOString();if(realtime.notice?.eventos?.includes(command.id_evento)){node.dataset.recibidoApi=realtime.notice.recibido_api;node.dataset.confirmadoApi=realtime.notice.confirmado_api}}}} className="bg-[#0c1728] rounded p-3"><code className="block text-sm break-all whitespace-pre-wrap">{command.comando}</code><div className="flex flex-wrap gap-3 mt-2 text-xs muted"><span>{date(command.fecha_hora)}</span><Link className="accent" to={'/sesiones/'+command.id_sesion}>Ver sesión</Link><span>#{command.id_evento}</span></div></li>)}</ul>{!data?.ultimos_comandos?.length&&<p className="muted text-sm mt-4">Sin comandos registrados todavía.</p>}</section></>}
 function SessionTable({sessions,onAnalyze,busyId}:{sessions:Session[],onAnalyze?:(session:Session)=>void,busyId?:string|null}){
   return <div className="overflow-x-auto"><table className="w-full text-sm">
     <thead className="bg-[#1b3049] text-[#a9bdd2] text-left text-xs"><tr><th className="p-3">Sesión</th><th className="p-3">IP de origen</th><th className="p-3">Inicio</th><th className="p-3">Protocolo</th><th className="p-3">Eventos</th><th className="p-3">Análisis</th>{onAnalyze&&<th className="p-3">Acción</th>}</tr></thead>
@@ -37,30 +56,24 @@ function SessionTable({sessions,onAnalyze,busyId}:{sessions:Session[],onAnalyze?
 }
 const PAGE_SIZE = 15
 
-function usePagedData<T>(path:string,page:number,pageSize=PAGE_SIZE){
-  const [rows,setRows]=useState<T[]>([])
-  const [hasNext,setHasNext]=useState(false)
-  const [loading,setLoading]=useState(true)
-  const [error,setError]=useState('')
-  useEffect(()=>{
-    let active=true
+function usePagedData<T>(path:string,page:number,pageSize=PAGE_SIZE,interval=5000,revision?:number){
+  const [rows,setRows]=useState<T[]>([]),[hasNext,setHasNext]=useState(false)
+  const [loading,setLoading]=useState(true),[error,setError]=useState('')
+  const loaded=useRef<{url:string,revision:number|undefined}|null>(null)
+  useEffect(()=>{setLoading(true);setError('')},[path,page,pageSize])
+  usePolling(async signal=>{
     const separator=path.includes('?')?'&':'?'
     const url=path+separator+'limit='+(pageSize+1)+'&offset='+(page*pageSize)
-    async function load(){
-      try{
-        const result=await api<T[]>(url)
-        if(!active)return
-        setRows(result.slice(0,pageSize))
-        setHasNext(result.length>pageSize)
-        setError('')
-      }catch(e){if(active)setError((e as Error).message)}
-      finally{if(active)setLoading(false)}
-    }
-    setLoading(true)
-    load()
-    const timer=window.setInterval(load,5000)
-    return()=>{active=false;window.clearInterval(timer)}
-  },[path,page,pageSize])
+    if(revision===-1||(revision!==undefined&&loaded.current?.url===url&&loaded.current.revision===revision))return
+    try{
+      const result=await api<T[]>(url,{signal})
+      if(signal.aborted)return
+      setRows(previous=>sameSnapshot(previous,result.slice(0,pageSize)))
+      loaded.current={url,revision}
+      setHasNext(result.length>pageSize);setError('')
+    }catch(e){if(!signal.aborted)setError((e as Error).message);throw e}
+    finally{if(!signal.aborted)setLoading(false)}
+  },interval,[path,page,pageSize,revision])
   return {rows,hasNext,loading,error}
 }
 
@@ -78,9 +91,11 @@ function SessionsPage(){
   const navigate=useNavigate()
   const [page,setPage]=useState(0)
   const [query,setQuery]=useState('')
+  const [filter,setFilter]=useState('')
+  useEffect(()=>{const timeout=window.setTimeout(()=>setFilter(query.trim()),250);return()=>window.clearTimeout(timeout)},[query])
   const [busyId,setBusyId]=useState<string|null>(null)
   const [actionError,setActionError]=useState('')
-  const {rows:sessions,hasNext,loading,error}=usePagedData<Session>('/sesiones?q='+encodeURIComponent(query.trim()),page)
+  const {rows:sessions,hasNext,loading,error}=usePagedData<Session>('/sesiones?q='+encodeURIComponent(filter),page,PAGE_SIZE,1000)
   async function analyze(session:Session){
     setBusyId(session.id_sesion);setActionError('')
     try{
@@ -110,24 +125,25 @@ function SessionDetail(){
   const [error,setError]=useState('')
   const [busy,setBusy]=useState(false)
   const [page,setPage]=useState(0)
-  const {rows:events,hasNext,loading,error:eventError}=usePagedData<Event>('/sesiones/'+id+'/eventos',page,20)
+  const {rows:events,hasNext,loading,error:eventError}=usePagedData<Event>('/sesiones/'+id+'/eventos',page,20,1000,session?.eventos??-1)
   useEffect(()=>setPage(0),[id])
-  useEffect(()=>{
+  const loadedAnalysis=useRef<string|null>(null)
+  useEffect(()=>{loadedAnalysis.current=null;setSession(null);setAnalysis(null)},[id])
+  usePolling(async signal=>{
     if(!id)return
-    let active=true
-    async function load(){
-      try{
-        const current=await api<Session>('/sesiones/'+id)
-        if(!active)return
-        setSession(current)
-        setAnalysis(current.analisis?await api<Analysis>('/analisis/'+current.analisis.id_analisis):null)
-        setError('')
-      }catch(e){if(active)setError((e as Error).message)}
-    }
-    load()
-    const timer=window.setInterval(load,5000)
-    return()=>{active=false;window.clearInterval(timer)}
-  },[id])
+    try{
+      const current=await api<Session>('/sesiones/'+id,{signal})
+      if(signal.aborted)return
+      setSession(previous=>sameSnapshot(previous,current))
+      const key=current.analisis?.id_analisis??null
+      if(key!==loadedAnalysis.current){
+        const detail=key?await api<Analysis>('/analisis/'+key,{signal}):null
+        if(signal.aborted)return
+        setAnalysis(previous=>sameSnapshot(previous,detail));loadedAnalysis.current=key
+      }
+      setError('')
+    }catch(e){if(!signal.aborted)setError((e as Error).message);throw e}
+  },1000,[id])
   async function analyze(){
     setBusy(true);setError('')
     try{
@@ -153,29 +169,34 @@ function SessionDetail(){
 }
 function AnalysisPage(){
   const [page,setPage]=useState(0)
-  const {rows:sessions,hasNext,loading,error:listError}=usePagedData<Session>('/sesiones',page,10)
+  const {rows:sessions,hasNext,loading,error:listError}=usePagedData<Session>('/sesiones',page,10,1000)
   const [selected,setSelected]=useState<Session|null>(null)
   const [analysis,setAnalysis]=useState<Analysis|null>(null)
   const [events,setEvents]=useState<Event[]>([])
   const [busy,setBusy]=useState(false)
   const [error,setError]=useState('')
   useEffect(()=>{setSelected(previous=>sessions.find(s=>s.id_sesion===previous?.id_sesion)||sessions[0]||null)},[sessions])
-  useEffect(()=>{
+  const loaded=useRef<{id:string,events:number,analysis:string|null}|null>(null)
+  useEffect(()=>{loaded.current=null;setEvents([]);setAnalysis(null)},[selected?.id_sesion])
+  usePolling(async signal=>{
     if(!selected)return
-    let active=true
-    setEvents([]);setAnalysis(null)
-    async function load(){
-      try{
-        const current=await api<Session>('/sesiones/'+selected!.id_sesion)
-        const latest=current.analisis?await api<Analysis>('/analisis/'+current.analisis.id_analisis):null
-        const recent=await api<Event[]>('/sesiones/'+selected!.id_sesion+'/eventos?limit=500&offset='+Math.max(0,(current.eventos??0)-500))
-        if(active){setAnalysis(latest);setEvents(recent);setError('')}
-      }catch(e){if(active)setError((e as Error).message)}
-    }
-    load()
-    const timer=window.setInterval(load,5000)
-    return()=>{active=false;window.clearInterval(timer)}
-  },[selected?.id_sesion])
+    try{
+      const current=await api<Session>('/sesiones/'+selected.id_sesion,{signal})
+      if(signal.aborted)return
+      const key=current.analisis?.id_analisis??null
+      if(!loaded.current||loaded.current.analysis!==key){
+        const detail=key?await api<Analysis>('/analisis/'+key,{signal}):null
+        if(signal.aborted)return
+        setAnalysis(previous=>sameSnapshot(previous,detail))
+      }
+      if(!loaded.current||loaded.current.events!==current.eventos){
+        const recent=await api<Event[]>('/sesiones/'+selected.id_sesion+'/eventos?limit=500&offset='+Math.max(0,(current.eventos??0)-500),{signal})
+        if(signal.aborted)return
+        setEvents(previous=>sameSnapshot(previous,recent))
+      }
+      loaded.current={id:current.id_sesion,events:current.eventos??0,analysis:key};setError('')
+    }catch(e){if(!signal.aborted)setError((e as Error).message);throw e}
+  },1000,[selected?.id_sesion])
   async function analyze(){
     if(!selected)return
     setBusy(true);setError('')
@@ -252,5 +273,5 @@ function ListingPage({kind}:{kind:'iocs'|'mitre'}){
     </div>
   </>
 }
-function App(){return <BrowserRouter><AuthProvider><AuthBoundary><Shell><Routes><Route path="/" element={<DashboardPage/>}/><Route path="/sesiones" element={<SessionsPage/>}/><Route path="/sesiones/:id" element={<SessionDetail/>}/><Route path="/analisis" element={<AnalysisPage/>}/><Route path="/iocs" element={<ListingPage kind="iocs"/>}/><Route path="/mitre" element={<ListingPage kind="mitre"/>}/><Route path="/importar" element={<AdminOnly><ImportPage/></AdminOnly>}/><Route path="/seguridad" element={<SecurityPage/>}/><Route path="/usuarios" element={<AdminUsers/>}/><Route path="*" element={<ErrorBox error="La página solicitada no existe."/>}/></Routes></Shell></AuthBoundary></AuthProvider></BrowserRouter>}
+function App(){return <BrowserRouter><AuthProvider><AuthBoundary><RealtimeProvider><Shell><Routes><Route path="/" element={<DashboardPage/>}/><Route path="/sesiones" element={<SessionsPage/>}/><Route path="/sesiones/:id" element={<SessionDetail/>}/><Route path="/analisis" element={<AnalysisPage/>}/><Route path="/iocs" element={<ListingPage kind="iocs"/>}/><Route path="/mitre" element={<ListingPage kind="mitre"/>}/><Route path="/importar" element={<AdminOnly><ImportPage/></AdminOnly>}/><Route path="/seguridad" element={<SecurityPage/>}/><Route path="/usuarios" element={<AdminUsers/>}/><Route path="*" element={<ErrorBox error="La página solicitada no existe."/>}/></Routes></Shell></RealtimeProvider></AuthBoundary></AuthProvider></BrowserRouter>}
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>)

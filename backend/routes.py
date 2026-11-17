@@ -105,15 +105,33 @@ def session_detail(id_sesion: UUID):
     return {**plain(row), **public_state(state)}
 
 
-@app.get("/api/dashboard/resumen", dependencies=[Depends(local_only)])
-def dashboard():
+def dashboard_snapshot():
     s, e, a, i, m = (table(n) for n in ("sesion", "evento", "analisis_llm", "ioc", "mapeo_mitre"))
     with app.state.engine.connect() as conn:
-        counts = {"sesiones": conn.scalar(select(func.count()).select_from(s)), "eventos": conn.scalar(select(func.count()).select_from(e)), "sesiones_analizadas": conn.scalar(select(func.count(func.distinct(a.c.id_sesion))).where(a.c.estado == "completado")), "iocs": conn.scalar(select(func.count()).select_from(i)), "tecnicas_mitre": conn.scalar(select(func.count(func.distinct(m.c.id_vinculo))))}
+        counts = dict(conn.execute(select(
+            select(func.count()).select_from(s).scalar_subquery().label('sesiones'),
+            select(func.count()).select_from(e).scalar_subquery().label('eventos'),
+            select(func.count(func.distinct(a.c.id_sesion))).where(a.c.estado == 'completado').scalar_subquery().label('sesiones_analizadas'),
+            select(func.count()).select_from(i).scalar_subquery().label('iocs'),
+            select(func.count(func.distinct(m.c.id_vinculo))).scalar_subquery().label('tecnicas_mitre'),
+        )).mappings().one())
         by_day = conn.execute(select(func.date(e.c.fecha_hora).label("dia"), func.count().label("total")).group_by(func.date(e.c.fecha_hora)).order_by(func.date(e.c.fecha_hora).desc()).limit(7)).mappings().all()
         by_type = conn.execute(select(e.c.tipo_evento, func.count().label("total")).group_by(e.c.tipo_evento).order_by(func.count().desc()).limit(8)).mappings().all()
         latest_event = conn.scalar(select(func.max(e.c.fecha_hora)))
-    return {**counts, "actividad": [plain(x) for x in reversed(by_day)], "tipos_evento": [plain(x) for x in by_type], "ultimo_evento": latest_event, "collector_last_seen": getattr(app.state, "collector_last_seen", None)}
+        commands = conn.execute(select(e.c.id_evento,e.c.id_sesion,e.c.fecha_hora,e.c.datos_originales)
+            .where(e.c.tipo_evento=='cowrie.command.input')
+            .order_by(e.c.fecha_hora.desc(),e.c.id_evento.desc()).limit(5)).mappings().all()
+    recent_commands=[{'id_evento':row['id_evento'],'id_sesion':str(row['id_sesion']),
+        'fecha_hora':row['fecha_hora'],'comando':str(row['datos_originales'].get('input',''))[:2000]}
+        for row in commands]
+    return {**counts, "actividad": [plain(x) for x in reversed(by_day)], "tipos_evento": [plain(x) for x in by_type], "ultimo_evento": latest_event,
+            'ultimos_comandos':recent_commands}
+
+
+@app.get("/api/dashboard/resumen", dependencies=[Depends(local_only)])
+def dashboard():
+    result = app.state.dashboard_cache.get((app.state.engine, app.state.honeypot_id), dashboard_snapshot)
+    return {**result, 'collector_last_seen': getattr(app.state, 'collector_last_seen', None)}
 
 
 class IocProposal(BaseModel):

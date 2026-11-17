@@ -1,5 +1,7 @@
 # TacticLens
 
+**Monitoreo vigente por eventos:** [inotify, SQLite, HTTP inmediato y WebSocket hacia React](docs/TIEMPO_REAL_WEBSOCKET.md), con prueba física y recuperación tras desconexión. Sustituye el timer de 2 s y el polling de monitoreo de 1 s. Consulte también la [auditoría de MITRE ATT&CK](docs/AUDITORIA_MITRE_ATTCK.md); esa implementación se inspeccionó sin modificar sus reglas.
+
 **Despliegue actual entre laptops físicas:** siga [la demostración Windows + Ubuntu mediante HTTP local y SQLite](docs/DEMO_LAPTOPS.md). El backend existente acepta ingesta únicamente desde Ubuntu en la interfaz seleccionada; React conserva su proxy local. No se utiliza túnel SSH. Las instrucciones de VirtualBox y `192.168.56.*` que aparecen más abajo describen el laboratorio anterior. `collector/collector.py` queda retirado como emisor directo. Consulte los [resultados reales](docs/RESULTADOS_HTTP_LOCAL.md).
 
 La [integración colaborativa del 12 de noviembre](docs/INTEGRACION_COLABORATIVA_2026-11-12.md) documenta los respaldos, conflictos, migraciones conservadas y pruebas de la versión unificada.

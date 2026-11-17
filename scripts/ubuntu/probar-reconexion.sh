@@ -6,10 +6,12 @@ python3 - "$1" <<'PY'
 import json,subprocess,sys
 from pathlib import Path
 snapshot=Path('/var/lib/tacticlens-cowrie/prueba-reconexion.json')
-state=json.loads(subprocess.check_output(['python3','/opt/tacticlens-cowrie/exportar_eventos.py','--status'],text=True))
+reader=Path('/opt/tacticlens-cowrie/event_status.py')
+args=['python3',str(reader)] if reader.exists() else ['python3','/opt/tacticlens-cowrie/exportar_eventos.py','--status']
+state=json.loads(subprocess.check_output(args,text=True))
 if sys.argv[1]=='antes':
     if state.get('pendientes',0)<1:
-        raise SystemExit('Genere eventos con el backend detenido y espere al timer: debe haber pendientes antes de medir')
+        raise SystemExit('Genere eventos con el backend detenido y espere a su captura: debe haber pendientes antes de medir')
     snapshot.write_text(json.dumps(state));print('Muestra de pendientes guardada. Inicie de nuevo el backend y espere la sincronizacion HTTP.')
 else:
     before=json.loads(snapshot.read_text())

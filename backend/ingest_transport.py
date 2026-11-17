@@ -33,6 +33,15 @@ class IngestTransportMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
+        if scope['type'] == 'websocket':
+            peer = (scope.get('client') or ('', 0))[0]
+            try:
+                local = ipaddress.ip_address(peer).is_loopback
+            except ValueError:
+                local = False
+            if (os.getenv('INGEST_TRANSPORT') == 'demo-http' and not local) or (not local and scope.get('scheme') != 'wss'):
+                return await send({'type': 'websocket.close', 'code': 1008})
+            return await self.app(scope, receive, send)
         if scope['type'] != 'http':
             return await self.app(scope, receive, send)
         peer = (scope.get('client') or ('', 0))[0]

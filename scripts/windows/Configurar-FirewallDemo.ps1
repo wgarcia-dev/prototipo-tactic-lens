@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory=$true)][string]$LocalIP,
     [Parameter(Mandatory=$true)][string]$UbuntuIP,
     [Parameter(Mandatory=$true)][int]$InterfaceIndex,
@@ -34,16 +34,22 @@ if (Test-FirewallDemo -LocalIP $LocalIP -UbuntuIP $UbuntuIP -InterfaceIndex $Int
 $address = Get-NetIPAddress -InterfaceIndex $InterfaceIndex -AddressFamily IPv4 | Where-Object IPAddress -EQ $LocalIP
 if (-not $address -or $LocalIP -eq $UbuntuIP) { throw 'La IP local no pertenece a la interfaz seleccionada' }
 $interface = (Get-NetAdapter -InterfaceIndex $InterfaceIndex).Name
-$connection = Get-NetConnectionProfile -InterfaceIndex $InterfaceIndex
-$profile = switch ([int]$connection.NetworkCategory) { 0 { 'Public' } 1 { 'Private' } 2 { 'Domain' } default { throw 'Perfil de red no reconocido' } }
-$current = Get-NetFirewallProfile -Name $profile
-if (-not (Test-Path -LiteralPath (Join-Path $root '.local/demo-http/firewall-previo.json'))) {
-    $current | Select-Object Name,Enabled,DefaultInboundAction | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root '.local/demo-http/firewall-previo.json') -Encoding UTF8
+$connection = Get-NetConnectionProfile -InterfaceIndex $InterfaceIndex -ErrorAction SilentlyContinue
+if (-not $connection) {
+    if (-not (Test-AllInboundProfilesProtected)) {
+        throw 'Interfaz sin perfil: todos los perfiles efectivos deben estar activos y bloquear la entrada por defecto.'
+    }
+} else {
+    $profile = switch ([int]$connection.NetworkCategory) { 0 { 'Public' } 1 { 'Private' } 2 { 'Domain' } default { throw 'Perfil de red no reconocido' } }
+    $current = Get-NetFirewallProfile -Name $profile
+    if (-not (Test-Path -LiteralPath (Join-Path $root '.local/demo-http/firewall-previo.json'))) {
+        $current | Select-Object Name,Enabled,DefaultInboundAction | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root '.local/demo-http/firewall-previo.json') -Encoding UTF8
+    }
+    # The host may have its firewall disabled. An allow rule alone would not restrict
+    # access. Enable only the profile in use by this interface, preserving others.
+    Set-NetFirewallProfile -Name $profile -Enabled True -DefaultInboundAction Block
+    Write-Host "Firewall del perfil $profile activo con entrada bloqueada por defecto."
 }
-# The host may have its firewall disabled. An allow rule alone would not restrict
-# access. Enable only the profile in use by this interface, preserving others.
-Set-NetFirewallProfile -Name $profile -Enabled True -DefaultInboundAction Block
-Write-Host "Firewall del perfil $profile activo con entrada bloqueada por defecto."
 # Replace only our own rule when the hotspot changes; never widen old rules.
 Get-NetFirewallRule -Name $name -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 New-NetFirewallRule -Name $name -DisplayName 'TacticLens: HTTP demo solo Ubuntu' -Direction Inbound -Action Allow `

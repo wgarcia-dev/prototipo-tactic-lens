@@ -6,3 +6,11 @@
 input:focus-visible,button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid #43d7d4;outline-offset:2px}
 @media(max-width:640px){.pager{align-items:stretch}.pager>div{width:100%}.pager button{flex:1}}
 .badge.contextual{background:#1b3049;color:#b6c9dc}
+
+.workspace-columns { align-items: start; }
+.workspace-columns > * { min-width: 0; overflow-wrap: anywhere; }
+@media (min-width: 64rem) and (min-height: 36rem) {
+  .timeline-events { max-height: 62vh; overflow-y: auto; scrollbar-gutter: stable; padding-right: .75rem; }
+  .workspace-columns:has(button[aria-pressed]) > section:first-child { position: sticky; top: 1rem; }
+  .workspace-columns:has(button[aria-pressed]) > section:first-child ul { max-height: 50vh; overflow-y: auto; scrollbar-gutter: stable; }
+}

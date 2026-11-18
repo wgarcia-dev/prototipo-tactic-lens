@@ -24,15 +24,12 @@ export function AuthBoundary({ children }: { children: ReactNode }) {
   if(location.pathname==="/ayuda") return <SupportPage/>;
   if (auth.loading)
     return (
-      <AuthFrame
-        step="CONEXIÓN SEGURA"
-        title="Preparando su acceso"
-        description="Comprobando la sesión con TacticLens…"
-      >
-        <div className="auth-loading" role="status">
-          Espere un momento.
+      <main className="min-h-screen grid place-items-center bg-[#0b1524] text-[#dce8f5]" aria-busy="true">
+        <div role="status" className="flex items-center gap-3 p-6">
+          <span aria-hidden="true" className="h-5 w-5 rounded-full border-2 border-[#27415c] border-t-[#43d7d4] motion-safe:animate-spin"/>
+          <p className="text-sm">Cargando TacticLens…</p>
         </div>
-      </AuthFrame>
+      </main>
     );
   if (auth.error)
     return (

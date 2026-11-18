@@ -273,6 +273,15 @@ Para actualizar el catálogo ATT&CK y procesar los eventos históricos después 
 
 **Observables de Cowrie** muestra valores únicos con su cantidad de eventos y revisión humana. **MITRE ATT&CK** presenta propuestas del análisis vinculadas a evidencia y permite revisarlas. Una IP o URL observada no demuestra por sí sola compromiso; una autenticación en Cowrie no demuestra acceso a un servidor real. Consulte [la guía de inteligencia](docs/INTELIGENCIA.md) para el alcance, las decisiones de revisión y los límites.
 
+## Exportar un informe de sesión
+
+Abra **Sesiones y eventos**, elija una sesión y pulse **Ver informe**. La vista incluye
+alcance, cronología UTC, análisis disponible, observables y mapeos revisables.
+Use **Descargar PDF** para compartir una copia fija o **Descargar Word** para editarla.
+La descarga consulta los registros actuales y no llama a DeepSeek. Las referencias se
+conservan como IDs de eventos. El reporte omite el JSON original y los campos de
+credenciales. Cada exportación indica los límites de filas cuando corresponde.
+
 ## 7. Prueba del flujo completo
 
 1. Inicie PostgreSQL, FastAPI y React como arriba. Inicie sesión con correo verificado, autorización y Google Authenticator; use Administrador para importar archivos manualmente.

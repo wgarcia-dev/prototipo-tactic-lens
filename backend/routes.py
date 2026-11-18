@@ -11,6 +11,7 @@ from typing import Literal
 
 import httpx
 from fastapi import Depends, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy import case, func, select, text
 from sqlalchemy.dialects.postgresql import insert
@@ -23,6 +24,7 @@ from .analysis_report import (BehaviorReport, REPORT_VERSION, analysis_instructi
                               needs_report_upgrade, observation_context, validate_report_evidence)
 from .intelligence import extract_observables, normalized_value, observables, persist_observables
 from .auth.store import require_admin, audit
+from .session_report import report_snapshot
 from .rag.retrieval import context as retrieve_context
 from .rag.validation import validate as validate_mitre
 from .rag.pipeline import METHOD, RAG_INSTRUCTION, evidence_sample, facts_for_model
@@ -132,6 +134,20 @@ def dashboard_snapshot():
         for row in commands]
     return {**counts, "actividad": [plain(x) for x in reversed(by_day)], "tipos_evento": [plain(x) for x in by_type], "ultimo_evento": latest_event,
             'ultimos_comandos':recent_commands}
+
+
+@app.get("/api/sesiones/{id_sesion}/informe", dependencies=[Depends(local_only)])
+def session_report(id_sesion: UUID, formato: Literal["json", "pdf", "docx"] = "json"):
+    with app.state.engine.connect().execution_options(isolation_level="REPEATABLE READ") as conn:
+        report = report_snapshot(conn, app.state.tables, app.state.honeypot_id, id_sesion)
+    if formato == "json":
+        return report
+    from .report_export import PDF_TYPE, WORD_TYPE, render_docx, render_pdf
+
+    content, media_type = (render_pdf(report), PDF_TYPE) if formato == "pdf" else (render_docx(report), WORD_TYPE)
+    return Response(content, media_type=media_type, headers={
+        "Content-Disposition": f'attachment; filename="TacticLens-{id_sesion}.{formato}"',
+    })
 
 
 @app.get("/api/dashboard/resumen", dependencies=[Depends(local_only)])

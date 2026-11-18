@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useState,
+  useRef,
   type ReactNode,
 } from "react";
 import { api, ApiError, mutate } from "./client";
@@ -43,11 +44,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [recoveryCodes, showRecoveryCodes] = useState<string[]>([]);
+  const refreshVersion = useRef(0);
   const refresh = useCallback(async () => {
+    const version = ++refreshVersion.current;
     try {
-      setSession(await api<AuthSession>("/auth/me"));
+      const next = await api<AuthSession>("/auth/me");
+      if (version !== refreshVersion.current) return;
+      setSession(next);
       setError("");
     } catch (e) {
+      if (version !== refreshVersion.current) return;
       if (e instanceof ApiError && e.status === 401) {
         setSession(null);
         setError("");
@@ -56,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           "No se pudo conectar con TacticLens. Compruebe que el backend esté iniciado.",
         );
     } finally {
-      setLoading(false);
+      if (version === refreshVersion.current) setLoading(false);
     }
   }, []);
   useEffect(() => {

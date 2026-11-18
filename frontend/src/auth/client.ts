@@ -32,10 +32,10 @@ async function csrf(): Promise<string> {
   return csrfRequest;
 }
 
-export async function api<T>(
+async function apiResponse(
   path: string,
   options: RequestInit = {},
-): Promise<T> {
+): Promise<Response> {
   const method = (options.method || "GET").toUpperCase();
   const headers = new Headers(options.headers);
   if (!["GET", "HEAD", "OPTIONS"].includes(method))
@@ -65,7 +65,16 @@ export async function api<T>(
       csrfRequest = null;
     throw new ApiError(response.status, message);
   }
+  return response;
+}
+
+export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const response = await apiResponse(path, options);
   return response.status === 204 ? undefined as T : response.json();
+}
+
+export async function apiBlob(path: string): Promise<Blob> {
+  return (await apiResponse(path)).blob();
 }
 
 export function mutate<T>(

@@ -1,5 +1,6 @@
 """Durable delivery using disposable SQLite queues and a mocked transport."""
 import json
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory
@@ -12,7 +13,7 @@ class SQLiteSenderTests(unittest.TestCase):
     def setUp(self):
         self.temp=TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.path=Path(self.temp.name)/'cola.sqlite3'
-        with sqlite3.connect(self.path) as conn:
+        with closing(sqlite3.connect(self.path)) as conn, conn:
             conn.execute('CREATE TABLE registros(id INTEGER PRIMARY KEY AUTOINCREMENT,payload TEXT NOT NULL,enviado INTEGER DEFAULT 0)')
             raw=json.dumps({'eventid':'cowrie.command.input','timestamp':'2026-11-12T12:00:00Z','session':'test','input':'pwd'})
             conn.executemany('INSERT INTO registros(payload) VALUES(?)',[(raw,),(raw,)])
@@ -29,7 +30,7 @@ class SQLiteSenderTests(unittest.TestCase):
         return sender.deliver_pending(self.conn,self.mapping,'http://127.0.0.1:18765/api/ingesta/eventos','fake-private-key')
 
     def test_backup_preserves_original_rows_and_identical_occurrences_are_distinct(self):
-        with sqlite3.connect(self.backup) as conn:
+        with closing(sqlite3.connect(self.backup)) as conn, conn:
             self.assertEqual(conn.execute('SELECT count(*) FROM registros').fetchone()[0],2)
         with patch.object(sender,'post',side_effect=self.ack) as transport:
             self.assertEqual(self.send(),2)

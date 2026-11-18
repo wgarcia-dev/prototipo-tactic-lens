@@ -1,4 +1,5 @@
 import gzip
+from contextlib import closing
 import hashlib
 import json
 from pathlib import Path
@@ -15,7 +16,7 @@ class ExistingExporterTests(unittest.TestCase):
         self.path=Path(self.temp.name)/'cola.sqlite3';self.log=Path(self.temp.name)/'cowrie.json'
         self.raw={'eventid':'cowrie.command.input','session':'same-session','timestamp':'2026-11-12T12:00:00Z','input':'pwd'}
         self.line=(json.dumps(self.raw)+'\n').encode()
-        with sqlite3.connect(self.path) as conn:
+        with closing(sqlite3.connect(self.path)) as conn, conn:
             # EXACT schema inspected in diagnostico_tacticlens.json, not guessed.
             conn.executescript('''CREATE TABLE events (
         id TEXT PRIMARY KEY, payload TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -35,7 +36,7 @@ CREATE TABLE cursor (name TEXT PRIMARY KEY,inode TEXT NOT NULL,offset INTEGER NO
         self.assertEqual(capture.ingest(self.conn,self.log)['nuevos'],1)
         self.assertEqual(self.count(),2)
         self.assertEqual(capture.ingest(self.conn,self.log)['nuevos'],0)
-        with sqlite3.connect(self.backup) as conn:
+        with closing(sqlite3.connect(self.backup)) as conn, conn:
             self.assertEqual(conn.execute('SELECT count(*) FROM events').fetchone()[0],1)
 
     def test_multiple_rotations_between_polls_and_compressed_archives(self):

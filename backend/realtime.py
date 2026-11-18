@@ -3,6 +3,7 @@ import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from anyio import CancelScope
 from fastapi import Request, WebSocket, WebSocketDisconnect
 from starlette.concurrency import run_in_threadpool
 
@@ -112,9 +113,12 @@ async def monitor_socket(ws: WebSocket):
                         next_check = hub.loop.time() + HEARTBEAT_SECONDS
                         messages = 0
         finally:
-            for task in (receive_task, change_task):
-                task.cancel()
-            await asyncio.gather(receive_task, change_task, return_exceptions=True)
+            # Finish child-task cleanup even if ASGI cancels a disconnected
+            # socket. Keep cancellation propagating after the bounded cleanup.
+            with CancelScope(shield=True):
+                for task in (receive_task, change_task):
+                    task.cancel()
+                await asyncio.gather(receive_task, change_task, return_exceptions=True)
     except AuthError:
         await ws.close(code=4401)
     except asyncio.TimeoutError:

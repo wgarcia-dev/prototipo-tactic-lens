@@ -1,5 +1,6 @@
 """Real PostgreSQL receipts, historical compatibility and concurrent ingestion."""
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from threading import Barrier
 import json
 import hashlib
@@ -92,7 +93,7 @@ class IngestionTests(fixtures.AuthFixture):
         from collector import sqlite_sender as sender
         with TemporaryDirectory() as folder:
             path=Path(folder)/'cola.sqlite3';log=Path(folder)/'cowrie.json'
-            with sqlite3.connect(path) as conn:
+            with closing(sqlite3.connect(path)) as conn, conn:
                 conn.executescript('CREATE TABLE events(id TEXT PRIMARY KEY,payload TEXT NOT NULL,created_at TEXT NOT NULL); CREATE TABLE cursor(name TEXT PRIMARY KEY,inode TEXT NOT NULL,offset INTEGER NOT NULL);')
             raw=event();raw.pop('_collector')
             log.write_text((json.dumps(raw)+'\n')*2)

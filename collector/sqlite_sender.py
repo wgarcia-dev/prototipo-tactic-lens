@@ -5,7 +5,7 @@ Explicit mapping and schema fingerprint are mandatory. Original rows are never
 deleted. Delivery metadata is added to the same DB only after an online backup.
 """
 import argparse
-from contextlib import contextmanager
+from contextlib import closing,contextmanager
 from datetime import datetime,timezone
 import hashlib
 import ipaddress
@@ -77,9 +77,11 @@ def prepare_queue(path,mapping,backup_dir):
     """SQLite backup includes committed WAL data; do not copy the .db alone."""
     folder=Path(backup_dir);folder.mkdir(parents=True,exist_ok=True,mode=0o700)
     dest=folder/('cola-antes-envio-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+uuid4().hex[:8]+'.sqlite3')
-    with connect(path) as conn:
+    # sqlite3.Connection.__exit__ commits/rolls back but does not close handles.
+    # Preserve transaction semantics and release both files deterministically.
+    with closing(connect(path)) as conn, conn:
         validate_mapping(conn,mapping)
-        with sqlite3.connect(dest) as backup:
+        with closing(sqlite3.connect(dest)) as backup, backup:
             conn.backup(backup)
         os.chmod(dest,0o600)
         conn.executescript('''BEGIN IMMEDIATE;

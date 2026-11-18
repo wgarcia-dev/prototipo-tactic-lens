@@ -21,7 +21,7 @@ class CoreTests(unittest.TestCase):
             timestamp("2026-11-01T10:00:00")
 
     def test_ioc_cites_real_event(self):
-        result = extract_iocs("wget http://example.org/a.sh", 42)
+        result = extract_iocs("wget http://files.corp.local/a.sh", 42)
         self.assertEqual(result[0]["evento"], 42)
         self.assertEqual(result[0]["tipo"], "URL")
 
@@ -30,14 +30,14 @@ class CoreTests(unittest.TestCase):
 
     def test_cowrie_observables_keep_origin_and_exclude_filenames(self):
         result = observables({"eventid": "cowrie.command.input", "src_ip": "192.0.2.7",
-                              "input": "wget https://example.org/tool.sh; ls collector.py virus.txt"})
+                              "input": "wget https://files.corp.local/tool.sh; ls collector.py virus.txt"})
         self.assertIn(("IP", "192.0.2.7", "IP de origen registrada por Cowrie"), result)
-        self.assertTrue(any(kind == "URL" and value == "https://example.org/tool.sh"
+        self.assertTrue(any(kind == "URL" and value == "https://files.corp.local/tool.sh"
                             for kind, value, _ in result))
         self.assertFalse(any(kind == "Dominio" for kind, _, _ in result))
 
     def test_observables_do_not_imply_command_execution(self):
-        result = observables({"eventid": "cowrie.command.input", "input": "curl http://example.org/a"})
+        result = observables({"eventid": "cowrie.command.input", "input": "curl http://files.corp.local/a"})
         self.assertTrue(any("descarga no confirmada" in evidence for _, _, evidence in result))
 
 

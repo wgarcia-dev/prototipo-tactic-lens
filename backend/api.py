@@ -59,6 +59,7 @@ class Batch(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from .ingest_transport import validate_demo_settings
+    from .correlation import transfer_window
     validate_demo_settings()
     required = ["DATABASE_NAME", "DATABASE_USER", "DATABASE_PASSWORD", "DATABASE_HOST", "INGEST_API_KEY", "HONEYPOT_ID"]
     missing = [name for name in required if not os.getenv(name)]
@@ -67,14 +68,16 @@ async def lifespan(app: FastAPI):
     app.state.honeypot_id = UUID(os.environ["HONEYPOT_ID"])
     app.state.api_key = os.environ["INGEST_API_KEY"]
     app.state.auth_settings = Settings.load()
+    app.state.ioc_transfer_window = transfer_window(os.getenv("IOC_CORRELACION_MAX_SEGUNDOS"))
     from .auth.mail_config import MailConfig
     app.state.mail_config = MailConfig.load()
     engine = database_engine()
     meta = MetaData()
     names = ("honeypot", "sesion", "evento", "modelo_llm", "analisis_llm", "accion_identificada", "accion_evento", "tipo_ioc", "ioc", "observacion_ioc", "deteccion_ioc", "accion_ioc", "tactica_mitre", "tecnica_mitre", "tecnica_tactica", "mapeo_mitre", "usuario", "rol", "auth_factor", "auth_token", "auth_sesion", "auth_recuperacion", "auth_limite", "auth_auditoria", "auth_solicitud_password", "auth_soporte", "auth_notificacion", "evento_origen")
-    names += ('catalogo_mitre','modelo_embedding')
+    names += ('catalogo_mitre','modelo_embedding','mapeo_mitre_evento')
     tables = {name: Table(name, meta, schema="honeypot", autoload_with=engine) for name in names}
     expected = {"sesion": {"id_sesion", "id_honeypot", "cowrie_session_id", "fecha_inicio", "ip_origen", "puerto_origen", "puerto_destino", "protocolo", "fecha_fin"}, "evento": {"id_evento", "id_sesion", "numero_secuencia", "tipo_evento", "fecha_hora", "datos_originales"}}
+    expected.update(observacion_ioc={"detalles"}, deteccion_ioc={"id_observacion"})
     for name, columns in expected.items():
         if not columns <= set(tables[name].columns.keys()):
             raise RuntimeError(f"Esquema {name} incompatible")
@@ -135,12 +138,17 @@ def sessions(request: Request, limit: int = Query(50, ge=1, le=200), offset: int
 
 
 @app.get("/api/sesiones/{id}/eventos")
-def events(id: UUID, request: Request, limit: int = Query(200, ge=1, le=500), offset: int = Query(0, ge=0)):
+def events(id: UUID, request: Request, limit: int = Query(200, ge=1, le=500), offset: int = Query(0, ge=0),
+           id_evento: int | None = Query(None, ge=0, le=(1 << 63) - 1)):
     local_only(request)
     table = app.state.tables["evento"]
     with app.state.engine.connect() as conn:
-        rows = conn.execute(select(table.c.id_evento, table.c.tipo_evento, table.c.fecha_hora, table.c.datos_originales).where(table.c.id_sesion == id).order_by(table.c.fecha_hora, table.c.id_evento).limit(limit).offset(offset)).mappings().all()
-    return [{**dict(row), "datos_originales": safe(row.datos_originales)} for row in rows]
+        query = select(table.c.id_evento, table.c.tipo_evento, table.c.fecha_hora, table.c.datos_originales
+                       ).where(table.c.id_sesion == id)
+        if id_evento is not None:
+            query = query.where(table.c.id_evento == id_evento)
+        rows = conn.execute(query.order_by(table.c.fecha_hora, table.c.id_evento).limit(limit).offset(offset)).mappings().all()
+    return [{**dict(row), "id_evento_texto": str(row.id_evento), "datos_originales": safe(row.datos_originales)} for row in rows]
 
 
 from . import routes  # noqa: E402,F401 - registers extended routes

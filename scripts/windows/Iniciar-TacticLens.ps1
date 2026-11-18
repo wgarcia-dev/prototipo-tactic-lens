@@ -18,6 +18,14 @@ if ($Detener) {
     foreach ($item in $state) {
         $process=Get-TaskProcess $item
         if ($process) {
+            if ($item.Marker -eq 'scripts.local_backend') {
+                $stopDir=Join-Path $root '.local/runtime'
+                New-Item -ItemType Directory -Force $stopDir | Out-Null
+                New-Item -ItemType File -Force (Join-Path $stopDir 'backend.stop') | Out-Null
+                Wait-Process -Id $process.ProcessId -Timeout 25 -ErrorAction SilentlyContinue
+                if (Get-TaskProcess $item) {throw 'FastAPI sigue cerrando solicitudes; no se fuerza el cierre. Reintente.'}
+                continue
+            }
             # Only descendants of the exact process started by this launcher.
             $children=@(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($process.ProcessId)" -ErrorAction SilentlyContinue)
             foreach ($child in $children) {Stop-Process -Id $child.ProcessId -ErrorAction Stop}
@@ -29,6 +37,11 @@ if ($Detener) {
     exit 0
 }
 if (-not (Test-Path -LiteralPath $python)) {throw 'Ejecute primero Preparar-NuevaPC.ps1'}
+$pgService=Get-Service postgresql-x64-18 -ErrorAction Stop
+if ($pgService.Status -ne 'Running') {
+    Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -ArgumentList '-NoProfile -Command "Start-Service postgresql-x64-18"' -Wait
+    if ((Get-Service postgresql-x64-18).Status -ne 'Running') {throw 'PostgreSQL no inicio'}
+}
 & $python -m scripts.portability check --model
 if ($LASTEXITCODE -ne 0) {throw 'Base/modelo/configuracion no preparados; revise MIGRACION_NUEVA_PC.md. No se migra automaticamente.'}
 if ($SoloComprobar) {Write-Host 'Configuracion y base local listas. No se iniciaron procesos.'; exit 0}
@@ -53,7 +66,7 @@ $health=Get-Health 'http://127.0.0.1:8000/api/health'
 $backendListeners=@(Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue)
 if ($health.contrato_ingesta -ne 'tacticlens.ingesta.v2') {
     if ($backendListeners.Count) {throw '8000 ocupado por un proceso no reconocido. No se detiene automaticamente.'}
-    Start-LocalProcess 'backend' 'scripts.local_server'
+    Start-LocalProcess 'backend' 'scripts.local_backend'
     for ($attempt=0;$attempt -lt 30;$attempt++) {Start-Sleep -Milliseconds 500; $health=Get-Health 'http://127.0.0.1:8000/api/health'; if($health){break}}
     if ($health.contrato_ingesta -ne 'tacticlens.ingesta.v2') {throw 'Backend no listo; revise .local/run-local/backend.err.log'}
 } elseif ($backendListeners | Where-Object {$_.LocalAddress -notin @('127.0.0.1','::1')}) {

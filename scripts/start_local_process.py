@@ -12,7 +12,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 def start(mode):
     directory=ROOT/'.local/run-local';directory.mkdir(parents=True,exist_ok=True)
-    if mode=='backend':command=[sys.executable,'-m','scripts.local_server']
+    if mode=='backend':command=[sys.executable,'-m','scripts.local_backend']
     elif mode=='frontend':
         node=shutil.which('node')
         if not node:raise RuntimeError('Falta Node en PATH')

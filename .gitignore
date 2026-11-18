@@ -15,7 +15,13 @@ frontend/.env
 .env.*
 !.env.example
 *.backup
+*.backup.json
 *.dump
+*.dump.json
+*.auth.env
+restored-db.env
+*.private.sql
+archive-inspection.sql
 *.fernet
 *.sqlite3
 *.key

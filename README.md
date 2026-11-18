@@ -1,6 +1,14 @@
 # TacticLens
 
-**Monitoreo vigente por eventos:** [inotify, SQLite, HTTP inmediato y WebSocket hacia React](docs/TIEMPO_REAL_WEBSOCKET.md), con prueba física y recuperación tras desconexión. Sustituye el timer de 2 s y el polling de monitoreo de 1 s. Consulte también la [auditoría de MITRE ATT&CK](docs/AUDITORIA_MITRE_ATTCK.md); esa implementación se inspeccionó sin modificar sus reglas.
+**Prioridad actual: continuidad en otra PC Windows con históricos, sin Ubuntu.** Siga
+[MIGRACION_NUEVA_PC.md](docs/MIGRACION_NUEVA_PC.md) para recuperar el paquete privado,
+restaurar PostgreSQL y usar `Preparar-NuevaPC.ps1` / `Iniciar-TacticLens.ps1` en loopback.
+El [estado de IoCs y salvaguardas](docs/CONTINUIDAD_DESARROLLO_IOC_SALVAGUARDAS.md)
+distingue las funciones actuales del desarrollo pendiente. La integración Cowrie se conserva para otra etapa.
+
+**Monitoreo vigente por eventos:** [inotify, SQLite, HTTP inmediato y WebSocket hacia React](docs/TIEMPO_REAL_WEBSOCKET.md), con prueba física y recuperación tras desconexión. Sustituye el timer de 2 s y el polling de monitoreo de 1 s. Consulte también la [auditoría previa de MITRE ATT&CK](docs/AUDITORIA_MITRE_ATTCK.md).
+
+**DeepSeek + RAG MITRE:** [implementación, catálogo Enterprise 20.1, embeddings locales CPU y búsqueda híbrida pgvector + texto](docs/IMPLEMENTACION_RAG_MITRE.md). El análisis sigue siendo manual y las propuestas requieren revisión humana; los resultados históricos se conservan.
 
 **Despliegue actual entre laptops físicas:** siga [la demostración Windows + Ubuntu mediante HTTP local y SQLite](docs/DEMO_LAPTOPS.md). El backend existente acepta ingesta únicamente desde Ubuntu en la interfaz seleccionada; React conserva su proxy local. No se utiliza túnel SSH. Las instrucciones de VirtualBox y `192.168.56.*` que aparecen más abajo describen el laboratorio anterior. `collector/collector.py` queda retirado como emisor directo. Consulte los [resultados reales](docs/RESULTADOS_HTTP_LOCAL.md).
 

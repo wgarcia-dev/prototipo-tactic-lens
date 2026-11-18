@@ -88,11 +88,21 @@ class RealtimeTests(fixtures.AuthFixture):
     def test_connection_limit_and_cleanup(self):
         self.enroll(994)
         with ExitStack() as stack:
+            sockets=[]
             for _ in range(3):
-                ws=stack.enter_context(self.ws());ws.receive_json()
+                ws=stack.enter_context(self.ws());ws.receive_json();sockets.append(ws)
             with self.assertRaises(WebSocketDisconnect):
                 with self.ws():pass
             self.assertEqual(len(app.state.monitor_hub.clients),3)
+            # Complete the close handshake before TestClient tears down several
+            # concurrent contexts. Abrupt portal cancellation races cleanup.
+            for ws in sockets:
+                ws.send_text('invalid-close-test')
+                with self.assertRaises(WebSocketDisconnect):ws.receive_json()
+            async def wait_cleanup():
+                while app.state.monitor_hub.clients:
+                    await asyncio.sleep(0.001)
+            self.client.portal.call(lambda:asyncio.wait_for(wait_cleanup(),1))
         self.assertEqual(len(app.state.monitor_hub.clients),0)
 
     def test_heartbeat_pong_and_invalid_frames(self):

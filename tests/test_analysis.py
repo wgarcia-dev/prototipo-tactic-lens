@@ -39,8 +39,12 @@ class AnalysisReportTests(unittest.TestCase):
                                               "LLM_BASE_URL": "https://example.invalid/v1"})
         self.env.start()
         self.addCleanup(self.env.stop)
-        self.catalog = patch('backend.routes.mitre_catalog', return_value=[{
-            'codigo_tecnica':'T1059.004','nombre':'Unix Shell','tactica':'Execution'}])
+        from backend.rag.behavior import represent
+        self.catalog = patch('backend.routes.rag_context', side_effect=lambda events:{
+            'catalogo':{'version':'fixture-20.1'},'representacion':represent(events),
+            'candidatos':[{'codigo_tecnica':'T1059.004','nombre':'Unix Shell',
+                'definicion':'Unix shell commands and scripts for execution in an emulated context.',
+                'tacticas':[{'codigo_tactica':'TA0002','nombre':'Execution'}]}]})
         self.catalog.start()
         self.addCleanup(self.catalog.stop)
 
@@ -71,6 +75,18 @@ class AnalysisReportTests(unittest.TestCase):
         self.assertEqual(context["comandos"], 1)
         self.assertEqual(context["autenticaciones_fallidas"], 1)
         self.assertEqual(context["autenticaciones_exitosas"], 0)
+
+    def test_provider_usage_is_retained_without_arbitrary_response_metadata(self):
+        content=json.dumps({'resumen':'Intento observado','acciones':[],'informe':report_data()})
+        response=Mock();response.json.return_value={'model':'deepseek-reported-fixture',
+            'usage':{'prompt_tokens':100,'completion_tokens':30,'total_tokens':130,'prompt_cache_hit_tokens':-1,
+                     'untrusted_secret':'must-not-be-stored'},
+            'choices':[{'finish_reason':'stop','message':{'content':content}}]}
+        rag={'catalogo':{'version':'fixture'},'representacion':{},'candidatos':[]}
+        with patch('backend.routes.httpx.post',return_value=response):real_result(self.events,rag)
+        self.assertEqual(rag['respuesta_proveedor']['uso'],{'prompt_tokens':100,'completion_tokens':30,'total_tokens':130})
+        self.assertEqual(rag['respuesta_proveedor']['modelo_reportado'],'deepseek-reported-fixture')
+        self.assertNotIn('must-not-be-stored',json.dumps(rag))
 
     def test_rejects_foreign_event_in_phase_or_hypothesis(self):
         for field in ("fases", "hipotesis"):

@@ -1,4 +1,5 @@
 export type AnalysisPayload = {
+  rag?:{metodo:string,catalogo:{version:string}}
   eventos_analizados?: number;
   version_informe?: number;
   contexto_observado?: {

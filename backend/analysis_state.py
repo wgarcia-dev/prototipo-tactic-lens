@@ -62,7 +62,8 @@ def states_for_sessions(conn, analysis_table, counts):
         output[session_id] = {
             "estado_analisis": status,
             "analisis_desactualizado": bool(completed and not valid),
-            "analisis": {"id_analisis": str(completed.id_analisis), "estado": completed.estado} if completed else None,
+            "analisis": {"id_analisis": str(completed.id_analisis), "estado": completed.estado,
+                'metodo':(completed.resultado_estructurado or {}).get('rag',{}).get('metodo','deepseek_legacy')} if completed else None,
             "ultimo_intento": {
                 "id_analisis": str(latest.id_analisis),
                 "estado": "fallido" if expired else latest.estado,

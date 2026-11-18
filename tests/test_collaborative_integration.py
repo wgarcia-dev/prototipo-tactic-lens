@@ -94,7 +94,7 @@ class CollaborativeIntegrationTests(fixtures.AuthFixture):
         result = AnalysisResult(resumen='Comando literal observado, sin descarga confirmada',acciones=[
             Finding(tipo='comando',descripcion='Comando de shell registrado',confianza=0.8,eventos=[event_id],
                 iocs=[IocProposal(tipo='Dominio',valor='bundles.zip',evento=event_id)],
-                mitre=[MitreProposal(codigo='T1059.004',justificacion='Comando escrito en la shell emulada',confianza=0.8),
+                mitre=[MitreProposal(codigo='T1059.004',codigo_tactica='TA0002',justificacion='Comando escrito en la shell emulada, sin prueba de ejecucion en Ubuntu real',limitaciones=['La shell de Cowrie es emulada y requiere revision humana'],confianza=0.8),
                        MitreProposal(codigo='T1078',justificacion='Propuesta no permitida en este laboratorio',confianza=0.5)])])
         with patch('backend.routes.real_result',return_value=result):
             analyzed = self.client.post('/api/sesiones/'+str(sid)+'/analizar')
@@ -124,7 +124,9 @@ class CollaborativeIntegrationTests(fixtures.AuthFixture):
         self.assertEqual(self.connection.scalar(select(tech.c.nombre).where(tech.c.codigo_tecnica=='T1059')),'Nombre revisado por el equipo')
         codes = {row['codigo_tecnica'] for row in mitre_catalog()}
         self.assertIn('T1059.004',codes)
-        self.assertNotIn('T1078',codes)
+        # Full import is independent from whether Cowrie can observe a technique.
+        self.assertIn('T1078',codes)
+        self.assertGreater(len(codes),10)
 
     def test_deferred_migration_is_not_executed_or_marked_applied(self):
         name = '999_cleanup_integration_fixture.sql'

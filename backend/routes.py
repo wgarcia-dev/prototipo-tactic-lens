@@ -5,6 +5,7 @@ import ipaddress
 import json
 import os
 import re
+import time
 from urllib.parse import urlparse
 from collections import Counter
 from datetime import datetime, timezone
@@ -14,7 +15,7 @@ from typing import Literal
 import httpx
 from fastapi import Depends, File, Header, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field, ValidationError, field_validator
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, case, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 
 from .api import app, local_only, persist_events, safe
@@ -23,7 +24,11 @@ from .analysis_report import (BehaviorReport, REPORT_VERSION, analysis_instructi
                               needs_report_upgrade, observation_context, validate_report_evidence)
 from .intelligence import observables
 from .auth.store import require_admin, audit
+from .rag.retrieval import context as retrieve_context
+from .rag.validation import validate as validate_mitre
+from .rag.pipeline import METHOD, RAG_INSTRUCTION, evidence_sample, facts_for_model
 
+# Legacy backfill compatibility only. New RAG classification NEVER filters by this set.
 COWRIE_TECHNIQUES = {"T1110", "T1110.001", "T1059.004", "T1105", "T1082", "T1083",
                      "T1016", "T1033", "T1057", "T1005"}
 
@@ -144,8 +149,12 @@ class IocProposal(BaseModel):
 
 class MitreProposal(BaseModel):
     codigo: str
-    justificacion: str = "Propuesta para revisión"
+    codigo_tactica: str | None = None
+    justificacion: str = Field(default='',max_length=3000)
     confianza: float = Field(default=0.5, ge=0, le=1)
+    eventos: list[int] = Field(default_factory=list)
+    grado_evidencia: Literal['intento','resultado_en_honeypot'] = 'intento'
+    limitaciones: list[str] = Field(default_factory=list)
 
 
 class Finding(BaseModel):
@@ -174,22 +183,42 @@ def mitre_catalog():
         catalog = conn.execute(select(tech.c.codigo_tecnica, tech.c.nombre, tac.c.nombre.label("tactica"))
             .join(tt, tech.c.codigo_tecnica == tt.c.codigo_tecnica)
             .join(tac, tac.c.codigo_tactica == tt.c.codigo_tactica)
-            .where(tech.c.codigo_tecnica.in_(COWRIE_TECHNIQUES))).mappings().all()
+            .where(~tech.c.revocada,~tech.c.deprecada,tt.c.activa_en_catalogo)).mappings().all()
     return [dict(row) for row in catalog]
 
 
-def real_result(events):
+def rag_context(events):
+    return retrieve_context(app.state.engine,events)
+
+
+def real_result(events, rag=None):
     key = os.getenv("LLM_API_KEY")
     model = os.getenv("LLM_MODEL")
     base = (os.getenv("LLM_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
     if not key or not model:
         raise ValueError("Configure LLM_API_KEY y LLM_MODEL")
-    facts = [{"id_evento": x.id_evento, "tipo": x.tipo_evento, "fecha": x.fecha_hora.isoformat(), "datos": safe(x.datos_originales)} for x in events]
+    rag = rag if rag is not None else rag_context(events)
+    facts = facts_for_model(evidence_sample(events))
+    candidates=[{**row,'definicion':row['definicion'][:3000]} for row in rag['candidatos']]
     payload = {"contexto_calculado": observation_context(events), "eventos": facts,
-               "tecnicas_mitre_permitidas": mitre_catalog()}
-    response = httpx.post(base + "/chat/completions", headers={"Authorization": f"Bearer {key}"}, json={"model": model, "temperature": 0, "thinking": {"type": "disabled"}, "response_format": {"type": "json_object"}, "max_tokens": 8192, "messages": [{"role": "system", "content": analysis_instruction()}, {"role": "user", "content": json.dumps(payload, ensure_ascii=False, default=str)}]}, timeout=float(os.getenv("LLM_TIMEOUT_SECONDS", "60")))
+               "tecnicas_mitre_permitidas": candidates,'catalogo':rag['catalogo'],
+               'comportamiento_observado':rag['representacion'],
+               'muestreo':{'eventos_snapshot':len(events),'eventos_en_prompt':len(facts)}}
+    request_body={"model":model,"temperature":0,"thinking":{"type":"disabled"},
+        "response_format":{"type":"json_object"},"max_tokens":8192,"messages":[
+            {"role":"system","content":analysis_instruction()+RAG_INSTRUCTION},
+            {"role":"user","content":json.dumps(payload,ensure_ascii=False,default=str)}]}
+    rag['solicitud_sha256']=hashlib.sha256(json.dumps(request_body,sort_keys=True,ensure_ascii=False,default=str).encode()).hexdigest()
+    started=time.perf_counter();requested_at=datetime.now(timezone.utc)
+    response = httpx.post(base + "/chat/completions", headers={"Authorization": f"Bearer {key}"},
+        json=request_body,timeout=float(os.getenv("LLM_TIMEOUT_SECONDS", "60")))
     response.raise_for_status()
-    choice = response.json()["choices"][0]
+    body=response.json();usage=body.get('usage') or {}
+    fields=('prompt_tokens','completion_tokens','total_tokens','prompt_cache_hit_tokens','prompt_cache_miss_tokens')
+    rag['respuesta_proveedor']={'solicitado_en':requested_at.isoformat(),'duracion_segundos':round(time.perf_counter()-started,3),
+        'modelo_reportado':str(body.get('model',model))[:160],
+        'uso':{field:usage[field] for field in fields if type(usage.get(field)) is int and usage[field]>=0}}
+    choice = body["choices"][0]
     if choice.get("finish_reason") == "length":
         raise ValueError("El proveedor truncó el informe; no se guardará un resultado incompleto")
     content = choice["message"]["content"]
@@ -213,7 +242,7 @@ def ensure_model(conn):
 
 
 @app.post("/api/sesiones/{id_sesion}/analizar", dependencies=[Depends(local_only)])
-def analyze(id_sesion: UUID, actualizar_informe: bool = False):
+def analyze(id_sesion: UUID, actualizar_informe: bool = False, actualizar_rag: bool = False):
     s, e, a = table("sesion"), table("evento"), table("analisis_llm")
     # Lock the session row while deciding whether to reuse or start an analysis.
     # Concurrent requests serialize here, including requests from another worker.
@@ -244,6 +273,9 @@ def analyze(id_sesion: UUID, actualizar_informe: bool = False):
         if state["analisis_vigente_id"] and actualizar_informe:
             saved = conn.scalar(select(a.c.resultado_estructurado).where(a.c.id_analisis == state["analisis_vigente_id"]))
             upgrade = needs_report_upgrade(saved)
+        if state['analisis_vigente_id'] and actualizar_rag:
+            saved=conn.scalar(select(a.c.resultado_estructurado).where(a.c.id_analisis==state['analisis_vigente_id']))
+            upgrade = upgrade or (saved or {}).get('rag',{}).get('metodo')!=METHOD
         if state["analisis_vigente_id"] and not upgrade:
             return {"id_analisis": str(state["analisis_vigente_id"]), "estado": "completado", "modo": "real", "reutilizado": True}
         model_id = ensure_model(conn)
@@ -251,57 +283,53 @@ def analyze(id_sesion: UUID, actualizar_informe: bool = False):
             id_sesion=id_sesion, id_modelo=model_id, estado="en_proceso", fecha_inicio=func.clock_timestamp(), creado_en=func.clock_timestamp()
         ).returning(a.c.id_analisis))
     try:
-        result = real_result(events)
+        rag=rag_context(events)
+        rag['candidatos']=rag['candidatos'][:24]
+        rag['modelo_llm']={'proveedor':os.getenv('LLM_PROVIDER','deepseek'),'modelo':os.getenv('LLM_MODEL','')}
+        rag['eventos_entregados']=[e.id_evento for e in evidence_sample(events)]
+        rag['eventos_snapshot']=len(events)
+        result = real_result(events,rag=rag)
         valid_ids = {x.id_evento for x in events}
         validate_report_evidence(result.informe, valid_ids)
-        event_text = {x.id_evento: json.dumps(safe(x.datos_originales), ensure_ascii=False).lower() for x in events}
+        event_text = {x['id_evento']:json.dumps(x['datos'],ensure_ascii=False).lower() for x in facts_for_model(events)}
         for action in result.acciones:
-            if not set(action.eventos) <= valid_ids:
+            if not set(action.eventos) <= valid_ids or not set(action.eventos)<=set(rag['eventos_entregados']):
                 raise ValueError("El LLM cito eventos ajenos a la sesion")
             if any(ioc.evento not in action.eventos for ioc in action.iocs):
                 raise ValueError("El IoC no cita una evidencia de la accion")
             if any(ioc.valor.lower() not in event_text[ioc.evento] for ioc in action.iocs):
                 raise ValueError("El IoC no aparece en el evento citado")
-        tt = table("tecnica_tactica")
-        with app.state.engine.connect() as conn:
-            allowed = set(conn.scalars(select(tt.c.codigo_tecnica).where(
-                tt.c.codigo_tecnica.in_(COWRIE_TECHNIQUES))).all())
-        discarded = []
-        for action in result.acciones:
-            valid = []
-            for mapping in action.mitre:
-                if mapping.codigo in allowed and mapping.justificacion.strip():
-                    valid.append(mapping)
-                else:
-                    discarded.append({"codigo": mapping.codigo, "motivo": "Código ausente del catálogo o justificación insuficiente"})
-            action.mitre = valid
+        discarded,provenance = validate_mitre(result,events,rag)
         # Results and all linked findings commit together. A failure leaves no partial IoCs.
         with app.state.engine.begin() as conn:
+            conn.execute(text('SELECT pg_advisory_xact_lock(724610902)'))
+            current=conn.scalar(select(table('catalogo_mitre').c.id_catalogo).where(table('catalogo_mitre').c.activo))
+            if str(current)!=rag['catalogo']['id_catalogo']:raise ValueError('El catalogo cambio; vuelva a analizar')
             conn.execute(a.update().where(a.c.id_analisis == analysis_id).values(
                 estado="completado", fecha_fin=func.clock_timestamp(), resumen=result.resumen,
                 resultado_estructurado={**result.model_dump(exclude_none=True), "eventos_analizados": len(events),
                     "version_informe": REPORT_VERSION if result.informe else 1,
-                    "contexto_observado": observation_context(events), "mapeos_descartados": discarded},
+                    "contexto_observado": observation_context(events), "mapeos_descartados": discarded,'rag':rag},
                 actualizado_en=func.clock_timestamp()
             ))
-            persist_findings(conn, analysis_id, result, events)
+            persist_findings(conn, analysis_id, result, events,rag=rag,provenance=provenance)
     except Exception as exc:
         with app.state.engine.begin() as conn:
             conn.execute(a.update().where(a.c.id_analisis == analysis_id).values(
                 estado="fallido", fecha_fin=func.clock_timestamp(),
-                mensaje_error=f"{type(exc).__name__}: {str(exc)[:160]}", actualizado_en=func.clock_timestamp()
+                mensaje_error=f"RAG/LLM no disponible o respuesta no valida ({type(exc).__name__})", actualizado_en=func.clock_timestamp()
             ))
         raise HTTPException(502, "El analisis fallo; consulte el estado del analisis") from exc
     return {"id_analisis": str(analysis_id), "estado": "completado", "modo": "real", "reutilizado": False}
 
 
-def persist_findings(conn, analysis_id, result, events):
+def persist_findings(conn, analysis_id, result, events,rag=None,provenance=None):
     action_t, link_t = table("accion_identificada"), table("accion_evento")
     mitre_t, mapping_t = table("tecnica_tactica"), table("mapeo_mitre")
     ioc_t, type_t, detection_t, action_ioc_t = (table(n) for n in ("ioc", "tipo_ioc", "deteccion_ioc", "accion_ioc"))
     event_ids = {e.id_evento for e in events}
     event_dates = {e.id_evento: e.fecha_hora for e in events}
-    for finding in result.acciones:
+    for action_index,finding in enumerate(result.acciones):
         action_id = conn.scalar(insert(action_t).values(id_analisis=analysis_id, tipo_accion=finding.tipo, descripcion=finding.descripcion, confianza=finding.confianza).returning(action_t.c.id_accion))
         for event_id in finding.eventos:
             if event_id not in event_ids:
@@ -339,10 +367,18 @@ def persist_findings(conn, analysis_id, result, events):
             if detection_id:
                 conn.execute(insert(action_ioc_t).values(id_accion=action_id, id_deteccion=detection_id).on_conflict_do_nothing(index_elements=["id_accion", "id_deteccion"]))
         for proposed in finding.mitre:
+            if not rag or provenance is None:raise ValueError('Se requiere contexto RAG validado')
             code = proposed.codigo
-            match = conn.execute(select(mitre_t.c.id_vinculo).where(mitre_t.c.codigo_tecnica == code).limit(1)).scalar_one_or_none()
-            if match:
-                conn.execute(insert(mapping_t).values(id_accion=action_id, id_vinculo=match, evidencia=f"Eventos: {', '.join(map(str, finding.eventos))}", justificacion=proposed.justificacion, confianza=proposed.confianza))
+            te=table('tecnica_mitre');meta=provenance[(action_index,code,proposed.codigo_tactica)]
+            match = conn.scalar(select(mitre_t.c.id_vinculo).join(te,mitre_t.c.codigo_tecnica==te.c.codigo_tecnica).where(
+                mitre_t.c.codigo_tecnica==code,mitre_t.c.codigo_tactica==proposed.codigo_tactica,
+                mitre_t.c.activa_en_catalogo,~te.c.revocada,~te.c.deprecada,
+                te.c.id_catalogo==UUID(rag['catalogo']['id_catalogo']),te.c.objeto_sha256==meta['definicion_sha256']))
+            if not match:raise ValueError('La tecnica o relacion oficial dejo de estar vigente')
+            conn.execute(insert(mapping_t).values(id_accion=action_id,id_vinculo=match,
+                evidencia=f"Eventos: {', '.join(map(str,proposed.eventos))}",justificacion=proposed.justificacion,
+                confianza=proposed.confianza,rag_procedencia={**meta,'modelo_llm':rag['modelo_llm']},
+                grado_evidencia=proposed.grado_evidencia))
 
 
 @app.get("/api/analisis/{id_analisis}", dependencies=[Depends(local_only)])
@@ -356,7 +392,7 @@ def get_analysis(id_analisis: UUID):
         output = []
         for item in actions:
             evidence = conn.execute(select(link.c.id_evento).where(link.c.id_accion == item.id_accion)).scalars().all()
-            mitre = conn.execute(select(technique.c.codigo_tecnica, technique.c.nombre.label("tecnica"), tactic.c.nombre.label("tactica"), mapping.c.justificacion, mapping.c.confianza).join(tt, mapping.c.id_vinculo == tt.c.id_vinculo).join(technique, tt.c.codigo_tecnica == technique.c.codigo_tecnica).join(tactic, tt.c.codigo_tactica == tactic.c.codigo_tactica).where(mapping.c.id_accion == item.id_accion)).mappings().all()
+            mitre = conn.execute(select(technique.c.codigo_tecnica, technique.c.nombre.label("tecnica"), tactic.c.nombre.label("tactica"), mapping.c.justificacion, mapping.c.confianza, mapping.c.id_mapeo, mapping.c.estado_revision, mapping.c.motivo_revision, mapping.c.grado_evidencia, mapping.c.rag_procedencia, mapping.c.revisado_por, mapping.c.revisado_en).join(tt, mapping.c.id_vinculo == tt.c.id_vinculo).join(technique, tt.c.codigo_tecnica == technique.c.codigo_tecnica).join(tactic, tt.c.codigo_tactica == tactic.c.codigo_tactica).where(mapping.c.id_accion == item.id_accion)).mappings().all()
             output.append({**plain(item), "eventos": evidence, "mitre": [plain(x) for x in mitre]})
     return {**plain(row), "resultado_estructurado": safe(row.resultado_estructurado), "acciones": output}
 
@@ -385,8 +421,32 @@ def list_iocs(limit: int = 100, offset: int = 0):
 def list_mappings(limit: int = 100, offset: int = 0):
     m, tt, tech, tac, act, analysis = (table(n) for n in ("mapeo_mitre", "tecnica_tactica", "tecnica_mitre", "tactica_mitre", "accion_identificada", "analisis_llm"))
     with app.state.engine.connect() as conn:
-        rows = conn.execute(select(m.c.id_mapeo, tech.c.codigo_tecnica, tech.c.nombre.label("tecnica"), tac.c.nombre.label("tactica"), m.c.evidencia, m.c.justificacion, m.c.confianza, m.c.estado_revision, m.c.motivo_revision, act.c.id_analisis, analysis.c.id_sesion).join(tt, m.c.id_vinculo == tt.c.id_vinculo).join(tech, tt.c.codigo_tecnica == tech.c.codigo_tecnica).join(tac, tt.c.codigo_tactica == tac.c.codigo_tactica).join(act, m.c.id_accion == act.c.id_accion).join(analysis, act.c.id_analisis == analysis.c.id_analisis).order_by(m.c.fecha_mapeo.desc()).limit(min(max(limit, 1), 200)).offset(max(offset, 0))).mappings().all()
+        rows = conn.execute(select(m.c.id_mapeo, tech.c.codigo_tecnica, tech.c.nombre.label("tecnica"), tac.c.nombre.label("tactica"), m.c.evidencia, m.c.justificacion, m.c.confianza, m.c.estado_revision, m.c.motivo_revision, m.c.grado_evidencia, m.c.rag_procedencia, m.c.revisado_por, m.c.revisado_en, act.c.id_analisis, analysis.c.id_sesion).join(tt, m.c.id_vinculo == tt.c.id_vinculo).join(tech, tt.c.codigo_tecnica == tech.c.codigo_tecnica).join(tac, tt.c.codigo_tactica == tac.c.codigo_tactica).join(act, m.c.id_accion == act.c.id_accion).join(analysis, act.c.id_analisis == analysis.c.id_analisis).order_by(m.c.fecha_mapeo.desc()).limit(min(max(limit, 1), 200)).offset(max(offset, 0))).mappings().all()
     return [plain(x) for x in rows]
+
+
+@app.get('/api/mitre/catalogo',dependencies=[Depends(local_only)])
+def catalog_status():
+    with app.state.engine.connect() as conn:
+        row=conn.execute(text('SELECT id_catalogo,version,fuente,sha256,conteos,importado_en FROM honeypot.catalogo_mitre WHERE activo')).mappings().first()
+        if not row:raise HTTPException(503,'Catalogo oficial no preparado')
+        ready=conn.scalar(text('SELECT count(*) FROM honeypot.tecnica_mitre WHERE id_catalogo=:id AND NOT revocada AND NOT deprecada AND embedding_rag IS NOT NULL'),{'id':row.id_catalogo})
+    return {**plain(row),'embeddings_vigentes':ready,'metodo':METHOD,'similitud_no_es_probabilidad':True}
+
+
+@app.post('/api/sesiones/{id_sesion}/mitre/candidatos',dependencies=[Depends(local_only)])
+def session_candidates(id_sesion:UUID,request:Request):
+    from .auth.store import transaction,rate
+    with transaction(request) as conn:
+        rate(conn,request,'rag_busqueda',account=request.state.user['id_usuario'],account_limit=60,ip_limit=120)
+    s,e=table('sesion'),table('evento')
+    with app.state.engine.connect() as conn:
+        if not conn.scalar(select(s.c.id_sesion).where(s.c.id_sesion==id_sesion,s.c.id_honeypot==app.state.honeypot_id)):
+            raise HTTPException(404,'Sesion no encontrada')
+        events=conn.execute(select(e.c.id_evento,e.c.tipo_evento,e.c.fecha_hora,e.c.datos_originales).where(e.c.id_sesion==id_sesion).order_by(e.c.fecha_hora,e.c.id_evento)).all()
+    if not events:raise HTTPException(422,'La sesion no tiene eventos')
+    try:return rag_context(events)
+    except RuntimeError:raise HTTPException(503,'Buscador no preparado; revise catalogo y embeddings') from None
 
 
 class ReviewDecision(BaseModel):

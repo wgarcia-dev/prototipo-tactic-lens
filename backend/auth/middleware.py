@@ -70,7 +70,7 @@ class AuthMiddleware:
         except AuthError as exc:
             return await JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)(scope, receive, secure_send)
 
-        if request.url.path.startswith("/api/auth/") and request.method not in SAFE_METHODS:
+        if (request.url.path.startswith("/api/auth/") or request.url.path in MACHINE_ROUTES) and request.method not in SAFE_METHODS:
             # Bound memory and validation cost even for chunked requests without Content-Length.
             parts, size = [], 0
             while True:
@@ -79,7 +79,7 @@ class AuthMiddleware:
                     return
                 part = message.get("body", b"")
                 size += len(part)
-                if size > 16384:
+                if size > (2_097_152 if request.url.path in MACHINE_ROUTES else 16384):
                     return await JSONResponse({"detail": "Solicitud demasiado grande"}, status_code=413)(scope, receive, secure_send)
                 parts.append(part)
                 if not message.get("more_body", False):

@@ -32,30 +32,32 @@ TECHNIQUES = (
 )
 
 
+def seed_catalog(conn, t):
+    """Add missing catalog entries, preserving existing reviewed metadata."""
+    for number, name in ((1, "IP"), (2, "Dominio"), (3, "URL"), (4, "Hash")):
+        conn.execute(insert(t["tipo_ioc"]).values(id_tipo_ioc=number, nombre=name)
+            .on_conflict_do_nothing(index_elements=["id_tipo_ioc"]))
+    for code, name in TACTICS:
+        conn.execute(insert(t["tactica_mitre"]).values(
+            codigo_tactica=code, nombre=name, version_attack=VERSION,
+            descripcion=f"https://attack.mitre.org/tactics/{code}/")
+            .on_conflict_do_nothing(index_elements=["codigo_tactica"]))
+    for code, parent, name, tactic in TECHNIQUES:
+        path = code.replace(".", "/")
+        conn.execute(insert(t["tecnica_mitre"]).values(
+            codigo_tecnica=code, tecnica_padre_id=parent, nombre=name,
+            version_attack=VERSION,
+            descripcion=f"https://attack.mitre.org/techniques/{path}/")
+            .on_conflict_do_nothing(index_elements=["codigo_tecnica"]))
+        conn.execute(insert(t["tecnica_tactica"]).values(
+            codigo_tecnica=code, codigo_tactica=tactic)
+            .on_conflict_do_nothing(index_elements=["codigo_tecnica", "codigo_tactica"]))
+
+
 async def main():
     async with lifespan(app):
-        t = app.state.tables
         with app.state.engine.begin() as conn:
-            for number, name in ((1, "IP"), (2, "Dominio"), (3, "URL"), (4, "Hash")):
-                conn.execute(insert(t["tipo_ioc"]).values(id_tipo_ioc=number, nombre=name)
-                    .on_conflict_do_nothing(index_elements=["id_tipo_ioc"]))
-            for code, name in TACTICS:
-                conn.execute(insert(t["tactica_mitre"]).values(
-                    codigo_tactica=code, nombre=name, version_attack=VERSION,
-                    descripcion=f"https://attack.mitre.org/tactics/{code}/")
-                    .on_conflict_do_update(index_elements=["codigo_tactica"],
-                        set_={"nombre": name, "version_attack": VERSION}))
-            for code, parent, name, tactic in TECHNIQUES:
-                path = code.replace(".", "/")
-                conn.execute(insert(t["tecnica_mitre"]).values(
-                    codigo_tecnica=code, tecnica_padre_id=parent, nombre=name,
-                    version_attack=VERSION,
-                    descripcion=f"https://attack.mitre.org/techniques/{path}/")
-                    .on_conflict_do_update(index_elements=["codigo_tecnica"],
-                        set_={"nombre": name, "version_attack": VERSION}))
-                conn.execute(insert(t["tecnica_tactica"]).values(
-                    codigo_tecnica=code, codigo_tactica=tactic)
-                    .on_conflict_do_nothing(index_elements=["codigo_tecnica", "codigo_tactica"]))
+            seed_catalog(conn, app.state.tables)
     print(f"Catálogo Cowrie ATT&CK Enterprise {VERSION}: {len(TECHNIQUES)} técnicas")
 
 

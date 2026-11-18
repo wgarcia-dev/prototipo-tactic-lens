@@ -11,3 +11,17 @@ frontend/*.tsbuildinfo
 .local/
 frontend/.env
 *.eml
+# Transferencias y configuraciones privadas (tambien fuera de .local/ por error).
+.env.*
+!.env.example
+*.backup
+*.backup.json
+*.dump
+*.dump.json
+*.auth.env
+restored-db.env
+*.private.sql
+archive-inspection.sql
+*.fernet
+*.sqlite3
+*.key

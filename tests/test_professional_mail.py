@@ -17,6 +17,8 @@ from backend.auth.security import now
 class ProfessionalMailTests(fixtures.AuthFixture):
     def setUp(self):
         super().setUp()
+        q=app.state.tables['auth_notificacion']
+        self.initial_notification_ids=list(self.connection.execute(select(q.c.id_notificacion)).scalars())
         self.previous_config = app.state.mail_config
         self.routing = patch.dict("os.environ", {"ADMIN_EMAIL":"admin@example.org", "SUPPORT_EMAIL":"soporte@example.org",
             "MAIL_ALERT_THRESHOLD":"5", "MAIL_ALERT_WINDOW_SECONDS":"900", "MAIL_ALERT_COOLDOWN_SECONDS":"900",
@@ -39,7 +41,8 @@ class ProfessionalMailTests(fixtures.AuthFixture):
 
     def queue(self):
         q = app.state.tables["auth_notificacion"]
-        return self.connection.execute(select(q).order_by(q.c.creado_en,q.c.id_notificacion)).mappings().all()
+        return self.connection.execute(select(q).where(q.c.id_notificacion.not_in(self.initial_notification_ids))
+            .order_by(q.c.creado_en,q.c.id_notificacion)).mappings().all()
 
     def support_data(self, **changes):
         return {"nombre":"Ángela María", "correo":"consulta@example.org", "asunto":"No puedo acceder a mi cuenta",

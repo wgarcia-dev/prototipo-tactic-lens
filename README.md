@@ -1,5 +1,19 @@
 # TacticLens
 
+**Prioridad actual: continuidad en otra PC Windows con históricos, sin Ubuntu.** Siga
+[MIGRACION_NUEVA_PC.md](docs/MIGRACION_NUEVA_PC.md) para recuperar el paquete privado,
+restaurar PostgreSQL y usar `Preparar-NuevaPC.ps1` / `Iniciar-TacticLens.ps1` en loopback.
+El [estado de IoCs y salvaguardas](docs/CONTINUIDAD_DESARROLLO_IOC_SALVAGUARDAS.md)
+distingue las funciones actuales del desarrollo pendiente. La integración Cowrie se conserva para otra etapa.
+
+**Monitoreo vigente por eventos:** [inotify, SQLite, HTTP inmediato y WebSocket hacia React](docs/TIEMPO_REAL_WEBSOCKET.md), con prueba física y recuperación tras desconexión. Sustituye el timer de 2 s y el polling de monitoreo de 1 s. Consulte también la [auditoría previa de MITRE ATT&CK](docs/AUDITORIA_MITRE_ATTCK.md).
+
+**DeepSeek + RAG MITRE:** [implementación, catálogo Enterprise 20.1, embeddings locales CPU y búsqueda híbrida pgvector + texto](docs/IMPLEMENTACION_RAG_MITRE.md). El análisis sigue siendo manual y las propuestas requieren revisión humana; los resultados históricos se conservan.
+
+**Despliegue actual entre laptops físicas:** siga [la demostración Windows + Ubuntu mediante HTTP local y SQLite](docs/DEMO_LAPTOPS.md). El backend existente acepta ingesta únicamente desde Ubuntu en la interfaz seleccionada; React conserva su proxy local. No se utiliza túnel SSH. Las instrucciones de VirtualBox y `192.168.56.*` que aparecen más abajo describen el laboratorio anterior. `collector/collector.py` queda retirado como emisor directo. Consulte los [resultados reales](docs/RESULTADOS_HTTP_LOCAL.md).
+
+La [integración colaborativa del 12 de noviembre](docs/INTEGRACION_COLABORATIVA_2026-11-12.md) documenta los respaldos, conflictos, migraciones conservadas y pruebas de la versión unificada.
+
 TacticLens es un prototipo académico para observar intentos de acceso SSH en un entorno controlado. Cowrie simula un servidor SSH y registra conexiones, autenticaciones y comandos; un recolector envía esos eventos a FastAPI, que los conserva en PostgreSQL. La interfaz React permite revisar sesiones históricas, ejecutar un análisis con DeepSeek y consultar valores observados y asociaciones propuestas con MITRE ATT&CK. Una IP, dominio, URL o hash pasa a ser un indicador de compromiso útil cuando su contexto y evidencia justifican esa conclusión; el sistema permite esa revisión humana. Un mapeo MITRE propone la técnica que podría explicar una acción registrada.
 
 **Implementado:** ingesta automática o importación manual, deduplicación de eventos, consulta y paginación, análisis manual de cualquier sesión con eventos, reutilización de resultados vigentes, reintento de fallos, bloqueo de análisis simultáneos por sesión, aviso cuando llegan eventos nuevos, extracción de observables independiente del LLM, mapeos MITRE con evidencia y revisión administrativa auditada. También incluye registro con autorización administrativa, verificación de correo, Google Authenticator obligatorio, recuperación, sesiones revocables, roles y auditoría. **Pendiente:** análisis automático al cerrar una sesión, despliegue público y monitoreo de producción. La ingesta funciona aunque DeepSeek esté indisponible.

@@ -15,7 +15,7 @@ Desde la raíz del proyecto, con PostgreSQL disponible y `.env` configurado:
 .\.venv\Scripts\python.exe -m scripts.backfill_mappings
 ```
 
-Los comandos son repetibles. `seed_catalog` conserva relaciones existentes y carga un subconjunto revisado de ATT&CK Enterprise 20.1. `backfill_observables` procesa eventos históricos sin llamar al LLM. `backfill_mappings` recupera propuestas históricas solo si puede asociarlas inequívocamente a la acción y a sus eventos; omite otras. Las nuevas observaciones se crean durante la ingesta. Reinicie Uvicorn después de aplicar la migración y el código.
+Los comandos son repetibles. `seed_catalog` agrega las entradas faltantes del subconjunto ATT&CK y conserva los metadatos y relaciones existentes. `backfill_observables` procesa eventos históricos sin llamar al LLM e incorpora las detecciones LLM históricas al listado unificado, sin sobrescribir revisiones. `backfill_mappings` recupera propuestas históricas solo si puede asociarlas inequívocamente a la acción y a sus eventos; omite otras. Las nuevas observaciones se crean en la misma transacción que el evento y su recibo de ingesta. Reinicie Uvicorn después de aplicar la migración y el código.
 
 El catálogo se limita deliberadamente a técnicas pertinentes al laboratorio. El origen de los códigos es [MITRE ATT&CK Enterprise](https://attack.mitre.org/) y su [distribución oficial STIX](https://github.com/mitre-attack/attack-stix-data). Al ampliar el subconjunto, revise la técnica y su táctica en esa fuente, agregue la relación en `scripts/seed_catalog.py` y actualice `COWRIE_TECHNIQUES` en `backend/routes.py`. No incorpore códigos producidos únicamente por un LLM.
 
@@ -25,7 +25,9 @@ El catálogo se limita deliberadamente a técnicas pertinentes al laboratorio. E
 2. **MITRE ATT&CK:** abra un mapeo para ver técnica, táctica, sesión, evidencia y justificación. El administrador revisa la propuesta. La confianza mostrada es la declaración del modelo; no es una probabilidad calibrada.
 3. **Sesiones y eventos:** analice manualmente una sesión para generar nuevas propuestas MITRE. Los observables aparecen tras la ingesta, sin requerir ese análisis.
 
-La revisión cambia el estado del hallazgo; no modifica el evento original. Las decisiones se registran en `auth_auditoria`. La migración `007_inteligencia.sql` crea `observacion_ioc` y añade revisión a `mapeo_mitre`; `008_limpieza_dominios.sql` retira nombres de archivo que pudieron clasificarse erróneamente como dominios durante el primer reproceso.
+La revisión cambia el estado del hallazgo; no modifica el evento original. Las decisiones se registran en `auth_auditoria`. La migración `007_inteligencia.sql` crea `observacion_ioc` y añade revisión a `mapeo_mitre`. Convive con `007_ingesta_identidad.sql`: el ejecutor identifica cada migración por su nombre completo y checksum, por lo que no se renumeran archivos publicados.
+
+`008_limpieza_dominios.sql` contiene borrados de evidencia histórica. Se conserva intacta para respetar el historial y los checksums de instalaciones anteriores, pero **el ejecutor no la aplica si está pendiente ni la marca como aplicada**. La integración no borra observaciones ni IoCs: el extractor evita nuevos falsos positivos por extensiones de archivo y los históricos pueden revisarse administrativamente. Si otra instalación ya aplicó esa migración, se valida su checksum y no se intenta deshacerla automáticamente.
 
 ## Límites actuales
 

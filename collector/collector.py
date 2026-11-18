@@ -127,4 +127,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit('Recolector directo retirado para esta instalación. Use la cola SQLite existente y sqlite_sender.py; no ejecute dos emisores.')

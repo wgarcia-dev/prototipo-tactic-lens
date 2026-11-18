@@ -111,7 +111,7 @@ REQUISITOS DEL INFORME:
   en sesiones cortas explica solo lo sustentable, sin rellenar ni inventar fases o acciones.
 - Acciones sin evidencia: no las incluyas. Se permite acciones=[] si solo hay conexión o desconexión.
 - Usa exclusivamente IDs proporcionados en fases, hipótesis, acciones e IoCs. No uses IDs del ejemplo.
-- Para IoCs incluye tipo (IP, Dominio, URL o Hash), valor literal presente, evento, evidencia y confianza.
+- Para IoCs cita exclusivamente una entrada de observables_por_evento del mismo evento de la acción. Incluye evento, referencia y tipo. El servidor resuelve el valor original. Evidencia y confianza expresan tu interpretación del contexto. Si no hay respaldo, deja iocs vacío.
   No conviertas automáticamente cada dirección o archivo en malicioso: explica su papel observado.
 - Para MITRE incluye codigo, justificacion y confianza. Usa exclusivamente códigos de
   tecnicas_mitre_permitidas incluidos en la entrada y solo si los eventos sustentan la acción.

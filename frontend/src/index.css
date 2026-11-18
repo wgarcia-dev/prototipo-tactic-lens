@@ -5,3 +5,4 @@
 .pager .btn-secondary{min-width:6rem;text-align:center;font-size:.8rem}
 input:focus-visible,button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid #43d7d4;outline-offset:2px}
 @media(max-width:640px){.pager{align-items:stretch}.pager>div{width:100%}.pager button{flex:1}}
+.badge.contextual{background:#1b3049;color:#b6c9dc}

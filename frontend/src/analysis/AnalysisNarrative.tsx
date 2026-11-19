@@ -1,3 +1,6 @@
+import {Link} from 'react-router-dom'
+import {eventEvidencePath} from './iocEvidence'
+
 export type AnalysisPayload = {
   rag?:{metodo:string,catalogo:{version:string}}
   eventos_analizados?: number;
@@ -18,9 +21,9 @@ export type AnalysisPayload = {
       observado: string;
       interpretacion: string;
       resultado: string;
-      eventos: number[];
+      eventos: number[]; eventos_texto?: string[];
     }[];
-    hipotesis: {descripcion: string; confianza: number; eventos: number[]}[];
+    hipotesis: {descripcion: string; confianza: number; eventos: number[]; eventos_texto?: string[]}[];
     conclusion: string;
     limitaciones: string[];
     recomendaciones: (string | {salvaguarda:string; activo:string; riesgo:string; objetivo:string; medidas:string; validacion:string})[];
@@ -28,18 +31,19 @@ export type AnalysisPayload = {
 };
 
 type Narrative = {
+  id_sesion: string;
   salvaguardas?: {title:string; rows:[string,string][]}[];
   resumen: string | null;
   mensaje_error: string | null;
   resultado_estructurado?: AnalysisPayload;
 };
 
-export function hasDetailedReport(analysis: Narrative) {
-  return !!analysis.resultado_estructurado?.informe;
+export function hasCurrentReport(analysis: Narrative) {
+  return !!analysis.resultado_estructurado?.informe && (analysis.resultado_estructurado.version_informe ?? 0) >= 3;
 }
 
-function Evidence({events}: {events: number[]}) {
-  return <p className="muted text-xs mt-3 break-words">Evidencia: {events.map(id => `#${id}`).join(', ')}</p>;
+function Evidence({events, session}: {events: string[]; session: string}) {
+  return <p className="muted text-xs mt-3 break-words">Evidencia: {events.map(id => <Link className="accent underline mr-2" key={id} to={eventEvidencePath(session,id)}>Evento #{id}</Link>)}</p>;
 }
 
 export function AnalysisNarrative({analysis}: {analysis: Narrative}) {
@@ -101,7 +105,7 @@ export function AnalysisNarrative({analysis}: {analysis: Narrative}) {
               <div><dt className="text-xs font-semibold">Interpretación técnica</dt><dd className="muted whitespace-pre-wrap">{phase.interpretacion}</dd></div>
               <div><dt className="text-xs font-semibold">Resultado y evidencia disponible</dt><dd className="whitespace-pre-wrap">{phase.resultado}</dd></div>
             </dl>
-            <Evidence events={phase.eventos}/>
+            <Evidence session={analysis.id_sesion} events={phase.eventos_texto ?? phase.eventos.filter(Number.isSafeInteger).map(String)}/>
             </details>
           </li>)}
         </ol>
@@ -112,7 +116,7 @@ export function AnalysisNarrative({analysis}: {analysis: Narrative}) {
         <ul className="space-y-4">{report.hipotesis.map((hypothesis, index) => <li key={index} className="border-l-2 border-[#2d5470] pl-3">
           <p className="whitespace-pre-wrap break-words">{hypothesis.descripcion}</p>
           <p className="text-xs muted mt-1">Confianza estimada: {Math.round(hypothesis.confianza * 100)}%</p>
-          <Evidence events={hypothesis.eventos}/>
+          <Evidence session={analysis.id_sesion} events={hypothesis.eventos_texto ?? hypothesis.eventos.filter(Number.isSafeInteger).map(String)}/>
         </li>)}</ul>
       </details>}
       <details className="py-2">

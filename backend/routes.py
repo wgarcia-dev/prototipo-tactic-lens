@@ -148,7 +148,7 @@ def dashboard_snapshot():
         commands = conn.execute(select(e.c.id_evento,e.c.id_sesion,e.c.fecha_hora,e.c.datos_originales)
             .where(e.c.tipo_evento=='cowrie.command.input', e.c.id_sesion.in_(sessions))
             .order_by(e.c.fecha_hora.desc(),e.c.id_evento.desc()).limit(5)).mappings().all()
-    recent_commands=[{'id_evento':row['id_evento'],'id_sesion':str(row['id_sesion']),
+    recent_commands=[{'id_evento':row['id_evento'],'id_evento_texto':str(row['id_evento']),'id_sesion':str(row['id_sesion']),
         'fecha_hora':row['fecha_hora'],'comando':redact(str(row['datos_originales'].get('input','')))[:2000]}
         for row in commands]
     return {**counts, "actividad": [plain(x) for x in reversed(by_day)], "tipos_evento": [plain(x) for x in by_type], "ultimo_evento": latest_event,
@@ -305,7 +305,7 @@ def real_result(events, rag=None):
     result = AnalysisResult.model_validate_json(content)
     if result.informe is None:
         raise ValueError("El proveedor no incluyó el informe detallado solicitado")
-    validate_report_evidence(result.informe, {event.id_evento for event in events})
+    validate_report_evidence(result.informe, {event.id_evento for event in sample})
     return result
 
 
@@ -490,6 +490,8 @@ def get_analysis(id_analisis: UUID):
     from .analysis_report import safeguard_cards
     payload = safe(row.resultado_estructurado)
     report = (payload or {}).get("informe") or {}
+    for item in (report.get("fases") or []) + (report.get("hipotesis") or []):
+        item["eventos_texto"] = [str(eid) for eid in item.get("eventos", [])]
     return {**plain(row), "resultado_estructurado": payload, "acciones": output,
             "salvaguardas": safeguard_cards(report.get("recomendaciones") or [])}
 

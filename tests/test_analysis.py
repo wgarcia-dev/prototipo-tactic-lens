@@ -61,6 +61,7 @@ class AnalysisReportTests(unittest.TestCase):
             result = real_result(self.events)
         self.assertEqual(result.informe.fases[0].eventos, [42])
         request = post.call_args.kwargs["json"]
+        self.assertIn("No atribuyas los eventos a una tesis", request["messages"][0]["content"])
         facts = json.loads(request["messages"][1]["content"])
         self.assertNotIn("captured-secret", request["messages"][1]["content"])
         self.assertNotIn("captured-token", request["messages"][1]["content"])
@@ -130,7 +131,8 @@ class AnalysisReportTests(unittest.TestCase):
         with self.provider(json.dumps(legacy)), self.assertRaisesRegex(ValueError, "informe detallado"):
             real_result(self.events)
         self.assertTrue(needs_report_upgrade(legacy))
-        self.assertFalse(needs_report_upgrade({"version_informe": 2, "informe": report_data()}))
+        self.assertTrue(needs_report_upgrade({"version_informe": 2, "informe": report_data()}))
+        self.assertFalse(needs_report_upgrade({"version_informe": 3, "informe": report_data()}))
         self.assertTrue(needs_report_upgrade({"version_informe": 2}))
 
     def test_truncated_output_is_rejected_even_if_json_is_parseable(self):

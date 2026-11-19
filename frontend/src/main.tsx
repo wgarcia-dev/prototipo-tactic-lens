@@ -10,7 +10,7 @@ import {AuthBoundary} from './auth/AuthBoundary'
 import {SecurityPage, SessionControls} from './auth/SecurityPage'
 import {AdminUsers} from './auth/AdminUsers'
 import {AdminOnly} from './auth/AdminOnly'
-import {AnalysisNarrative, hasDetailedReport, type AnalysisPayload} from './analysis/AnalysisNarrative'
+import {AnalysisNarrative, hasCurrentReport, type AnalysisPayload} from './analysis/AnalysisNarrative'
 import {useMonitorQuery as usePolling, RealtimeProvider, useRealtime} from './monitoring/Realtime'
 import {sameSnapshot} from './monitoring/polling'
 import {RagCandidates} from './analysis/RagCandidates'
@@ -27,7 +27,7 @@ import {SessionReport} from './analysis/SessionReport'
 
 type Session = {id_sesion:string,cowrie_session_id:string,ip_origen:string|null,fecha_inicio:string,fecha_fin:string|null,protocolo?:string,eventos?:number,estado_analisis?:'pendiente'|'en_proceso'|'analizada'|'error',analisis_desactualizado?:boolean,analisis?:{id_analisis:string,estado:string}|null,ultimo_intento?:{id_analisis:string,estado:string,mensaje_error:string|null}|null}
 type Event = {id_evento:number,id_evento_texto?:string,tipo_evento:string,fecha_hora:string,datos_originales:Record<string,unknown>}
-type RecentCommand = {id_evento:number,id_sesion:string,fecha_hora:string,comando:string}
+type RecentCommand = {id_evento:number,id_evento_texto:string,id_sesion:string,fecha_hora:string,comando:string}
 type Dashboard = {ultimos_comandos:RecentCommand[],sesiones:number,eventos:number,sesiones_analizadas:number,iocs:number,tecnicas_mitre:number,actividad:{dia:string,total:number}[],tipos_evento:{tipo_evento:string,total:number}[],ultimo_evento:string|null,collector_last_seen:string|null}
 type AnalysisAction = {id_accion:string,tipo_accion:string,descripcion:string,confianza:number|null,eventos_texto:string[],observables:ObservableLink[],mitre:MappingEvidence[]}
 type Analysis = {id_analisis:string,id_sesion:string,estado:string,resumen:string|null,mensaje_error:string|null,resultado_estructurado?:AnalysisPayload,acciones:AnalysisAction[]}
@@ -61,7 +61,7 @@ function DashboardPage(){
       setSessions(previous=>sameSnapshot(previous,recent.value));setError('')
     }catch(e){if(!signal.aborted)setError((e as Error).message);throw e}
   })
-  return <><Header title="Panel principal" description="Actividad del honeypot"/>{error&&<ErrorBox error={error}/>}<div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-4 mb-5"><Metric label="Sesiones registradas" value={data?.sesiones??'—'} sub="Sesiones almacenadas"/><Metric label="Eventos recibidos" value={data?.eventos??'—'} sub="Vinculados a sesiones" color="blue"/><Metric label="Sesiones analizadas" value={data?.sesiones_analizadas??'—'} sub="Análisis completados" color="green"/><Metric label="Observables registrados" value={data?.iocs??'—'} sub="Con evidencia de Cowrie" color="purple"/><Metric label="Técnicas MITRE" value={data?.tecnicas_mitre??'—'} sub="Asociaciones registradas" color="green"/></div><div className="grid lg:grid-cols-[1.7fr_1fr] gap-5 mb-5"><section className="panel p-5"><h2 className="font-semibold">Actividad de eventos</h2><p className="muted text-xs mt-1">Cantidad de eventos registrados por día</p><div className="h-60 mt-5">{data?.actividad.length?<ResponsiveContainer width="100%" height="100%"><BarChart data={data.actividad}><CartesianGrid stroke="#20344d" vertical={false}/><XAxis dataKey="dia" tick={{fill:'#8ea3bb',fontSize:11}}/><YAxis tick={{fill:'#8ea3bb',fontSize:11}}/><Tooltip contentStyle={{background:'#16273f',border:'1px solid #27415c',color:'#fff'}}/><Bar isAnimationActive={false} dataKey="total" fill="#4180aa" radius={[4,4,0,0]}/></BarChart></ResponsiveContainer>:<div className="muted text-sm pt-20 text-center">Sin eventos todavía</div>}</div></section><section className="panel p-5"><h2 className="font-semibold">Eventos por tipo</h2><p className="muted text-xs mt-1">Distribución observada en PostgreSQL</p><div className="mt-6 space-y-4">{data?.tipos_evento.map(x=><div key={x.tipo_evento}><div className="flex justify-between text-xs mb-2 gap-3"><span className="truncate">{x.tipo_evento}</span><span className="accent">{x.total}</span></div><div className="h-2 rounded-full bg-[#24384f]"><div className="h-2 rounded-full bg-[#42caca]" style={{width:`${Math.max(4,(x.total/(data.tipos_evento[0]?.total||1))*100)}%`}}/></div></div>)}</div></section></div><section className="panel p-5"><div className="flex justify-between items-start mb-4"><div><h2 className="font-semibold">Sesiones recientes</h2><p className="muted text-xs mt-1">Accesos capturados por Cowrie</p></div><Link className="btn text-xs" to="/sesiones">Ver todas</Link></div><SessionTable sessions={sessions}/></section><section className="panel p-5 mt-5" aria-label="Comandos recientes"><h2 className="font-semibold">Últimos comandos observados</h2><p className="muted text-xs mt-1">Actualizaciones por WebSocket · el análisis LLM se ejecuta manualmente</p><ul className="mt-4 space-y-3" aria-live="polite">{data?.ultimos_comandos?.map(command=><li key={command.id_evento} data-evento={command.id_evento} ref={node=>{if(node&&!node.dataset.renderizadoEn){node.dataset.renderizadoEn=new Date().toISOString();if(realtime.notice?.eventos?.includes(command.id_evento)){node.dataset.recibidoApi=realtime.notice.recibido_api;node.dataset.confirmadoApi=realtime.notice.confirmado_api}}}} className="bg-[#0c1728] rounded p-3"><code className="block text-sm break-all whitespace-pre-wrap">{command.comando}</code><div className="flex flex-wrap gap-3 mt-2 text-xs muted"><span>{date(command.fecha_hora)}</span><Link className="accent" to={'/sesiones/'+command.id_sesion}>Ver sesión</Link><span>#{command.id_evento}</span></div></li>)}</ul>{!data?.ultimos_comandos?.length&&<p className="muted text-sm mt-4">Sin comandos registrados todavía.</p>}</section></>}
+  return <><Header title="Panel principal" description="Actividad del honeypot"/>{error&&<ErrorBox error={error}/>}<div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-4 mb-5"><Metric label="Sesiones registradas" value={data?.sesiones??'—'} sub="Sesiones almacenadas"/><Metric label="Eventos recibidos" value={data?.eventos??'—'} sub="Vinculados a sesiones" color="blue"/><Metric label="Sesiones analizadas" value={data?.sesiones_analizadas??'—'} sub="Análisis completados" color="green"/><Metric label="Observables registrados" value={data?.iocs??'—'} sub="Con evidencia de Cowrie" color="purple"/><Metric label="Técnicas MITRE" value={data?.tecnicas_mitre??'—'} sub="Asociaciones registradas" color="green"/></div><div className="grid lg:grid-cols-[1.7fr_1fr] gap-5 mb-5"><section className="panel p-5"><h2 className="font-semibold">Actividad de eventos</h2><p className="muted text-xs mt-1">Cantidad de eventos registrados por día</p><div className="h-60 mt-5">{data?.actividad.length?<ResponsiveContainer width="100%" height="100%"><BarChart data={data.actividad}><CartesianGrid stroke="#20344d" vertical={false}/><XAxis dataKey="dia" tick={{fill:'#8ea3bb',fontSize:11}}/><YAxis tick={{fill:'#8ea3bb',fontSize:11}}/><Tooltip contentStyle={{background:'#16273f',border:'1px solid #27415c',color:'#fff'}}/><Bar isAnimationActive={false} dataKey="total" fill="#4180aa" radius={[4,4,0,0]}/></BarChart></ResponsiveContainer>:<div className="muted text-sm pt-20 text-center">Sin eventos todavía</div>}</div></section><section className="panel p-5"><h2 className="font-semibold">Eventos por tipo</h2><p className="muted text-xs mt-1">Distribución observada en PostgreSQL</p><div className="mt-6 space-y-4">{data?.tipos_evento.map(x=><div key={x.tipo_evento}><div className="flex justify-between text-xs mb-2 gap-3"><span className="truncate">{x.tipo_evento}</span><span className="accent">{x.total}</span></div><div className="h-2 rounded-full bg-[#24384f]"><div className="h-2 rounded-full bg-[#42caca]" style={{width:`${Math.max(4,(x.total/(data.tipos_evento[0]?.total||1))*100)}%`}}/></div></div>)}</div></section></div><section className="panel p-5"><div className="flex justify-between items-start mb-4"><div><h2 className="font-semibold">Sesiones recientes</h2><p className="muted text-xs mt-1">Accesos capturados por Cowrie</p></div><Link className="btn text-xs" to="/sesiones">Ver todas</Link></div><SessionTable sessions={sessions}/></section><section className="panel p-5 mt-5" aria-label="Comandos recientes"><h2 className="font-semibold">Últimos comandos observados</h2><p className="muted text-xs mt-1">Actualizaciones por WebSocket · el análisis LLM se ejecuta manualmente</p><ul className="mt-4 space-y-3" aria-live="polite">{data?.ultimos_comandos?.map(command=><li key={command.id_evento_texto} data-evento={command.id_evento_texto} ref={node=>{if(node&&!node.dataset.renderizadoEn){node.dataset.renderizadoEn=new Date().toISOString();if(realtime.notice?.eventos?.includes(command.id_evento)){node.dataset.recibidoApi=realtime.notice.recibido_api;node.dataset.confirmadoApi=realtime.notice.confirmado_api}}}} className="bg-[#0c1728] rounded p-3"><code className="block text-sm break-all whitespace-pre-wrap">{command.comando}</code><div className="flex flex-wrap gap-3 mt-2 text-xs muted"><span>{date(command.fecha_hora)}</span><Link className="accent" to={'/sesiones/'+command.id_sesion}>Ver sesión</Link><Link className="accent underline" to={eventEvidencePath(command.id_sesion,command.id_evento_texto)}>Evento #{command.id_evento_texto}</Link></div></li>)}</ul>{!data?.ultimos_comandos?.length&&<p className="muted text-sm mt-4">Sin comandos registrados todavía.</p>}</section></>}
 function SessionTable({sessions,onAnalyze,busyId}:{sessions:Session[],onAnalyze?:(session:Session)=>void,busyId?:string|null}){
   return <div className="overflow-x-auto"><table className="w-full text-sm">
     <thead className="bg-[#1b3049] text-[#a9bdd2] text-left text-xs"><tr><th className="p-3">Sesión</th><th className="p-3">IP de origen</th><th className="p-3">Inicio</th><th className="p-3">Protocolo</th><th className="p-3">Eventos</th><th className="p-3">Análisis</th>{onAnalyze&&<th className="p-3">Acción</th>}</tr></thead>
@@ -103,10 +103,24 @@ function Pager({page,pageSize,count,hasNext,onChange,label}:{page:number,pageSiz
 
 function SessionsPage(){
   const navigate=useNavigate()
-  const [page,setPage]=useState(0)
-  const [query,setQuery]=useState('')
-  const [filter,setFilter]=useState('')
+  const {session:authSession}=useAuth()
+  const [params,setParams]=useSearchParams()
+  const rawPage=Number(params.get('pagina')??1)
+  const page=Number.isSafeInteger(rawPage)&&rawPage>=1&&rawPage<=1000000?rawPage-1:0
+  const query=params.get('q')??''
+  const [filter,setFilter]=useState(query.trim())
   useEffect(()=>{const timeout=window.setTimeout(()=>setFilter(query.trim()),250);return()=>window.clearTimeout(timeout)},[query])
+  function setPage(next:number){
+    const updated=new URLSearchParams(params)
+    if(next)updated.set('pagina',String(next+1));else updated.delete('pagina')
+    setParams(updated)
+  }
+  function setQuery(value:string){
+    const updated=new URLSearchParams(params)
+    if(value)updated.set('q',value);else updated.delete('q')
+    updated.delete('pagina')
+    setParams(updated,{replace:true})
+  }
   const [busyId,setBusyId]=useState<string|null>(null)
   const [actionError,setActionError]=useState('')
   const {rows:sessions,hasNext,loading,error}=usePagedData<Session>('/sesiones?q='+encodeURIComponent(filter),page,PAGE_SIZE,1000)
@@ -119,12 +133,12 @@ function SessionsPage(){
     finally{setBusyId(null)}
   }
   return <>
-    <Header title="Sesiones y eventos" description="Historial y cronología de Cowrie" action={<Link className="btn" to="/importar">Importar archivo</Link>}/>
+    <Header title="Sesiones y eventos" description="Historial y cronología de Cowrie" action={authSession?.usuario.rol==='administrador'?<Link className="btn" to="/importar">Importar archivo</Link>:undefined}/>
     {(error||actionError)&&<ErrorBox error={error||actionError}/>}
     <section className="panel p-5">
       <div className="flex flex-wrap gap-3 justify-between items-center mb-5">
         <div><h2 className="font-semibold">Historial de sesiones</h2><p className="muted text-xs mt-1">Busca por sesión o IP</p></div>
-        <div className="relative"><Search size={15} className="absolute left-3 top-3 muted"/><input aria-label="Buscar sesión o IP" className="bg-[#1a2e46] rounded-md text-sm pl-9 pr-3 py-2 outline-none border border-[#29415a]" placeholder="Filtrar sesión o IP" value={query} onChange={e=>{setQuery(e.target.value);setPage(0)}}/></div>
+        <div className="relative"><Search size={15} className="absolute left-3 top-3 muted"/><input aria-label="Buscar sesión o IP" className="bg-[#1a2e46] rounded-md text-sm pl-9 pr-3 py-2 outline-none border border-[#29415a]" placeholder="Filtrar sesión o IP" value={query} onChange={e=>setQuery(e.target.value)}/></div>
       </div>
       {loading?<p className="muted text-sm py-8 text-center">Cargando sesiones…</p>:<SessionTable sessions={sessions} onAnalyze={analyze} busyId={busyId}/>}
       <Pager page={page} pageSize={PAGE_SIZE} count={sessions.length} hasNext={hasNext} onChange={setPage} label="sesiones"/>
@@ -140,7 +154,7 @@ function ActionEvidence({action,sessionId}: {action:AnalysisAction,sessionId:str
     <p className="text-sm muted mt-1">{action.descripcion}</p>
     <div className="flex gap-x-2 gap-y-1 flex-wrap text-xs mt-2">
       <span className="muted">Eventos de la acción</span>
-      {action.eventos_texto.map(event=><Link className="accent hover:underline" key={event} to={eventEvidencePath(sessionId,event)}>#{event}</Link>)}
+      {action.eventos_texto.map(event=><Link className="accent hover:underline" key={event} to={eventEvidencePath(sessionId,event)}>Evento #{event}</Link>)}
     </div>
     {action.mitre.map(mapping=><div key={mapping.id_mapeo} className="text-xs mt-3">
       <Link className="accent hover:underline" to={mappingEvidencePath(mapping.id_mapeo)}>{mapping.codigo_tecnica} · {mapping.tecnica}</Link>
@@ -154,11 +168,53 @@ function ActionEvidence({action,sessionId}: {action:AnalysisAction,sessionId:str
   </article>
 }
 
+function SessionRoute(){
+  const {id}=useParams()
+  const [params]=useSearchParams()
+  const event=params.get('evento')
+  return id && event!==null ? <EventDetail key={id+':'+event} session={id} event={event}/> : <SessionDetail/>
+}
+
+function EventDetail({session,event}:{session:string,event:string}){
+  const navigate=useNavigate()
+  const heading=useRef<HTMLHeadingElement>(null)
+  const [record,setRecord]=useState<Event|null>(null)
+  const [loading,setLoading]=useState(true)
+  const [error,setError]=useState('')
+  const [attempt,setAttempt]=useState(0)
+  const valid=/^(0|[1-9][0-9]{0,18})$/.test(event)&&BigInt(event)<=9223372036854775807n
+  useEffect(()=>{
+    heading.current?.focus()
+    heading.current?.scrollIntoView({block:'start'})
+  },[])
+  useEffect(()=>{
+    if(!valid)return
+    const controller=new AbortController()
+    setLoading(true);setError('')
+    api<Event[]>('/sesiones/'+encodeURIComponent(session)+'/eventos?id_evento='+encodeURIComponent(event)+'&limit=1',{signal:controller.signal})
+      .then(rows=>{if(!controller.signal.aborted)setRecord(rows.find(row=>row.id_evento_texto===event)??null)})
+      .catch(e=>{if(!controller.signal.aborted)setError((e as Error).message)})
+      .finally(()=>{if(!controller.signal.aborted)setLoading(false)})
+    return ()=>controller.abort()
+  },[session,event,attempt,valid])
+  return <section className="panel p-5 space-y-4">
+    <h1 ref={heading} tabIndex={-1} className="text-2xl font-bold">{valid?'Evento #'+event:'Referencia de evento inválida'}</h1>
+    <div className="flex flex-wrap gap-3">
+      {window.history.state?.idx>0&&<button className="btn-secondary" onClick={()=>navigate(-1)}>Volver</button>}
+      <Link className="btn-secondary" to={sessionEvidencePath(session)}>Ver sesión completa</Link>
+    </div>
+    {valid&&(loading?<p role="status">Cargando evidencia…</p>:error?<><ErrorBox error={error}/><button className="btn-secondary" onClick={()=>setAttempt(n=>n+1)}>Reintentar</button></>:record?<article className="space-y-3">
+      <h2 className="font-semibold">{record.tipo_evento}</h2><p className="muted">{date(record.fecha_hora)}</p>
+      {typeof record.datos_originales.input==='string'&&<div><h3>Comando registrado</h3><pre className="whitespace-pre-wrap break-words">{record.datos_originales.input}</pre></div>}
+      <details><summary>Ver campos del evento</summary><pre className="overflow-auto whitespace-pre-wrap break-words mt-2">{JSON.stringify(record.datos_originales,null,2)}</pre></details>
+    </article>:<p role="status">No se encontró este evento en la sesión indicada.</p>)}
+  </section>
+}
+
 function SessionDetail(){
   const {id}=useParams()
   const navigate=useNavigate()
   const [params]=useSearchParams()
-  const eventId=params.get('evento')
   const requestedAnalysis=params.get('analisis')
   const requestedAction=params.get('accion')
   const [session,setSession]=useState<Session|null>(null)
@@ -166,9 +222,9 @@ function SessionDetail(){
   const [error,setError]=useState('')
   const [busy,setBusy]=useState(false)
   const [page,setPage]=useState(0)
-  const eventPath='/sesiones/'+id+'/eventos'+(eventId?'?id_evento='+encodeURIComponent(eventId):'')
-  const {rows:events,hasNext,loading,error:eventError}=usePagedData<Event>(eventPath,eventId?0:page,20,1000,session?.eventos??-1)
-  useEffect(()=>setPage(0),[id,eventId])
+  const eventPath='/sesiones/'+id+'/eventos'
+  const {rows:events,hasNext,loading,error:eventError}=usePagedData<Event>(eventPath,page,20,1000,session?.eventos??-1)
+  useEffect(()=>setPage(0),[id])
   const loadedAnalysis=useRef<string|null>(null)
   useEffect(()=>{loadedAnalysis.current=null;setSession(null);setAnalysis(null)},[id,requestedAnalysis])
   usePolling(async signal=>{
@@ -190,25 +246,25 @@ function SessionDetail(){
   async function analyze(){
     setBusy(true);setError('')
     try{
-      const result=await api<{id_analisis:string}>('/sesiones/'+id+'/analizar?actualizar_rag=true'+(analysis&&!hasDetailedReport(analysis)?'&actualizar_informe=true':''),{method:'POST'})
+      const result=await api<{id_analisis:string}>('/sesiones/'+id+'/analizar?actualizar_rag=true'+(analysis&&!hasCurrentReport(analysis)?'&actualizar_informe=true':''),{method:'POST'})
       setAnalysis(await api<Analysis>('/analisis/'+result.id_analisis))
       setSession(await api<Session>('/sesiones/'+id))
     }catch(e){setError((e as Error).message)}
     finally{setBusy(false)}
   }
   return <>
-    <Header title={'Sesión '+(session?.cowrie_session_id||'')} description="Cronología y evidencia" action={<button className="btn-secondary flex gap-2 items-center" onClick={()=>navigate('/sesiones')}><ArrowLeft size={16}/> Volver</button>}/>
+    <Header title={'Sesión '+(session?.cowrie_session_id||'')} description="Cronología y evidencia" action={<button className="btn-secondary flex gap-2 items-center" onClick={()=>window.history.state?.idx>0?navigate(-1):navigate('/sesiones',{replace:true})}><ArrowLeft size={16}/> Volver</button>}/>
     {error&&<ErrorBox error={error}/>}
     {eventError&&<ErrorBox error={eventError}/>}
     {session&&<SessionReport key={session.id_sesion} id={session.id_sesion}/>}
     <div className="grid gap-5 min-w-0">
       <section className="panel p-5"><h2 className="font-semibold mb-4">Datos de la sesión</h2><dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 xl:grid-cols-4">{[['ID',session?.id_sesion],['IP de origen',session?.ip_origen],['Inicio',date(session?.fecha_inicio)],['Cierre',date(session?.fecha_fin)]].map(([k,v])=><div className="min-w-0" key={k}><dt className="muted">{k}</dt><dd className="mt-1 break-words">{v||'—'}</dd></div>)}</dl></section>
       <section className="panel p-5">
-        <div className="flex justify-between flex-wrap gap-3 mb-5"><div><h2 className="font-semibold">{eventId?'Evento de evidencia':'Línea de tiempo'}</h2><p className="muted text-xs mt-1">{session?.eventos??0} eventos · {session?.ip_origen||'IP desconocida'} · {session?.protocolo||'ssh'}</p></div>
-          {eventId||requestedAnalysis?<Link className="btn-secondary text-xs" to={sessionEvidencePath(id??'')}>Ver sesión completa</Link>:
-            session?.estado_analisis==='analizada'&&(!analysis||(hasDetailedReport(analysis)&&isRag(analysis)))?<span className="badge">Resultado guardado</span>:<button className="btn flex gap-2 items-center" onClick={analyze} disabled={busy||!session?.eventos||session?.estado_analisis==='en_proceso'}><Workflow size={16}/>{busy?'Analizando...':session?.estado_analisis==='analizada'?'Analizar con RAG':session?analysisActionLabel(session):'Analizar'}</button>}</div>
+        <div className="flex justify-between flex-wrap gap-3 mb-5"><div><h2 className="font-semibold">Línea de tiempo</h2><p className="muted text-xs mt-1">{session?.eventos??0} eventos · {session?.ip_origen||'IP desconocida'} · {session?.protocolo||'ssh'}</p></div>
+          {requestedAnalysis?<Link className="btn-secondary text-xs" to={sessionEvidencePath(id??'')}>Ver sesión completa</Link>:
+            session?.estado_analisis==='analizada'&&(!analysis||(hasCurrentReport(analysis)&&isRag(analysis)))?<span className="badge">Resultado guardado</span>:<button className="btn flex gap-2 items-center" onClick={analyze} disabled={busy||!session?.eventos||session?.estado_analisis==='en_proceso'}><Workflow size={16}/>{busy?'Analizando...':session?.estado_analisis==='analizada'?'Actualizar análisis':session?analysisActionLabel(session):'Analizar'}</button>}</div>
         {loading?<p className="muted text-sm py-8">Cargando eventos…</p>:<div className="timeline-events border-l border-[#2d5470] ml-2 space-y-5" tabIndex={0} role="region" aria-label="Eventos de la sesión">{events.map(x=><div key={x.id_evento_texto??x.id_evento} className="relative pl-6"><div className="absolute -left-[5px] top-2 w-[9px] h-[9px] rounded-full bg-[#43d7d4]"/><div className="flex flex-wrap gap-3 items-baseline"><span className="text-xs accent font-mono">{date(x.fecha_hora)}</span><span className="font-semibold text-sm">{x.tipo_evento}</span><span className="muted text-[11px]">#{x.id_evento_texto??x.id_evento}</span></div>{typeof x.datos_originales.input==='string'&&<div className="bg-[#0c1728] rounded-md px-3 py-2 text-sm font-mono mt-2 text-[#c4e5e2]">$ {x.datos_originales.input}</div>}<details className="mt-2 text-xs muted"><summary className="cursor-pointer hover:text-white">Ver JSON relevante</summary><pre className="overflow-auto whitespace-pre-wrap bg-[#0c1728] p-3 rounded mt-2">{JSON.stringify(x.datos_originales,null,2)}</pre></details></div>)}{!events.length&&<p className="pl-6 muted text-sm">No hay eventos registrados</p>}</div>}
-        {!eventId&&<Pager page={page} pageSize={20} count={events.length} hasNext={hasNext} onChange={setPage} label="eventos"/>}
+        <Pager page={page} pageSize={20} count={events.length} hasNext={hasNext} onChange={setPage} label="eventos"/>
       </section>
       <section className="panel p-5 min-w-0"><div className="flex justify-between items-center mb-4"><h2 className="font-semibold">Análisis LLM</h2>{analysis&&badge(analysis.estado)}</div>{session?.analisis_desactualizado&&<p className="badge warn mb-3">Resultado anterior: hay eventos nuevos</p>}{session?.estado_analisis==='error'&&<p className="text-sm text-red-200 mb-3">{session.ultimo_intento?.mensaje_error||'El último intento falló. Puede reintentarlo.'}</p>}{analysis?<>{originBadge(analysis)}<AnalysisNarrative analysis={analysis}/><div className="mt-5 space-y-4">{analysis.acciones.filter(action=>!requestedAction||action.id_accion===requestedAction).map(action=>
         <ActionEvidence key={action.id_accion} action={action} sessionId={analysis.id_sesion}/>)}
@@ -251,7 +307,7 @@ function AnalysisPage(){
     if(!selected)return
     setBusy(true);setError('')
     try{
-      const result=await api<{id_analisis:string}>('/sesiones/'+selected.id_sesion+'/analizar?actualizar_rag=true'+(analysis&&!hasDetailedReport(analysis)?'&actualizar_informe=true':''),{method:'POST'})
+      const result=await api<{id_analisis:string}>('/sesiones/'+selected.id_sesion+'/analizar?actualizar_rag=true'+(analysis&&!hasCurrentReport(analysis)?'&actualizar_informe=true':''),{method:'POST'})
       setAnalysis(await api<Analysis>('/analisis/'+result.id_analisis))
       setSelected(await api<Session>('/sesiones/'+selected.id_sesion))
     }catch(e){setError((e as Error).message)}
@@ -284,8 +340,8 @@ function AnalysisPage(){
         <Pager page={page} pageSize={10} count={sessions.length} hasNext={hasNext} onChange={setPage} label="sesiones para análisis"/>
       </section>
       <section className="space-y-5">
-        <div className="panel p-5"><div className="flex flex-wrap justify-between items-center gap-3"><div><h2 className="font-semibold">Comandos recientes</h2><p className="muted text-xs mt-1">Sesión {selected?.cowrie_session_id||'—'} · datos capturados</p></div><Link className="btn-secondary text-xs" to={selected?'/sesiones/'+selected.id_sesion:'/sesiones'}>Ver cronología</Link></div><div className="mt-4 space-y-2">{commands.map(e=><div key={e.id_evento_texto??e.id_evento} className="bg-[#0d192a] rounded p-3 text-sm font-mono"><span className="accent">$ </span>{String(e.datos_originales.input||'')}<div className="muted text-[11px] mt-1">{date(e.fecha_hora)} · evento #{e.id_evento_texto??e.id_evento}</div></div>)}{!commands.length&&<p className="muted text-sm">Todavía no hay comandos en esta sesión.</p>}</div></div>
-        <div className="panel p-5"><div className="flex flex-wrap justify-between gap-3"><div><h2 className="font-semibold">Resultado del análisis</h2><p className="muted text-xs mt-1">Proveedor LLM configurado en el backend</p></div><button className="btn text-xs" disabled={!selected||!(selected.eventos??0)||busy||(selected.estado_analisis==='analizada'&&(!analysis||(hasDetailedReport(analysis)&&isRag(analysis))))||selected.estado_analisis==='en_proceso'} onClick={analyze}>{busy?'Analizando…':selected?.estado_analisis==='analizada'?(analysis&&(!hasDetailedReport(analysis)||!isRag(analysis))?'Analizar con RAG':'Resultado guardado'):selected?.estado_analisis==='en_proceso'?'En proceso':selected?analysisActionLabel(selected):'Analizar sesión'}</button></div>{selected?.estado_analisis==='error'&&<p className="text-sm text-red-200 mt-4">{selected.ultimo_intento?.mensaje_error||'El último intento falló. Puede reintentarlo.'}</p>}{newer&&<p className="badge warn mt-4">Hay eventos posteriores al último análisis</p>}{analysis?<div className="mt-5">{badge(analysis.estado)}<div className="mt-5">{originBadge(analysis)}<AnalysisNarrative analysis={analysis}/></div><h3 className="text-sm font-semibold mt-6 mb-3">Acciones identificadas</h3><div className="space-y-3">{analysis.acciones.map(action=>
+        <div className="panel p-5"><div className="flex flex-wrap justify-between items-center gap-3"><div><h2 className="font-semibold">Comandos recientes</h2><p className="muted text-xs mt-1">Sesión {selected?.cowrie_session_id||'—'} · datos capturados</p></div><Link className="btn-secondary text-xs" to={selected?'/sesiones/'+selected.id_sesion:'/sesiones'}>Ver cronología</Link></div><div className="mt-4 space-y-2">{selected&&commands.map(e=><div key={e.id_evento_texto??e.id_evento} className="bg-[#0d192a] rounded p-3 text-sm font-mono"><span className="accent">$ </span>{String(e.datos_originales.input||'')}<div className="muted text-[11px] mt-1">{date(e.fecha_hora)} · <Link className="accent underline" to={eventEvidencePath(selected.id_sesion,e.id_evento_texto??String(e.id_evento))}>Evento #{e.id_evento_texto??e.id_evento}</Link></div></div>)}{!commands.length&&<p className="muted text-sm">Todavía no hay comandos en esta sesión.</p>}</div></div>
+        <div className="panel p-5"><div className="flex flex-wrap justify-between gap-3"><div><h2 className="font-semibold">Resultado del análisis</h2><p className="muted text-xs mt-1">Proveedor LLM configurado en el backend</p></div><button className="btn text-xs" disabled={!selected||!(selected.eventos??0)||busy||(selected.estado_analisis==='analizada'&&(!analysis||(hasCurrentReport(analysis)&&isRag(analysis))))||selected.estado_analisis==='en_proceso'} onClick={analyze}>{busy?'Analizando…':selected?.estado_analisis==='analizada'?(analysis&&(!hasCurrentReport(analysis)||!isRag(analysis))?'Actualizar análisis':'Resultado guardado'):selected?.estado_analisis==='en_proceso'?'En proceso':selected?analysisActionLabel(selected):'Analizar sesión'}</button></div>{selected?.estado_analisis==='error'&&<p className="text-sm text-red-200 mt-4">{selected.ultimo_intento?.mensaje_error||'El último intento falló. Puede reintentarlo.'}</p>}{newer&&<p className="badge warn mt-4">Hay eventos posteriores al último análisis</p>}{analysis?<div className="mt-5">{badge(analysis.estado)}<div className="mt-5">{originBadge(analysis)}<AnalysisNarrative analysis={analysis}/></div><h3 className="text-sm font-semibold mt-6 mb-3">Acciones identificadas</h3><div className="space-y-3">{analysis.acciones.map(action=>
           <ActionEvidence key={action.id_accion} action={action} sessionId={analysis.id_sesion}/>)}</div></div>:<p className="muted text-sm mt-5">Esta sesión aún no tiene un análisis real.</p>}</div>
       </section>
     </div>
@@ -513,5 +569,5 @@ function MitrePage(){
     </div>
   </>
 }
-function App(){return <BrowserRouter><AuthProvider><AuthBoundary><RealtimeProvider><Shell><Routes><Route path="/" element={<DashboardPage/>}/><Route path="/sesiones" element={<SessionsPage/>}/><Route path="/sesiones/:id" element={<SessionDetail/>}/><Route path="/analisis" element={<AnalysisPage/>}/><Route path="/iocs" element={<IocsPage/>}/><Route path="/mitre" element={<MitrePage/>}/><Route path="/importar" element={<AdminOnly><ImportPage/></AdminOnly>}/><Route path="/seguridad" element={<SecurityPage/>}/><Route path="/usuarios" element={<AdminUsers/>}/><Route path="*" element={<ErrorBox error="La página solicitada no existe."/>}/></Routes></Shell></RealtimeProvider></AuthBoundary></AuthProvider></BrowserRouter>}
+function App(){return <BrowserRouter><AuthProvider><AuthBoundary><RealtimeProvider><Shell><Routes><Route path="/" element={<DashboardPage/>}/><Route path="/sesiones" element={<SessionsPage/>}/><Route path="/sesiones/:id" element={<SessionRoute/>}/><Route path="/analisis" element={<AnalysisPage/>}/><Route path="/iocs" element={<IocsPage/>}/><Route path="/mitre" element={<MitrePage/>}/><Route path="/importar" element={<AdminOnly><ImportPage/></AdminOnly>}/><Route path="/seguridad" element={<SecurityPage/>}/><Route path="/usuarios" element={<AdminUsers/>}/><Route path="*" element={<section><ErrorBox error="La página solicitada no existe."/><Link className="btn-secondary mt-4 inline-flex" to="/">Volver al panel principal</Link></section>}/></Routes></Shell></RealtimeProvider></AuthBoundary></AuthProvider></BrowserRouter>}
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>)

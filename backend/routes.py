@@ -552,7 +552,10 @@ def ioc_observations(id_ioc: UUID, limit: int = Query(50, ge=1, le=200), offset:
 @app.get("/api/mitre/mapeos", dependencies=[Depends(local_only)])
 def list_mappings(limit: int = 100, offset: int = 0, id_mapeo: UUID | None = None):
     m, act, analysis = (table(n) for n in ("mapeo_mitre", "accion_identificada", "analisis_llm"))
-    query = (mapping_query(app.state.tables).add_columns(act.c.id_analisis, analysis.c.id_sesion)
+    query = (mapping_query(app.state.tables).add_columns(
+                 act.c.id_analisis, analysis.c.id_sesion,
+                 act.c.tipo_accion, act.c.descripcion.label("descripcion_accion"),
+                 m.c.fecha_mapeo)
              .join(act, m.c.id_accion == act.c.id_accion).join(analysis, act.c.id_analisis == analysis.c.id_analisis)
              .order_by(m.c.fecha_mapeo.desc(), m.c.id_mapeo).limit(min(max(limit, 1), 200)).offset(max(offset, 0)))
     if id_mapeo is not None:

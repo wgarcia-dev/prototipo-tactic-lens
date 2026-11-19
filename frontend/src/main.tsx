@@ -39,7 +39,7 @@ const badge=(status?:string|null)=><span className={'badge '+(['fallido','error'
 const analysisActionLabel=(session:Session)=>session.estado_analisis==='error'?'Reintentar':session.analisis_desactualizado?'Actualizar análisis':'Analizar'
 
 const nav=[['/','Panel principal',LayoutDashboard],['/sesiones','Sesiones y eventos',Database],['/analisis','Análisis LLM',Workflow],['/iocs','Observables e IoCs',Fingerprint],['/mitre','MITRE ATT&CK',Shield],['/importar','Importar Cowrie',FileUp]] as const
-function Shell({children}:{children:React.ReactNode}){const {session}=useAuth();return <div className="min-h-screen md:flex"><aside className="w-full md:w-64 md:min-h-screen bg-[#0f1b2e] border-r line flex flex-col shrink-0"><div className="h-20 flex items-center gap-3 px-6 border-b line"><div className="w-9 h-9 rounded-lg bg-[#164b56] flex items-center justify-center text-[#5ce5de]"><Activity size={21}/></div><div><div className="font-bold tracking-wide text-lg">TacticLens</div><div className="text-[10px] tracking-[.2em] accent">OBSERVATORIO COWRIE</div></div></div><div className="px-6 pt-7 pb-3 text-[10px] tracking-[.13em] muted">NAVEGACIÓN</div><nav className="px-3 space-y-1">{nav.filter(([href])=>href!=='/importar'||session?.usuario.rol==='administrador').map(([href,label,Icon])=><NavLink key={href} to={href} end={href==='/'} className={({isActive})=>`flex items-center gap-3 px-4 py-3 rounded-lg text-sm ${isActive?'bg-[#1b3851] text-white border-l-[3px] border-[#43d7d4]':'text-[#8ea3bb] hover:bg-[#172b42]'}`}><Icon size={16}/>{label}</NavLink>)}</nav><div className="mt-auto p-6 border-t line text-xs muted"><SessionControls/><span className="inline-block w-2 h-2 rounded-full bg-emerald-400 mr-2"/>Cowrie · entorno controlado<br/><span className="text-[10px]">Prototipo de tesis · UNEMI</span></div></aside><main className="flex-1 min-w-0 bg-[#0b1423]"><div className="max-w-[1500px] mx-auto px-5 md:px-9 py-8">{children}</div></main></div>}
+function Shell({children}:{children:React.ReactNode}){const {session}=useAuth();return <div className="min-h-screen md:flex"><aside className="w-full md:w-60 md:sticky md:top-0 md:self-start md:max-h-dvh md:overflow-y-auto bg-[#0f1b2e] border-r line flex flex-col shrink-0"><div className="h-20 flex items-center gap-3 px-6 border-b line"><div className="w-9 h-9 rounded-lg bg-[#164b56] flex items-center justify-center text-[#5ce5de]"><Activity size={21}/></div><div><div className="font-bold tracking-wide text-lg">TacticLens</div><div className="text-[10px] tracking-[.2em] accent">OBSERVATORIO COWRIE</div></div></div><div className="px-5 pt-4 pb-2 text-[10px] tracking-[.13em] muted">NAVEGACIÓN</div><nav className="px-3 space-y-1">{nav.filter(([href])=>href!=='/importar'||session?.usuario.rol==='administrador').map(([href,label,Icon])=><NavLink key={href} to={href} end={href==='/'} className={({isActive})=>`flex items-center gap-3 px-4 py-3 rounded-lg text-sm ${isActive?'bg-[#1b3851] text-white border-l-[3px] border-[#43d7d4]':'text-[#8ea3bb] hover:bg-[#172b42]'}`}><Icon size={16}/>{label}</NavLink>)}</nav><div className="mt-3 px-5 py-4 border-t line text-xs muted"><SessionControls/><span className="inline-block w-2 h-2 rounded-full bg-emerald-400 mr-2"/>Cowrie · entorno controlado<br/><span className="text-[10px]">Prototipo de tesis · UNEMI</span></div></aside><main className="flex-1 min-w-0 bg-[#0b1423]"><div className="max-w-[1500px] mx-auto px-5 md:px-9 py-8">{children}</div></main></div>}
 function Header({title,description,action}:{title:string,description:string,action?:React.ReactNode}){return <div className="flex flex-wrap items-start justify-between gap-4 pb-6 border-b line mb-7"><div><h1 className="text-2xl md:text-3xl font-bold tracking-tight">{title}</h1><p className="muted text-sm mt-1">{description}</p></div>{action}</div>}
 function Metric({label,value,sub,color='cyan'}:{label:string,value:number|string,sub:string,color?:string}){return <div className={`panel p-5 border-l-[3px] ${color==='blue'?'border-l-blue-500':color==='purple'?'border-l-violet-400':color==='green'?'border-l-emerald-400':'border-l-cyan-400'}`}><div className="muted text-[11px] tracking-wide uppercase">{label}</div><div className="text-3xl font-bold mt-3">{value}</div><div className="muted text-xs mt-2">{sub}</div></div>}
 function ErrorBox({error}:{error:string}){return <div className="panel p-4 border-red-700 text-red-200">{error}</div>}
@@ -309,8 +309,8 @@ type IocObservation = {
     limitacion: string, alcance_ip: string|null, algoritmo: string|null, posicion: number|null
   }[]
 }
-type MitreRow={id_mapeo:string,id_accion:string,id_analisis:string,codigo_tecnica:string,tecnica:string,tactica:string,evidencia:string,justificacion:string,confianza:number,id_sesion:string,estado_revision:ReviewState,motivo_revision:string|null,grado_evidencia?:string,rag_procedencia?:{metodo?:string,catalogo?:{version:string}},revisado_por?:string,revisado_en?:string}
-function ReviewControls({kind,id,state,canConfirm=true}:{kind:'observacion_ioc'|'mitre',id:string,state:ReviewState,canConfirm?:boolean}){
+type MitreRow={id_mapeo:string,id_accion:string,id_analisis:string,codigo_tecnica:string,tecnica:string,tactica:string,evidencia:string,justificacion:string,confianza:number|null,id_sesion:string,tipo_accion:string,descripcion_accion:string,fecha_mapeo:string,estado_revision:ReviewState,motivo_revision:string|null,grado_evidencia?:string,rag_procedencia?:{metodo?:string,catalogo?:{version:string}},revisado_por?:string,revisado_en?:string}
+function ReviewControls({kind,id,state,canConfirm=true,onReviewed}:{kind:'observacion_ioc'|'mitre',id:string,state:ReviewState,canConfirm?:boolean,onReviewed?:(state:ReviewState)=>void}){
   const {session}=useAuth(),[busy,setBusy]=useState(false),[error,setError]=useState('')
   const [decision,setDecision]=useState<'confirmado'|'descartado'|null>(null)
   const [reason,setReason]=useState('')
@@ -321,7 +321,7 @@ function ReviewControls({kind,id,state,canConfirm=true}:{kind:'observacion_ioc'|
     const motivo=reason.trim()
     if(!decision||motivo.length<10){setError('Escriba un motivo de al menos 10 caracteres.');return}
     setBusy(true);setError('')
-    try{await mutate(`/inteligencia/${kind}/${id}/revision`,{estado:decision,motivo},'PATCH');setCurrent(decision);setDecision(null);setReason('')}
+    try{await mutate(`/inteligencia/${kind}/${id}/revision`,{estado:decision,motivo},'PATCH');setCurrent(decision);onReviewed?.(decision);setDecision(null);setReason('')}
     catch(e){setError((e as Error).message)}finally{setBusy(false)}
   }
   return <div className="mt-2">
@@ -468,32 +468,40 @@ function MitrePage(){
   const [params]=useSearchParams()
   const linkedMapping=params.get('mapeo')
   const [page,setPage]=useState(0)
-  const [selected,setSelected]=useState<MitreRow|null>(null)
+  const [selectedId,setSelectedId]=useState<string|null>(linkedMapping)
+  const [reviewed,setReviewed]=useState<Record<string,ReviewState>>({})
   const path='/mitre/mapeos'+(linkedMapping?'?id_mapeo='+encodeURIComponent(linkedMapping):'')
   const {rows:maps,hasNext,loading,error}=usePagedData<MitreRow>(path,linkedMapping?0:page)
-  useEffect(()=>setPage(0),[linkedMapping])
-  useEffect(()=>setSelected(previous=>maps.find(row=>row.id_mapeo===previous?.id_mapeo)||maps[0]||null),[maps])
+  const selected=maps.find(row=>row.id_mapeo===selectedId)||null
+  useEffect(()=>{setPage(0);setSelectedId(linkedMapping)},[linkedMapping])
+  function changePage(next:number){setSelectedId(null);setPage(next)}
+  const reviewState=(mapping:MitreRow)=>reviewed[mapping.id_mapeo]??mapping.estado_revision
   return <>
     <Header title="MITRE ATT&CK" description="Consulta técnicas, tácticas y evidencias vinculadas a eventos analizados"
       action={linkedMapping?<Link className="btn-secondary" to="/mitre">Ver todos los mapeos</Link>:undefined}/>
     {error&&<ErrorBox error={error}/>}
-    <div className="workspace-columns grid lg:grid-cols-[1.4fr_1fr] gap-5">
-      <section className="panel p-5"><div className="flex flex-wrap justify-between gap-3 mb-5"><div><h2 className="font-semibold">Técnicas identificadas</h2><p className="muted text-xs mt-1">Propuestas del análisis con evidencia y revisión humana</p></div><span className="badge">{maps.length} en esta página</span></div>
-        {loading?<p className="muted text-sm py-8">Cargando mapeos…</p>:<div className="overflow-auto"><table className="w-full text-sm"><thead className="bg-[#1b3049] text-left text-xs muted"><tr><th className="p-3">Código</th><th className="p-3">Técnica</th><th className="p-3">Táctica</th></tr></thead><tbody>{maps.map(x=><tr key={x.id_mapeo} className={'table-row border-b line '+(selected?.id_mapeo===x.id_mapeo?'bg-[#1b3049]':'')}><td className="p-3"><button className="accent font-mono text-left hover:underline" onClick={()=>setSelected(x)} aria-label={'Ver mapeo '+x.codigo_tecnica}>{x.codigo_tecnica}</button></td><td className="p-3">{x.tecnica}</td><td className="p-3 muted">{x.tactica}</td></tr>)}</tbody></table>{!maps.length&&<p className="muted text-sm p-5 text-center">Aún no hay mapeos registrados.</p>}</div>}
-        {!linkedMapping&&<Pager page={page} pageSize={PAGE_SIZE} count={maps.length} hasNext={hasNext} onChange={setPage} label="mapeos MITRE"/>}
+    <div className="mitre-review-layout grid lg:grid-cols-[minmax(0,1.15fr)_minmax(22rem,.85fr)] gap-5 items-start">
+      <section className="panel p-5"><div className="flex flex-wrap justify-between gap-3 mb-4"><div><h2 className="font-semibold">Hallazgos MITRE</h2><p className="muted text-xs mt-1">Cada registro corresponde a una técnica propuesta para una acción y sesión concretas</p></div><span className="badge">{maps.length} en esta página</span></div>
+        {loading?<p className="muted text-sm py-8" role="status">Cargando hallazgos…</p>:<ul className="divide-y line" aria-label="Mapeos MITRE pendientes de revisión">{maps.map(x=>{const state=reviewState(x);return <li key={x.id_mapeo}>
+          <button type="button" aria-pressed={selectedId===x.id_mapeo} onClick={()=>setSelectedId(x.id_mapeo)} className="mitre-finding w-full text-left px-3 py-4 rounded-md">
+            <span className="flex flex-wrap items-center justify-between gap-2"><span className="font-semibold"><span className="font-mono accent mr-2">{x.codigo_tecnica}</span>{x.tecnica}</span><span className={'badge '+(state==='pendiente'?'warn':'')}>{mappingReviewLabels[state]}</span></span>
+            <span className="block text-xs muted mt-2">{x.tactica} · {x.tipo_accion} · sesión {x.id_sesion.slice(0,8)}</span>
+            <span className="block text-xs mt-2 line-clamp-2">{x.justificacion}</span>
+          </button>
+        </li>})}{!maps.length&&<li className="muted text-sm p-5 text-center">Aún no hay hallazgos registrados</li>}</ul>}
+        {!linkedMapping&&<Pager page={page} pageSize={PAGE_SIZE} count={maps.length} hasNext={hasNext} onChange={changePage} label="hallazgos MITRE"/>}
       </section>
-      <section className="panel p-5 min-w-0">
-        <h2 className="font-semibold">Detalle de técnica</h2>
-        {selected?<><h3 className="text-2xl font-bold mt-5">{selected.tecnica}</h3>
-          <div className="flex flex-wrap gap-2 items-baseline mt-3">
-            <span className="badge">{selected.codigo_tecnica} · {selected.tactica}</span>
-          </div>
-          <ReviewControls key={selected.id_mapeo} kind="mitre" id={selected.id_mapeo} state={selected.estado_revision}/>
+      <aside className="panel p-5 min-w-0" aria-live="polite">
+        <h2 className="font-semibold">Revisión del hallazgo</h2>
+        {selected?<><p className="muted text-xs mt-1">Mapeo {selected.id_mapeo.slice(0,8)} · sesión {selected.id_sesion.slice(0,8)}</p><h3 className="text-2xl font-bold mt-5">{selected.tecnica}</h3>
+          <div className="flex flex-wrap gap-2 items-baseline mt-3"><span className="badge">{selected.codigo_tecnica}</span><span className="badge contextual">{selected.tactica}</span>{selected.confianza!=null&&<span className="muted text-xs">{Math.round(Number(selected.confianza)*100)} % de confianza declarada</span>}</div>
+          <div className="mt-5 rounded-lg bg-[#0d192a] p-4"><p className="muted text-xs">Acción analizada</p><p className="font-semibold mt-1">{selected.tipo_accion}</p><p className="text-sm mt-2">{selected.descripcion_accion}</p></div>
+          <ReviewControls key={selected.id_mapeo} kind="mitre" id={selected.id_mapeo} state={reviewState(selected)} onReviewed={state=>setReviewed(previous=>({...previous,[selected.id_mapeo]:state}))}/>
           <div className="flex flex-wrap gap-3 mt-5 text-xs">
             <Link to={sessionEvidencePath(selected.id_sesion)} className="accent hover:underline">Ver sesión</Link>
             <Link to={actionEvidencePath(selected.id_sesion,selected.id_analisis,selected.id_accion)} className="accent hover:underline">Ver acción</Link>
           </div>
-          <div className="border-t line mt-5 pt-4 text-sm"><p className="muted text-xs mb-2">Justificación del mapeo</p>{selected.justificacion}</div>
+          <div className="border-t line mt-5 pt-4 text-sm"><h4 className="muted text-xs mb-2">Justificación del mapeo</h4><p>{selected.justificacion}</p></div>
           <details className="mt-3 text-xs muted"><summary className="cursor-pointer">Evidencia original del mapeo</summary>
             <p className="mt-2 break-words">{selected.evidencia}</p>
           </details>
@@ -501,8 +509,8 @@ function MitrePage(){
           <p className="muted text-xs mt-3">{selected.rag_procedencia?.metodo?'DeepSeek + RAG · ATT&CK '+selected.rag_procedencia.catalogo?.version:'Método anterior'}{selected.grado_evidencia?' · '+selected.grado_evidencia.replaceAll('_',' '):''}</p>
           {selected.revisado_en&&<p className="muted text-xs">Revisado {date(selected.revisado_en)}</p>}
           {selected.motivo_revision&&<p className="muted text-xs mt-2">{selected.motivo_revision}</p>}
-        </>:<p className="muted text-sm mt-8">Seleccione un mapeo para ver su evidencia</p>}
-      </section>
+        </>:<div className="mt-8 rounded-lg border line p-5"><p className="font-semibold">Seleccione un hallazgo</p><p className="muted text-sm mt-2">La paginación no cambia la revisión automáticamente. Abra un registro para consultar su acción, evidencia y procedencia antes de tomar una decisión.</p></div>}
+      </aside>
     </div>
   </>
 }

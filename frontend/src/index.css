@@ -9,8 +9,11 @@ input:focus-visible,button:focus-visible,a:focus-visible,summary:focus-visible{o
 
 .workspace-columns { align-items: start; }
 .workspace-columns > * { min-width: 0; overflow-wrap: anywhere; }
+.mitre-finding:hover{background:#182d46}
+.mitre-finding[aria-pressed="true"]{background:#1b3851;box-shadow:inset 3px 0 #43d7d4}
 @media (min-width: 64rem) and (min-height: 36rem) {
   .timeline-events { max-height: 62vh; overflow-y: auto; scrollbar-gutter: stable; padding-right: .75rem; }
   .workspace-columns:has(button[aria-pressed]) > section:first-child { position: sticky; top: 1rem; }
   .workspace-columns:has(button[aria-pressed]) > section:first-child ul { max-height: 50vh; overflow-y: auto; scrollbar-gutter: stable; }
+  .mitre-review-layout > aside{position:sticky;top:1rem;max-height:calc(100vh - 2rem);overflow-y:auto;scrollbar-gutter:stable}
 }

@@ -1,5 +1,8 @@
 """Render the same report sections as a printable PDF and an editable Word file."""
 from io import BytesIO
+import json
+import subprocess
+from pathlib import Path
 import re
 from xml.sax.saxutils import escape
 
@@ -32,70 +35,10 @@ def clean(value):
 
 
 def render_pdf(report):
-    stream = BytesIO()
-    doc = SimpleDocTemplate(stream, pagesize=letter, leftMargin=48, rightMargin=48,
-                            topMargin=58, bottomMargin=50,
-                            title=report["title"], author="TacticLens")
-    styles = getSampleStyleSheet()
-    styles["Title"].alignment = 0
-    body = ParagraphStyle("Body", fontName="Helvetica", fontSize=10, leading=15,
-                          textColor=colors.HexColor(INK), spaceAfter=7)
-    small = ParagraphStyle("Table", parent=body, fontSize=8.5, leading=12, spaceAfter=0)
-    white = ParagraphStyle("TableHeader", parent=small, fontName="Helvetica-Bold", textColor=colors.white)
-
-    def paragraph(value, style=body):
-        return Paragraph(escape(clean(value)).replace("\n", "<br/>"), style)
-
-    def grid(columns, rows):
-        data = [[paragraph(value, white) for value in columns]]
-        data.extend([paragraph(value, small) for value in row] for row in rows)
-        table = LongTable(data, colWidths=[doc.width * x for x in column_widths(columns)],
-                          repeatRows=1, splitInRow=1, hAlign="LEFT")
-        table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(INK)),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor(STRIPE)]),
-            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor(RULE)),
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("TOPPADDING", (0, 0), (-1, -1), 6),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-        ]))
-        return table
-
-    def furniture(canvas, document):
-        canvas.saveState()
-        canvas.setFillColor(colors.HexColor(MUTED))
-        canvas.setFont("Helvetica", 9)
-        canvas.drawString(48, 756, "TacticLens  /  Observatorio Cowrie")
-        canvas.setStrokeColor(colors.HexColor(RULE))
-        canvas.line(48, 747, 564, 747)
-        canvas.line(48, 39, 564, 39)
-        canvas.drawString(48, 24, report["reference"])
-        canvas.drawRightString(564, 24, f"Página {document.page}")
-        canvas.restoreState()
-
-    story = [paragraph(report["title"], styles["Title"]), paragraph(report["status"]),
-             grid(("Campo", "Registro"), report["metadata"])]
-    for section in report["sections"]:
-        heading = paragraph(section["title"], styles["Heading2"])
-        notes = [paragraph(item) for item in section["paragraphs"]]
-        if notes and section["rows"]:
-            notes[-1].keepWithNext = True
-        if section["rows"]:
-            # Leave room for the heading, note and start of the table together.
-            notes_height = sum(note.wrap(doc.width, 600)[1] + note.getSpaceAfter() for note in notes)
-            story.append(CondPageBreak(82 + notes_height))
-        story.extend([Spacer(1, 8), heading, *notes])
-        if section["rows"]:
-            story.append(grid(section["columns"], section["rows"]))
-    doc.build(story, onFirstPage=furniture, onLaterPages=furniture)
-    return stream.getvalue()
-
-
-def word_property(parent, name, value):
-    node = OxmlElement(f"w:{name}")
-    node.set(qn("w:val"), value)
-    parent.append(node)
-    return node
+    renderer = Path(__file__).with_name("report_renderer") / "render.mjs"
+    result = subprocess.run(["node", str(renderer)], input=json.dumps(report).encode(),
+                            stdout=subprocess.PIPE, check=True, timeout=90)
+    return result.stdout
 
 
 def render_docx(report):

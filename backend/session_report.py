@@ -65,7 +65,37 @@ def report_snapshot(conn, tables, honeypot_id, session_id):
             .where(a.c.id_analisis == saved.id_analisis)
             .order_by(tech.c.codigo_tecnica, m.c.id_mapeo).limit(FINDING_LIMIT + 1)).all()
 
-    return assemble_report(record, total, counts, events, saved, covered, status, observations, mappings)
+    commands = conn.execute(select(event.c.id_evento, event.c.fecha_hora,
+        event.c.datos_originales["input"].as_string()).where(event.c.id_sesion == session_id,
+        event.c.tipo_evento == "cowrie.command.input").order_by(event.c.fecha_hora,
+        event.c.numero_secuencia, event.c.id_evento).limit(EVENT_LIMIT)).all()
+    report = assemble_report(record, total, counts, events, saved, covered, status, observations, mappings)
+    sections = report["sections"]
+    sections.insert(1, dict(title="Registro de comandos", columns=["Hora UTC", "Entrada en Cowrie", "Evento"],
+        paragraphs=[f"{len(commands)} entradas mostradas de {counts.get('cowrie.command.input', 0)} registradas. "
+                    "Cada fila identifica el texto recibido por el señuelo. La entrada por sí sola no acredita su resultado."],
+        rows=[[utc(when), command or "Entrada sin texto", f"#{eid}"] for eid, when, command in commands]))
+    detail = ((saved.resultado_estructurado or {}).get("informe") or {}) if saved else {}
+    narrative = []
+    def add(title, paragraphs):
+        text = [item for item in paragraphs if isinstance(item, str) and item.strip()]
+        if text:
+            narrative.append(dict(title=title, paragraphs=text, columns=[], rows=[]))
+    add("Contexto del análisis LLM", [detail.get("contexto")])
+    for phase in detail.get("fases") or []:
+        refs = ", ".join(f"#{eid}" for eid in phase.get("eventos", []))
+        add(phase.get("fase") or "Fase observada", [
+            f"{label}: {phase[key]}" for key, label in (("observado","Observación"),("interpretacion","Interpretación del modelo"),("resultado","Resultado documentado")) if phase.get(key)
+        ] + ([f"Evidencia: {refs}"] if refs else []))
+    for hypothesis in detail.get("hipotesis") or []:
+        refs = ", ".join(f"#{eid}" for eid in hypothesis.get("eventos", []))
+        add("Hipótesis del modelo", [hypothesis.get("descripcion"), f"Evidencia vinculada: {refs}" if refs else None])
+    add("Conclusión del análisis", [detail.get("conclusion")])
+    add("Limitaciones de la evidencia", detail.get("limitaciones") or [])
+    add("Comprobaciones recomendadas", detail.get("recomendaciones") or [])
+    index = next(i for i, item in enumerate(sections) if item["title"] == "Cronología de evidencia")
+    sections[index:index] = narrative
+    return report
 
 
 def observable_value(kind, value):
@@ -98,6 +128,9 @@ def assemble_report(record, total, counts, events, saved, covered, status, obser
         summary.append(f"El análisis guardado examinó {covered} de los {total} eventos registrados.")
     sections = [
         section("Resumen y alcance", summary),
+        section("Distribución de actividad", ["Frecuencia de cada tipo de evento en la sesión completa."],
+                ("Tipo de evento", "Registros"),
+                [(kind, str(count)) for kind, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))]),
         section("Cronología de evidencia",
                 [f"Se muestran los primeros {len(events)} de {total} eventos. Consulte la sesión para revisar el resto."]
                 if total > len(events) else ([] if events else ["No hay eventos registrados."]),
@@ -139,5 +172,6 @@ def assemble_report(record, total, counts, events, saved, covered, status, obser
             ("Generado UTC", utc(datetime.now(timezone.utc))),
             ("Análisis", str(saved.id_analisis) if saved else "Sin registro"),
         ],
+        "event_counts": counts,
         "sections": sections,
     }

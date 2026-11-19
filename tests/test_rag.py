@@ -39,6 +39,12 @@ def result(events,proposals):
 
 
 class BehaviorTests(unittest.TestCase):
+    def test_redaction_handles_quoted_arguments_and_authorization_headers(self):
+        for entry in ('--password "fixture secret"', "token='fixture secret'", 'Authorization: Basic fixture',
+                      'X-API-Key: fixture', 'https://user:fixture@example.org/path?key=fixture'):
+            with self.subTest(entry=entry):
+                self.assertNotIn('fixture', redact(entry))
+
     def test_positive_and_unknown_commands(self):
         cases={'uname -a':'system_discovery','whoami':'user_discovery','ls -la /tmp':'file_discovery','ip addr':'network_discovery',
                'ps aux':'process_discovery','nmap -sV 192.0.2.1':'network_scan','wget https://example.org/a':'transfer',

@@ -1,4 +1,5 @@
 """Transactional PostgreSQL checks for the combined Cowrie/intelligence flows."""
+import json
 from pathlib import Path
 from datetime import datetime, timedelta
 from tempfile import TemporaryDirectory
@@ -9,6 +10,7 @@ from sqlalchemy import func, select, text
 
 import test_auth as fixtures
 from backend.api import app
+from backend.session_report import report_snapshot
 from backend.intelligence import backfill_detections, persist_observables
 from backend.routes import AnalysisResult, Finding, IocProposal, MitreProposal, mitre_catalog
 from scripts import migrate
@@ -48,6 +50,28 @@ class CollaborativeIntegrationTests(fixtures.AuthFixture):
         retry = self.ingest([first,second])
         self.assertEqual((retry['insertados'],retry['duplicados']),(0,2))
         self.assertEqual(count(),before)
+
+    def test_recent_commands_survive_a_long_tail_of_other_events(self):
+        self.enroll(95, admin=True)
+        command = self.event(input='echo --password "private fixture"')
+        receipt = self.ingest([command])['confirmaciones'][0]
+        events = app.state.tables['evento']
+        sid = self.connection.scalar(select(events.c.id_sesion).where(events.c.id_evento == receipt['id_evento']))
+        later = self.clock + timedelta(seconds=1)
+        self.connection.execute(events.insert(), [
+            dict(id_sesion=sid, numero_secuencia=n, tipo_evento='cowrie.client.size',
+                 fecha_hora=later, datos_originales={}) for n in range(2, 504)
+        ])
+        path = f'/api/sesiones/{sid}'
+        recent = self.client.get(path + '/eventos?comandos_recientes=true&limit=6')
+        self.assertEqual(recent.status_code, 200, recent.text)
+        self.assertEqual([row['id_evento_texto'] for row in recent.json()], [str(receipt['id_evento'])])
+        report = report_snapshot(self.connection, app.state.tables, app.state.honeypot_id, sid)
+        self.assertNotIn('private fixture', json.dumps(report))
+        self.assertIn('[REDACTED]', json.dumps(report))
+        with patch.object(app.state, 'honeypot_id', uuid4()):
+            self.assertEqual(self.client.get(path + '/eventos').json(), [])
+            self.assertEqual(self.client.get(path).status_code, 404)
 
     def test_failed_observable_transaction_never_acknowledges_or_persists_event(self):
         raw = self.event()

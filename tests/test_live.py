@@ -161,7 +161,10 @@ class LiveTests(unittest.TestCase):
             self.assertEqual(sessions.status_code, 200)
             self.assertIsInstance(sessions.json(), list)
             with app.state.engine.connect() as conn:
-                total = conn.scalar(select(func.count()).select_from(app.state.tables["evento"]))
+                events, sessions = app.state.tables["evento"], app.state.tables["sesion"]
+                total = conn.scalar(select(func.count()).select_from(events)
+                                    .join(sessions, sessions.c.id_sesion == events.c.id_sesion)
+                                    .where(sessions.c.id_honeypot == app.state.honeypot_id))
             self.assertEqual(client.get("/api/dashboard/resumen").json()["eventos"], total)
             self.assertEqual(client.get("/api/iocs").status_code, 200)
             self.assertEqual(client.get("/api/mitre/mapeos").status_code, 200)

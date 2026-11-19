@@ -132,14 +132,14 @@ def sessions(request: Request, limit: int = Query(50, ge=1, le=200), offset: int
         term = f'%{q.strip()}%'
         statement = statement.where(or_(table.c.cowrie_session_id.ilike(term), cast(table.c.ip_origen, String).ilike(term)))
     with app.state.engine.connect() as conn:
-        rows = conn.execute(statement.order_by(table.c.fecha_inicio.desc()).limit(limit).offset(offset)).mappings().all()
+        rows = conn.execute(statement.order_by(table.c.fecha_inicio.desc(), table.c.id_sesion).limit(limit).offset(offset)).mappings().all()
         states = states_for_sessions(conn, analysis_table, {row.id_sesion: row.eventos for row in rows})
     return [{**{k: str(v) if isinstance(v, UUID) else v for k, v in row.items()}, **public_state(states[row.id_sesion])} for row in rows]
 
 
 @app.get("/api/sesiones/{id}/eventos")
 def events(id: UUID, request: Request, limit: int = Query(200, ge=1, le=500), offset: int = Query(0, ge=0),
-           id_evento: int | None = Query(None, ge=0, le=(1 << 63) - 1)):
+           id_evento: int | None = Query(None, ge=0, le=(1 << 63) - 1), comandos_recientes: bool = False):
     local_only(request)
     table = app.state.tables["evento"]
     with app.state.engine.connect() as conn:
@@ -147,7 +147,11 @@ def events(id: UUID, request: Request, limit: int = Query(200, ge=1, le=500), of
                        ).where(table.c.id_sesion == id, table.c.id_sesion.in_(routes.sensor_sessions()))
         if id_evento is not None:
             query = query.where(table.c.id_evento == id_evento)
-        rows = conn.execute(query.order_by(table.c.fecha_hora, table.c.numero_secuencia, table.c.id_evento).limit(limit).offset(offset)).mappings().all()
+        order = (table.c.fecha_hora, table.c.numero_secuencia, table.c.id_evento)
+        if comandos_recientes:
+            query = query.where(table.c.tipo_evento == "cowrie.command.input")
+            order = tuple(column.desc() for column in order)
+        rows = conn.execute(query.order_by(*order).limit(limit).offset(offset)).mappings().all()
     return [{**dict(row), "id_evento_texto": str(row.id_evento), "datos_originales": safe(row.datos_originales)} for row in rows]
 
 

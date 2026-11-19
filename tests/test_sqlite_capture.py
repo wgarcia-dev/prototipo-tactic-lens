@@ -27,6 +27,13 @@ CREATE TABLE cursor (name TEXT PRIMARY KEY,inode TEXT NOT NULL,offset INTEGER NO
         self.backup=capture.prepare(self.path,Path(self.temp.name)/'backups')
         self.conn=capture.delivery.connect(self.path);self.addCleanup(self.conn.close)
 
+    def test_status_works_while_sender_owns_the_lock(self):
+        with patch.object(capture, 'DB', self.path), patch('sys.argv', ['exporter', '--status']), \
+             patch.object(capture.delivery, 'sender_lock', side_effect=AssertionError('status requested sender lock')), \
+             patch('builtins.print') as output:
+            capture.main()
+        self.assertEqual(json.loads(output.call_args.args[0])['total_cola'], 1)
+
     def count(self):
         return self.conn.execute('SELECT count(*) FROM events').fetchone()[0]
 

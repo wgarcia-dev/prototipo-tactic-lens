@@ -144,10 +144,10 @@ def events(id: UUID, request: Request, limit: int = Query(200, ge=1, le=500), of
     table = app.state.tables["evento"]
     with app.state.engine.connect() as conn:
         query = select(table.c.id_evento, table.c.tipo_evento, table.c.fecha_hora, table.c.datos_originales
-                       ).where(table.c.id_sesion == id)
+                       ).where(table.c.id_sesion == id, table.c.id_sesion.in_(routes.sensor_sessions()))
         if id_evento is not None:
             query = query.where(table.c.id_evento == id_evento)
-        rows = conn.execute(query.order_by(table.c.fecha_hora, table.c.id_evento).limit(limit).offset(offset)).mappings().all()
+        rows = conn.execute(query.order_by(table.c.fecha_hora, table.c.numero_secuencia, table.c.id_evento).limit(limit).offset(offset)).mappings().all()
     return [{**dict(row), "id_evento_texto": str(row.id_evento), "datos_originales": safe(row.datos_originales)} for row in rows]
 
 

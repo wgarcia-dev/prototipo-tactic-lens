@@ -61,11 +61,11 @@ function DashboardPage(){
       setSessions(previous=>sameSnapshot(previous,recent.value));setError('')
     }catch(e){if(!signal.aborted)setError((e as Error).message);throw e}
   })
-  return <><Header title="Panel principal" description="Resumen de sesiones, eventos y resultados del análisis del honeypot"/>{error&&<ErrorBox error={error}/>}<div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-4 mb-5"><Metric label="Sesiones registradas" value={data?.sesiones??'—'} sub="Sesiones almacenadas"/><Metric label="Eventos recibidos" value={data?.eventos??'—'} sub="Vinculados a sesiones" color="blue"/><Metric label="Sesiones analizadas" value={data?.sesiones_analizadas??'—'} sub="Análisis completados" color="green"/><Metric label="Observables registrados" value={data?.iocs??'—'} sub="Con evidencia de Cowrie" color="purple"/><Metric label="Técnicas MITRE" value={data?.tecnicas_mitre??'—'} sub="Asociaciones registradas" color="green"/></div><div className="grid lg:grid-cols-[1.7fr_1fr] gap-5 mb-5"><section className="panel p-5"><h2 className="font-semibold">Actividad de eventos</h2><p className="muted text-xs mt-1">Cantidad de eventos registrados por día</p><div className="h-60 mt-5">{data?.actividad.length?<ResponsiveContainer width="100%" height="100%"><BarChart data={data.actividad}><CartesianGrid stroke="#20344d" vertical={false}/><XAxis dataKey="dia" tick={{fill:'#8ea3bb',fontSize:11}}/><YAxis tick={{fill:'#8ea3bb',fontSize:11}}/><Tooltip contentStyle={{background:'#16273f',border:'1px solid #27415c',color:'#fff'}}/><Bar isAnimationActive={false} dataKey="total" fill="#4180aa" radius={[4,4,0,0]}/></BarChart></ResponsiveContainer>:<div className="muted text-sm pt-20 text-center">Sin eventos todavía</div>}</div></section><section className="panel p-5"><h2 className="font-semibold">Eventos por tipo</h2><p className="muted text-xs mt-1">Distribución observada en PostgreSQL</p><div className="mt-6 space-y-4">{data?.tipos_evento.map(x=><div key={x.tipo_evento}><div className="flex justify-between text-xs mb-2 gap-3"><span className="truncate">{x.tipo_evento}</span><span className="accent">{x.total}</span></div><div className="h-2 rounded-full bg-[#24384f]"><div className="h-2 rounded-full bg-[#42caca]" style={{width:`${Math.max(4,(x.total/(data.tipos_evento[0]?.total||1))*100)}%`}}/></div></div>)}</div></section></div><section className="panel p-5"><div className="flex justify-between items-start mb-4"><div><h2 className="font-semibold">Sesiones recientes</h2><p className="muted text-xs mt-1">Accesos capturados por Cowrie</p></div><Link className="btn text-xs" to="/sesiones">Ver todas</Link></div><SessionTable sessions={sessions}/></section><section className="panel p-5 mt-5" aria-label="Comandos recientes"><h2 className="font-semibold">Últimos comandos observados</h2><p className="muted text-xs mt-1">Actualizaciones por WebSocket · el análisis LLM se ejecuta manualmente</p><ul className="mt-4 space-y-3" aria-live="polite">{data?.ultimos_comandos?.map(command=><li key={command.id_evento} data-evento={command.id_evento} ref={node=>{if(node&&!node.dataset.renderizadoEn){node.dataset.renderizadoEn=new Date().toISOString();if(realtime.notice?.eventos?.includes(command.id_evento)){node.dataset.recibidoApi=realtime.notice.recibido_api;node.dataset.confirmadoApi=realtime.notice.confirmado_api}}}} className="bg-[#0c1728] rounded p-3"><code className="block text-sm break-all whitespace-pre-wrap">{command.comando}</code><div className="flex flex-wrap gap-3 mt-2 text-xs muted"><span>{date(command.fecha_hora)}</span><Link className="accent" to={'/sesiones/'+command.id_sesion}>Ver sesión</Link><span>#{command.id_evento}</span></div></li>)}</ul>{!data?.ultimos_comandos?.length&&<p className="muted text-sm mt-4">Sin comandos registrados todavía.</p>}</section></>}
+  return <><Header title="Panel principal" description="Actividad del honeypot"/>{error&&<ErrorBox error={error}/>}<div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-4 mb-5"><Metric label="Sesiones registradas" value={data?.sesiones??'—'} sub="Sesiones almacenadas"/><Metric label="Eventos recibidos" value={data?.eventos??'—'} sub="Vinculados a sesiones" color="blue"/><Metric label="Sesiones analizadas" value={data?.sesiones_analizadas??'—'} sub="Análisis completados" color="green"/><Metric label="Observables registrados" value={data?.iocs??'—'} sub="Con evidencia de Cowrie" color="purple"/><Metric label="Técnicas MITRE" value={data?.tecnicas_mitre??'—'} sub="Asociaciones registradas" color="green"/></div><div className="grid lg:grid-cols-[1.7fr_1fr] gap-5 mb-5"><section className="panel p-5"><h2 className="font-semibold">Actividad de eventos</h2><p className="muted text-xs mt-1">Cantidad de eventos registrados por día</p><div className="h-60 mt-5">{data?.actividad.length?<ResponsiveContainer width="100%" height="100%"><BarChart data={data.actividad}><CartesianGrid stroke="#20344d" vertical={false}/><XAxis dataKey="dia" tick={{fill:'#8ea3bb',fontSize:11}}/><YAxis tick={{fill:'#8ea3bb',fontSize:11}}/><Tooltip contentStyle={{background:'#16273f',border:'1px solid #27415c',color:'#fff'}}/><Bar isAnimationActive={false} dataKey="total" fill="#4180aa" radius={[4,4,0,0]}/></BarChart></ResponsiveContainer>:<div className="muted text-sm pt-20 text-center">Sin eventos todavía</div>}</div></section><section className="panel p-5"><h2 className="font-semibold">Eventos por tipo</h2><p className="muted text-xs mt-1">Distribución observada en PostgreSQL</p><div className="mt-6 space-y-4">{data?.tipos_evento.map(x=><div key={x.tipo_evento}><div className="flex justify-between text-xs mb-2 gap-3"><span className="truncate">{x.tipo_evento}</span><span className="accent">{x.total}</span></div><div className="h-2 rounded-full bg-[#24384f]"><div className="h-2 rounded-full bg-[#42caca]" style={{width:`${Math.max(4,(x.total/(data.tipos_evento[0]?.total||1))*100)}%`}}/></div></div>)}</div></section></div><section className="panel p-5"><div className="flex justify-between items-start mb-4"><div><h2 className="font-semibold">Sesiones recientes</h2><p className="muted text-xs mt-1">Accesos capturados por Cowrie</p></div><Link className="btn text-xs" to="/sesiones">Ver todas</Link></div><SessionTable sessions={sessions}/></section><section className="panel p-5 mt-5" aria-label="Comandos recientes"><h2 className="font-semibold">Últimos comandos observados</h2><p className="muted text-xs mt-1">Actualizaciones por WebSocket · el análisis LLM se ejecuta manualmente</p><ul className="mt-4 space-y-3" aria-live="polite">{data?.ultimos_comandos?.map(command=><li key={command.id_evento} data-evento={command.id_evento} ref={node=>{if(node&&!node.dataset.renderizadoEn){node.dataset.renderizadoEn=new Date().toISOString();if(realtime.notice?.eventos?.includes(command.id_evento)){node.dataset.recibidoApi=realtime.notice.recibido_api;node.dataset.confirmadoApi=realtime.notice.confirmado_api}}}} className="bg-[#0c1728] rounded p-3"><code className="block text-sm break-all whitespace-pre-wrap">{command.comando}</code><div className="flex flex-wrap gap-3 mt-2 text-xs muted"><span>{date(command.fecha_hora)}</span><Link className="accent" to={'/sesiones/'+command.id_sesion}>Ver sesión</Link><span>#{command.id_evento}</span></div></li>)}</ul>{!data?.ultimos_comandos?.length&&<p className="muted text-sm mt-4">Sin comandos registrados todavía.</p>}</section></>}
 function SessionTable({sessions,onAnalyze,busyId}:{sessions:Session[],onAnalyze?:(session:Session)=>void,busyId?:string|null}){
   return <div className="overflow-x-auto"><table className="w-full text-sm">
     <thead className="bg-[#1b3049] text-[#a9bdd2] text-left text-xs"><tr><th className="p-3">Sesión</th><th className="p-3">IP de origen</th><th className="p-3">Inicio</th><th className="p-3">Protocolo</th><th className="p-3">Eventos</th><th className="p-3">Análisis</th>{onAnalyze&&<th className="p-3">Acción</th>}</tr></thead>
-    <tbody>{sessions.map(x=><tr key={x.id_sesion} className="table-row border-b line"><td className="p-3"><Link className="accent hover:underline font-mono" to={'/sesiones/'+x.id_sesion}>{x.cowrie_session_id}</Link></td><td className="p-3">{x.ip_origen||'?'}</td><td className="p-3 muted">{date(x.fecha_inicio)}</td><td className="p-3">{x.protocolo||'ssh'}</td><td className="p-3">{x.eventos??'?'}</td><td className="p-3">{badge(x.estado_analisis)}{x.analisis_desactualizado&&<span className="badge warn ml-2">Desactualizado</span>}</td>{onAnalyze&&<td className="p-3">{x.estado_analisis==='analizada'?<Link className="btn-secondary text-xs" to={'/sesiones/'+x.id_sesion}>Ver resultado</Link>:<button className="btn-secondary text-xs" disabled={!x.eventos||x.estado_analisis==='en_proceso'||!!busyId} onClick={()=>onAnalyze(x)}>{busyId===x.id_sesion?'Analizando…':x.estado_analisis==='en_proceso'?'En proceso':analysisActionLabel(x)}</button>}</td>}</tr>)}</tbody>
+    <tbody>{sessions.map(x=><tr key={x.id_sesion} className="table-row border-b line"><td className="p-3"><Link className="accent hover:underline font-mono" to={'/sesiones/'+x.id_sesion}>{x.cowrie_session_id}</Link></td><td className="p-3">{x.ip_origen||'?'}</td><td className="p-3 muted">{date(x.fecha_inicio)}</td><td className="p-3">{x.protocolo||'ssh'}</td><td className="p-3">{x.eventos??'?'}</td><td className="p-3">{x.analisis_desactualizado&&x.estado_analisis==='pendiente'?<span className="badge warn">Por actualizar</span>:badge(x.estado_analisis)}</td>{onAnalyze&&<td className="p-3">{x.estado_analisis==='analizada'?<Link className="btn-secondary text-xs" to={'/sesiones/'+x.id_sesion}>Ver resultado</Link>:<button className="btn-secondary text-xs" disabled={!x.eventos||x.estado_analisis==='en_proceso'||!!busyId} onClick={()=>onAnalyze(x)}>{busyId===x.id_sesion?'Analizando…':x.estado_analisis==='en_proceso'?'En proceso':analysisActionLabel(x)}</button>}</td>}</tr>)}</tbody>
   </table>{!sessions.length&&<p className="muted text-sm p-5 text-center">No hay sesiones para mostrar</p>}</div>
 }
 const PAGE_SIZE = 15
@@ -88,7 +88,7 @@ function usePagedData<T>(path:string,page:number,pageSize=PAGE_SIZE,interval=500
     }catch(e){if(!signal.aborted)setError((e as Error).message);throw e}
     finally{if(!signal.aborted)setLoading(false)}
   },interval,[path,page,pageSize,revision])
-  return {rows,hasNext,loading,error}
+  return {rows,setRows,hasNext,loading,error}
 }
 
 function Pager({page,pageSize,count,hasNext,onChange,label}:{page:number,pageSize:number,count:number,hasNext:boolean,onChange:(page:number)=>void,label:string}){
@@ -119,11 +119,11 @@ function SessionsPage(){
     finally{setBusyId(null)}
   }
   return <>
-    <Header title="Sesiones y eventos" description="Explora las sesiones registradas y consulta la secuencia de eventos" action={<Link className="btn" to="/importar">Importar archivo</Link>}/>
+    <Header title="Sesiones y eventos" description="Historial y cronología de Cowrie" action={<Link className="btn" to="/importar">Importar archivo</Link>}/>
     {(error||actionError)&&<ErrorBox error={error||actionError}/>}
     <section className="panel p-5">
       <div className="flex flex-wrap gap-3 justify-between items-center mb-5">
-        <div><h2 className="font-semibold">Historial de sesiones</h2><p className="muted text-xs mt-1">Busca y analiza cualquier sesión guardada en PostgreSQL</p></div>
+        <div><h2 className="font-semibold">Historial de sesiones</h2><p className="muted text-xs mt-1">Busca por sesión o IP</p></div>
         <div className="relative"><Search size={15} className="absolute left-3 top-3 muted"/><input aria-label="Buscar sesión o IP" className="bg-[#1a2e46] rounded-md text-sm pl-9 pr-3 py-2 outline-none border border-[#29415a]" placeholder="Filtrar sesión o IP" value={query} onChange={e=>{setQuery(e.target.value);setPage(0)}}/></div>
       </div>
       {loading?<p className="muted text-sm py-8 text-center">Cargando sesiones…</p>:<SessionTable sessions={sessions} onAnalyze={analyze} busyId={busyId}/>}
@@ -197,7 +197,7 @@ function SessionDetail(){
     finally{setBusy(false)}
   }
   return <>
-    <Header title={'Sesión '+(session?.cowrie_session_id||'')} description="Reconstrucción cronológica y evidencia de origen" action={<button className="btn-secondary flex gap-2 items-center" onClick={()=>navigate('/sesiones')}><ArrowLeft size={16}/> Volver</button>}/>
+    <Header title={'Sesión '+(session?.cowrie_session_id||'')} description="Cronología y evidencia" action={<button className="btn-secondary flex gap-2 items-center" onClick={()=>navigate('/sesiones')}><ArrowLeft size={16}/> Volver</button>}/>
     {error&&<ErrorBox error={error}/>}
     {eventError&&<ErrorBox error={eventError}/>}
     {session&&<SessionReport key={session.id_sesion} id={session.id_sesion}/>}
@@ -261,9 +261,9 @@ function AnalysisPage(){
   const commands=events.filter(e=>e.tipo_evento==='cowrie.command.input').slice(-6).reverse()
   const newer=analysis?.resultado_estructurado?.eventos_analizados!==undefined&&(selected?.eventos??0)>analysis.resultado_estructurado.eventos_analizados
   return <>
-    <Header title="Análisis LLM" description="Eventos reales de Cowrie y análisis de la sesión seleccionada" action={<LiveStatus/>}/>
+    <Header title="Análisis LLM" description="Actividad e interpretación por sesión" action={<LiveStatus/>}/>
     {(error||listError)&&<ErrorBox error={error||listError}/>}
-    <div className="grid sm:grid-cols-3 gap-4 mb-5"><Metric label="Completados en página" value={completed} sub="Resultados disponibles"/><Metric label="Pendientes en página" value={sessions.length-completed} sub="Sesiones por revisar" color="blue"/><Metric label="Eventos en sesión" value={selected?.eventos??0} sub="Actualización cada 5 segundos" color="green"/></div>
+    <div className="grid sm:grid-cols-3 gap-4 mb-5"><Metric label="Completados en página" value={completed} sub="Resultados disponibles"/><Metric label="Pendientes en página" value={sessions.filter(x=>x.estado_analisis==='pendiente').length} sub="Sesiones por revisar" color="blue"/><Metric label="Eventos en sesión" value={selected?.eventos??0} sub="Actualización cada 5 segundos" color="green"/></div>
     <div className="workspace-columns grid lg:grid-cols-2 gap-5">
       <section className="panel p-5"><h2 className="font-semibold">Sesiones y estado</h2><p className="muted text-xs mt-1 mb-5">Seleccione una sesión para consultar los eventos recientes</p>
         {loading ? <p role="status" className="muted text-sm py-8">Cargando sesiones…</p> :
@@ -291,7 +291,7 @@ function AnalysisPage(){
     </div>
   </>
 }
-function ImportPage(){const [file,setFile]=useState<File|null>(null),[result,setResult]=useState<unknown>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);async function submit(){if(!file)return;setBusy(true);setError('');try{const body=new FormData();body.append('file',file);setResult(await api('/ingesta/cowrie',{method:'POST',body}))}catch(e){setError((e as Error).message)}finally{setBusy(false)}}return <><Header title="Importar registros Cowrie" description="Carga un archivo JSONL para incorporar sesiones y eventos reales"/><div className="panel p-6 max-w-2xl"><div className="flex items-start gap-4"><FileUp size={30} className="accent"/><div><h2 className="font-semibold">Archivo cowrie.json</h2><p className="muted text-sm mt-1">Máximo 10 MB. Cada línea se valida de forma independiente. La reimportación evita duplicados.</p></div></div><input type="file" accept=".json,.jsonl" className="block mt-7 text-sm" onChange={e=>setFile(e.target.files?.[0]||null)}/><button className="btn mt-6" disabled={!file||busy} onClick={submit}>{busy?'Importando…':'Importar eventos'}</button>{error&&<div className="mt-5"><ErrorBox error={error}/></div>}{result!==null&&<pre className="bg-[#0c1728] p-4 rounded mt-5 overflow-auto text-sm">{JSON.stringify(result,null,2)}</pre>}</div></>}
+function ImportPage(){const [file,setFile]=useState<File|null>(null),[result,setResult]=useState<unknown>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);async function submit(){if(!file)return;setBusy(true);setError('');try{const body=new FormData();body.append('file',file);setResult(await api('/ingesta/cowrie',{method:'POST',body}))}catch(e){setError((e as Error).message)}finally{setBusy(false)}}return <><Header title="Importar registros Cowrie" description="Importación de registros JSONL"/><div className="panel p-6 max-w-2xl"><div className="flex items-start gap-4"><FileUp size={30} className="accent"/><div><h2 className="font-semibold">Archivo cowrie.json</h2><p className="muted text-sm mt-1">Máximo 10 MB. Cada línea se valida de forma independiente. La reimportación evita duplicados.</p></div></div><input type="file" accept=".json,.jsonl" className="block mt-7 text-sm" onChange={e=>setFile(e.target.files?.[0]||null)}/><button className="btn mt-6" disabled={!file||busy} onClick={submit}>{busy?'Importando…':'Importar eventos'}</button>{error&&<div className="mt-5"><ErrorBox error={error}/></div>}{result!==null&&<pre className="bg-[#0c1728] p-4 rounded mt-5 overflow-auto text-sm">{JSON.stringify(result,null,2)}</pre>}</div></>}
 type ReviewState='pendiente'|'confirmado'|'descartado'|'mixto'
 type IocRow = {
   id_ioc: string, tipo: string, valor: string, primera_observacion: string, ultima_observacion: string,
@@ -428,7 +428,7 @@ function IocsPage() {
   const {rows,hasNext,loading,error}=usePagedData<IocRow>(path,linkedIoc?0:page)
   const selected=rows.find(row=>row.id_ioc===selectedId)
   return <>
-    <Header title="Observables de Cowrie" description="Consulta el contexto de cada valor y su revisión de relevancia."
+    <Header title="Observables de Cowrie" description="Valores observados y estado de revisión"
       action={linkedIoc?<Link className="btn-secondary" to="/iocs">Ver todos los observables</Link>:undefined}/>
     {error&&<ErrorBox error={error}/>}
     <div className="space-y-5">
@@ -469,20 +469,19 @@ function MitrePage(){
   const linkedMapping=params.get('mapeo')
   const [page,setPage]=useState(0)
   const [selectedId,setSelectedId]=useState<string|null>(linkedMapping)
-  const [reviewed,setReviewed]=useState<Record<string,ReviewState>>({})
   const path='/mitre/mapeos'+(linkedMapping?'?id_mapeo='+encodeURIComponent(linkedMapping):'')
-  const {rows:maps,hasNext,loading,error}=usePagedData<MitreRow>(path,linkedMapping?0:page)
+  const {rows:maps,setRows:setMaps,hasNext,loading,error}=usePagedData<MitreRow>(path,linkedMapping?0:page)
   const selected=maps.find(row=>row.id_mapeo===selectedId)||null
   useEffect(()=>{setPage(0);setSelectedId(linkedMapping)},[linkedMapping])
   function changePage(next:number){setSelectedId(null);setPage(next)}
-  const reviewState=(mapping:MitreRow)=>reviewed[mapping.id_mapeo]??mapping.estado_revision
+  const reviewState=(mapping:MitreRow)=>mapping.estado_revision
   return <>
-    <Header title="MITRE ATT&CK" description="Consulta técnicas, tácticas y evidencias vinculadas a eventos analizados"
+    <Header title="MITRE ATT&CK" description="Técnicas propuestas y evidencia"
       action={linkedMapping?<Link className="btn-secondary" to="/mitre">Ver todos los mapeos</Link>:undefined}/>
     {error&&<ErrorBox error={error}/>}
     <div className="mitre-review-layout grid lg:grid-cols-[minmax(0,1.15fr)_minmax(22rem,.85fr)] gap-5 items-start">
       <section className="panel p-5"><div className="flex flex-wrap justify-between gap-3 mb-4"><div><h2 className="font-semibold">Hallazgos MITRE</h2><p className="muted text-xs mt-1">Cada registro corresponde a una técnica propuesta para una acción y sesión concretas</p></div><span className="badge">{maps.length} en esta página</span></div>
-        {loading?<p className="muted text-sm py-8" role="status">Cargando hallazgos…</p>:<ul className="divide-y line" aria-label="Mapeos MITRE pendientes de revisión">{maps.map(x=>{const state=reviewState(x);return <li key={x.id_mapeo}>
+        {loading?<p className="muted text-sm py-8" role="status">Cargando hallazgos…</p>:<ul className="divide-y line" aria-label="Mapeos MITRE">{maps.map(x=>{const state=reviewState(x);return <li key={x.id_mapeo}>
           <button type="button" aria-pressed={selectedId===x.id_mapeo} onClick={()=>setSelectedId(x.id_mapeo)} className="mitre-finding w-full text-left px-3 py-4 rounded-md">
             <span className="flex flex-wrap items-center justify-between gap-2"><span className="font-semibold"><span className="font-mono accent mr-2">{x.codigo_tecnica}</span>{x.tecnica}</span><span className={'badge '+(state==='pendiente'?'warn':'')}>{mappingReviewLabels[state]}</span></span>
             <span className="block text-xs muted mt-2">{x.tactica} · {x.tipo_accion} · sesión {x.id_sesion.slice(0,8)}</span>
@@ -496,7 +495,7 @@ function MitrePage(){
         {selected?<><p className="muted text-xs mt-1">Mapeo {selected.id_mapeo.slice(0,8)} · sesión {selected.id_sesion.slice(0,8)}</p><h3 className="text-2xl font-bold mt-5">{selected.tecnica}</h3>
           <div className="flex flex-wrap gap-2 items-baseline mt-3"><span className="badge">{selected.codigo_tecnica}</span><span className="badge contextual">{selected.tactica}</span>{selected.confianza!=null&&<span className="muted text-xs">{Math.round(Number(selected.confianza)*100)} % de confianza declarada</span>}</div>
           <div className="mt-5 rounded-lg bg-[#0d192a] p-4"><p className="muted text-xs">Acción analizada</p><p className="font-semibold mt-1">{selected.tipo_accion}</p><p className="text-sm mt-2">{selected.descripcion_accion}</p></div>
-          <ReviewControls key={selected.id_mapeo} kind="mitre" id={selected.id_mapeo} state={reviewState(selected)} onReviewed={state=>setReviewed(previous=>({...previous,[selected.id_mapeo]:state}))}/>
+          <ReviewControls key={selected.id_mapeo} kind="mitre" id={selected.id_mapeo} state={reviewState(selected)} onReviewed={state=>setMaps(rows=>rows.map(row=>row.id_mapeo===selected.id_mapeo?{...row,estado_revision:state}:row))}/>
           <div className="flex flex-wrap gap-3 mt-5 text-xs">
             <Link to={sessionEvidencePath(selected.id_sesion)} className="accent hover:underline">Ver sesión</Link>
             <Link to={actionEvidencePath(selected.id_sesion,selected.id_analisis,selected.id_accion)} className="accent hover:underline">Ver acción</Link>
@@ -509,7 +508,7 @@ function MitrePage(){
           <p className="muted text-xs mt-3">{selected.rag_procedencia?.metodo?'DeepSeek + RAG · ATT&CK '+selected.rag_procedencia.catalogo?.version:'Método anterior'}{selected.grado_evidencia?' · '+selected.grado_evidencia.replaceAll('_',' '):''}</p>
           {selected.revisado_en&&<p className="muted text-xs">Revisado {date(selected.revisado_en)}</p>}
           {selected.motivo_revision&&<p className="muted text-xs mt-2">{selected.motivo_revision}</p>}
-        </>:<div className="mt-8 rounded-lg border line p-5"><p className="font-semibold">Seleccione un hallazgo</p><p className="muted text-sm mt-2">La paginación no cambia la revisión automáticamente. Abra un registro para consultar su acción, evidencia y procedencia antes de tomar una decisión.</p></div>}
+        </>:<div className="mt-8 rounded-lg border line p-5"><p className="font-semibold">Seleccione un hallazgo</p><p className="muted text-sm mt-2">Abre un registro para revisar su evidencia.</p></div>}
       </aside>
     </div>
   </>

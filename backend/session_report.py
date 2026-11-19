@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 
 from .analysis_state import analyzed_count
+from .rag.behavior import redact
 
 EVENT_LIMIT = 500
 OBSERVABLE_LIMIT = 100
@@ -27,8 +28,10 @@ def report_snapshot(conn, tables, honeypot_id, session_id):
     events = conn.execute(select(event.c.id_evento, event.c.tipo_evento, event.c.fecha_hora)
         .where(event.c.id_sesion == session_id)
         .order_by(event.c.fecha_hora, event.c.numero_secuencia, event.c.id_evento).limit(EVENT_LIMIT)).all()
-    counts = dict(conn.execute(select(event.c.tipo_evento, func.count())
-        .where(event.c.id_sesion == session_id).group_by(event.c.tipo_evento)).tuples().all())
+    groups = conn.execute(select(event.c.tipo_evento, func.count(), func.min(event.c.id_evento))
+        .where(event.c.id_sesion == session_id).group_by(event.c.tipo_evento)).all()
+    counts = {kind: count for kind, count, _ in groups}
+    examples = {kind: eid for kind, _, eid in groups}
     total = sum(counts.values())
     saved = conn.execute(select(analysis).where(
         analysis.c.id_sesion == session_id, analysis.c.estado == "completado"
@@ -69,7 +72,7 @@ def report_snapshot(conn, tables, honeypot_id, session_id):
         event.c.datos_originales["input"].as_string()).where(event.c.id_sesion == session_id,
         event.c.tipo_evento == "cowrie.command.input").order_by(event.c.fecha_hora,
         event.c.numero_secuencia, event.c.id_evento).limit(EVENT_LIMIT)).all()
-    report = assemble_report(record, total, counts, events, saved, covered, status, observations, mappings)
+    report = assemble_report(record, total, counts, events, saved, covered, status, observations, mappings, examples)
     sections = report["sections"]
     sections.insert(1, dict(title="Registro de comandos", columns=["Hora UTC", "Entrada en Cowrie", "Evento"],
         paragraphs=[f"{len(commands)} entradas mostradas de {counts.get('cowrie.command.input', 0)} registradas. "
@@ -92,9 +95,19 @@ def report_snapshot(conn, tables, honeypot_id, session_id):
         add("Hipótesis del modelo", [hypothesis.get("descripcion"), f"Evidencia vinculada: {refs}" if refs else None])
     add("Conclusión del análisis", [detail.get("conclusion")])
     add("Limitaciones de la evidencia", detail.get("limitaciones") or [])
-    add("Comprobaciones recomendadas", detail.get("recomendaciones") or [])
+    safeguards = detail.get("recomendaciones") or []
+    from .analysis_report import safeguard_cards
+    for card in safeguard_cards(safeguards):
+        narrative.append(dict(title="Propuesta de salvaguarda · " + card["rows"][0][1],
+                              paragraphs=[], columns=["Campo", "Detalle"], rows=card["rows"]))
     index = next(i for i, item in enumerate(sections) if item["title"] == "Cronología de evidencia")
     sections[index:index] = narrative
+    # Preserve every section and row, including tuple-backed SQL results.
+    report["metadata"] = [[label, redact(value)] for label, value in report["metadata"]]
+    for section in sections:
+        section["title"] = redact(section["title"])
+        section["paragraphs"] = [redact(value) for value in section["paragraphs"]]
+        section["rows"] = [[redact(value) for value in row] for row in section["rows"]]
     return report
 
 
@@ -110,7 +123,7 @@ def observable_value(kind, value):
         return "URL no disponible"
 
 
-def assemble_report(record, total, counts, events, saved, covered, status, observations, mappings):
+def assemble_report(record, total, counts, events, saved, covered, status, observations, mappings, examples=None):
     def section(title, paragraphs=(), columns=(), rows=()):
         return dict(title=title, paragraphs=list(paragraphs), columns=list(columns), rows=list(rows))
 
@@ -118,6 +131,23 @@ def assemble_report(record, total, counts, events, saved, covered, status, obser
         return f"#{event_id}" if event_id is not None else "Sin referencia"
 
     review = {"pendiente": "Pendiente", "confirmado": "Confirmado", "descartado": "Descartado"}
+    if examples is None:
+        examples = {kind: eid for eid, kind, _ in events}
+    safeguards = []
+    for kind, measure, check in (
+        ("cowrie.login.success", "Verificar el origen del acceso", "Contrastar la IP y la hora con las pruebas autorizadas del laboratorio."),
+        ("cowrie.login.failed", "Revisar los intentos de acceso", "Comparar origen y frecuencia con otras sesiones antes de proponer restricciones."),
+        ("cowrie.command.input", "Proteger el registro de comandos", "Conservar el original con acceso restringido y revisar las entradas por si contienen secretos antes de compartir el informe."),
+        ("cowrie.session.file_download", "Revisar la salida de red del señuelo", "Contrastar el destino registrado con las reglas de salida de la VM."),
+    ):
+        if kind in examples:
+            safeguards.append((measure, check, reference(examples[kind])))
+    for kind, value, state, _, eid in observations[:OBSERVABLE_LIMIT]:
+        if state == "pendiente":
+            safeguards.append(("Validar el observable", f"Contrastar {kind} {observable_value(kind, value)} con su evento en Observables e IoCs.", reference(eid)))
+    for code, name, state, eid in mappings[:FINDING_LIMIT]:
+        if state == "pendiente":
+            safeguards.append((f"Revisar {code}", f"Verificar la propuesta «{name}» en MITRE ATT&CK y registrar el motivo de la decisión.", reference(eid)))
     summary = [
         f"Eventos registrados: {total}. Comandos: {counts.get('cowrie.command.input', 0)}. "
         f"Autenticaciones aceptadas por el señuelo: {counts.get('cowrie.login.success', 0)}.",
@@ -150,10 +180,10 @@ def assemble_report(record, total, counts, events, saved, covered, status, obser
                 ("Técnica", "Revisión", "Referencia"),
                 [(f"{code} · {name}", review.get(state, state), reference(event_id))
                  for code, name, state, event_id in mappings[:FINDING_LIMIT]]),
-        section("Seguimiento",
-                ["Revisar los observables y mapeos pendientes con sus eventos de origen.",
-                 "Correlacionar con fuentes externas al señuelo antes de determinar impacto.",
-                 "Conservar los registros originales de Cowrie para consultas posteriores."]),
+        section("Comprobaciones vinculadas a la evidencia",
+                ["Medidas propuestas para revisión humana. La referencia identifica un evento de la sesión o de la acción asociada."]
+                if safeguards else ["La evidencia disponible no activa una recomendación específica."],
+                ("Medida propuesta", "Comprobación", "Evento de referencia"), safeguards),
     ]
     if saved and saved.resumen:
         sections.insert(1, section("Interpretación del análisis guardado", [

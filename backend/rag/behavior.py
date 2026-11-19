@@ -32,11 +32,16 @@ def redact(value):
     if isinstance(value,list):return [redact(v) for v in value[:500]]
     if not isinstance(value,str):return value
     value=re.sub(r'https?://[^\s<>\"\']+',lambda m:clean_url(m.group()),value)
-    value=re.sub(r'(?i)(\b(?:password|passwd|token|secret|api[_-]?key)\s*[=:]\s*)[^\s;]+',r'\1[REDACTED]',value)
-    value=re.sub(r'(?i)(\bBearer\s+)[\w.\-]+',r'\1[REDACTED]',value)
-    value=re.sub(r'(?i)((?:--password|--token|--secret|--api-key|--user|-u)\s+)[^\s;]+',r'\1[REDACTED]',value)
-    value=re.sub(r'\b([A-Za-z_][A-Za-z0-9_]*=)(?:"[^"]*"|\'[^\']*\'|[^\s;]+)',r'\1[REDACTED]',value)
-    value=re.sub(r'(sshpass\s+-p\s+)[^\s]+',r'\1[REDACTED]',value)
+    argument = r"""(?:"(?:\\.|[^"\\])*"|'[^']*'|[^\s;]+)"""
+    prefixes = (
+        r"\b(?:password|passwd|passphrase|token|secret|api[_-]?key|x-api-key)\s*[=:]\s*",
+        r"(?:--password|--token|--secret|--api-key|--user|-u)(?:\s+|=)",
+        r"\bsshpass\s+-p\s+",
+        r"\b(?:Bearer|Basic)\s+",
+        r"\b[A-Za-z_][A-Za-z0-9_]*=",
+    )
+    for prefix in prefixes:
+        value = re.sub("(?i)(" + prefix + ")" + argument, r"\1[REDACTED]", value)
     return value[:4000]
 
 

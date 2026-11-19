@@ -53,6 +53,18 @@ if (-not $SoloComprobar) {
         else {Write-Host "Conservado $($pair[1]); no se sobrescribe."}
     }
 }
+Push-Location backend/report_renderer
+try {
+    $rendererCheck = "import puppeteer from 'puppeteer'; import fs from 'node:fs'; const lock=JSON.parse(fs.readFileSync('package-lock.json')); if(JSON.parse(fs.readFileSync('node_modules/puppeteer/package.json')).version!==lock.packages['node_modules/puppeteer'].version)process.exit(1); const browser=await puppeteer.launch({headless:'shell',pipe:true}); await browser.close()"
+    & node --input-type=module -e $rendererCheck
+    if ($LASTEXITCODE -ne 0) {
+        if ($SoloComprobar) {throw 'Falta Puppeteer o Chrome para los informes PDF'}
+        & npm.cmd ci
+        if ($LASTEXITCODE -ne 0) {throw 'Fallo la instalacion del generador PDF'}
+        & node --input-type=module -e $rendererCheck
+        if ($LASTEXITCODE -ne 0) {throw 'Chrome no pudo iniciar para generar PDF'}
+    }
+} finally {Pop-Location}
 & $python -m pip check
 if ($LASTEXITCODE -ne 0) {throw 'Dependencias Python incompatibles'}
 if (-not $SoloComprobar) {

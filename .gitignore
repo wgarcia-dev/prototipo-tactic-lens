@@ -4,7 +4,7 @@ __pycache__/
 frontend/.env.local
 frontend/.env.*.local
 *.pyc
-frontend/node_modules/
+node_modules/
 frontend/dist/
 frontend/.npm-cache/
 frontend/*.tsbuildinfo

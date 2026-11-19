@@ -22,13 +22,43 @@ class BehaviorHypothesis(BaseModel):
     eventos: list[StrictInt] = Field(min_length=1)
 
 
+class SafeguardProposal(BaseModel):
+    activo: str
+    riesgo: str
+    salvaguarda: str
+    objetivo: str
+    medidas: str
+    validacion: str
+
+
+def safeguard_cards(recommendations):
+    cards = []
+    for index, item in enumerate(recommendations, 1):
+        proposal = item if isinstance(item, dict) else {"salvaguarda": item}
+        fields = [
+            ("Código", f"SG-{index:03d}"),
+            ("Activo", proposal.get("activo") or "Por identificar"),
+            ("Riesgo", proposal.get("riesgo") or "Por caracterizar"),
+            ("Nivel de riesgo inicial", "Pendiente de valorar probabilidad e impacto"),
+            ("Salvaguarda", proposal["salvaguarda"]),
+            ("Objetivo", proposal.get("objetivo") or "Por definir"),
+            ("Medidas", proposal.get("medidas") or "Por concretar"),
+            ("Responsable", "Por asignar"),
+            ("Prioridad", "Pendiente de valoración"),
+            ("Validación", proposal.get("validacion") or "Por definir con el analista"),
+            ("Estado", "Propuesta, pendiente de aprobación"),
+        ]
+        cards.append(dict(title=proposal["salvaguarda"], rows=fields))
+    return cards
+
+
 class BehaviorReport(BaseModel):
     contexto: str = Field(min_length=1, max_length=4000)
     fases: list[BehaviorPhase] = Field(min_length=1)
     hipotesis: list[BehaviorHypothesis] = Field(default_factory=list)
     conclusion: str = Field(min_length=1, max_length=4000)
     limitaciones: list[str] = Field(min_length=1)
-    recomendaciones: list[str] = Field(default_factory=list)
+    recomendaciones: list[SafeguardProposal | str] = Field(default_factory=list)
 
 
 def observation_context(events):
@@ -78,7 +108,9 @@ def analysis_instruction():
                            "confianza": 0.6, "eventos": [123]}],
             "conclusion": "Balance final: logros observables, intentos y alcance no demostrado.",
             "limitaciones": ["Limitación específica de esta captura y de la emulación de Cowrie."],
-            "recomendaciones": ["Comprobación concreta sugerida, sin afirmar que ya se haya realizado."],
+            "recomendaciones": [{"activo":"Activo observado", "riesgo":"Riesgo potencial",
+                "salvaguarda":"Título breve", "objetivo":"Resultado esperado", "medidas":"Acción concreta",
+                "validacion":"Cómo comprobar el resultado"}],
         },
         "acciones": [{"tipo": "comando", "descripcion": "Descripción técnica sustentada en eventos.",
                       "confianza": 0.8, "eventos": [123], "iocs": [], "mitre": []}],
@@ -106,7 +138,7 @@ REQUISITOS DEL INFORME:
   Acceder a Cowrie no demuestra compromiso de la máquina real ni de la red de la organización.
 - informe.limitaciones: explica vacíos concretos (salidas ausentes, descarga no confirmada, captura parcial,
   capacidades de emulación). La ausencia de un evento no prueba que una acción no haya ocurrido.
-- informe.recomendaciones: comprobaciones defensivas proporcionales a los hechos; no órdenes ofensivas.
+- informe.recomendaciones: salvaguardas defensivas proporcionales a los hechos, concretas y pendientes de validación humana; no afirmes que ya se aplicaron.
 - Profundidad proporcional: en sesiones ricas busca aproximadamente 400–900 palabras entre las secciones;
   en sesiones cortas explica solo lo sustentable, sin rellenar ni inventar fases o acciones.
 - Acciones sin evidencia: no las incluyas. Se permite acciones=[] si solo hay conexión o desconexión.

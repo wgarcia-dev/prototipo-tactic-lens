@@ -27,6 +27,7 @@ from .auth.store import require_admin, audit
 from .session_report import report_snapshot
 from .rag.retrieval import context as retrieve_context
 from .rag.validation import validate as validate_mitre
+from .rag.behavior import redact
 from .rag.pipeline import METHOD, RAG_INSTRUCTION, evidence_sample, facts_for_model
 
 # Legacy backfill compatibility only. New RAG classification NEVER filters by this set.
@@ -37,6 +38,22 @@ MODEL_OBSERVABLE_LIMIT = 20
 
 def table(name):
     return app.state.tables[name]
+
+
+def sensor_sessions():
+    sessions = table("sesion")
+    return select(sessions.c.id_sesion).where(sessions.c.id_honeypot == app.state.honeypot_id)
+
+
+def sensor_events():
+    events = table("evento")
+    return select(events.c.id_evento).where(events.c.id_sesion.in_(sensor_sessions()))
+
+
+def sensor_actions():
+    actions, analyses = table("accion_identificada"), table("analisis_llm")
+    return (select(actions.c.id_accion).join(analyses, actions.c.id_analisis == analyses.c.id_analisis)
+            .where(analyses.c.id_sesion.in_(sensor_sessions())))
 
 
 def plain(row):
@@ -114,23 +131,25 @@ def session_detail(id_sesion: UUID):
 
 def dashboard_snapshot():
     s, e, a, obs, m = (table(n) for n in ("sesion", "evento", "analisis_llm", "observacion_ioc", "mapeo_mitre"))
+    sessions = sensor_sessions()
+    technique = table("tecnica_tactica")
     with app.state.engine.connect() as conn:
         counts = dict(conn.execute(select(
-            select(func.count()).select_from(s).scalar_subquery().label('sesiones'),
-            select(func.count()).select_from(e).scalar_subquery().label('eventos'),
-            select(func.count(func.distinct(a.c.id_sesion))).where(a.c.estado == 'completado').scalar_subquery().label('sesiones_analizadas'),
+            select(func.count()).select_from(s).where(s.c.id_honeypot == app.state.honeypot_id).scalar_subquery().label('sesiones'),
+            select(func.count()).select_from(e).where(e.c.id_sesion.in_(sessions)).scalar_subquery().label('eventos'),
+            select(func.count(func.distinct(a.c.id_sesion))).where(a.c.estado == 'completado', a.c.id_sesion.in_(sessions)).scalar_subquery().label('sesiones_analizadas'),
             select(func.count(func.distinct(obs.c.id_ioc))).where(
-                func.jsonb_array_length(obs.c.detalles) > 0).scalar_subquery().label('iocs'),
-            select(func.count(func.distinct(m.c.id_vinculo))).scalar_subquery().label('tecnicas_mitre'),
+                func.jsonb_array_length(obs.c.detalles) > 0, obs.c.id_evento.in_(sensor_events())).scalar_subquery().label('iocs'),
+            select(func.count(func.distinct(technique.c.codigo_tecnica))).select_from(m).join(technique, technique.c.id_vinculo == m.c.id_vinculo).where(m.c.id_accion.in_(sensor_actions())).scalar_subquery().label('tecnicas_mitre'),
         )).mappings().one())
-        by_day = conn.execute(select(func.date(e.c.fecha_hora).label("dia"), func.count().label("total")).group_by(func.date(e.c.fecha_hora)).order_by(func.date(e.c.fecha_hora).desc()).limit(7)).mappings().all()
-        by_type = conn.execute(select(e.c.tipo_evento, func.count().label("total")).group_by(e.c.tipo_evento).order_by(func.count().desc()).limit(8)).mappings().all()
-        latest_event = conn.scalar(select(func.max(e.c.fecha_hora)))
+        by_day = conn.execute(select(func.date(e.c.fecha_hora).label("dia"), func.count().label("total")).where(e.c.id_sesion.in_(sessions)).group_by(func.date(e.c.fecha_hora)).order_by(func.date(e.c.fecha_hora).desc()).limit(7)).mappings().all()
+        by_type = conn.execute(select(e.c.tipo_evento, func.count().label("total")).where(e.c.id_sesion.in_(sessions)).group_by(e.c.tipo_evento).order_by(func.count().desc()).limit(8)).mappings().all()
+        latest_event = conn.scalar(select(func.max(e.c.fecha_hora)).where(e.c.id_sesion.in_(sessions)))
         commands = conn.execute(select(e.c.id_evento,e.c.id_sesion,e.c.fecha_hora,e.c.datos_originales)
-            .where(e.c.tipo_evento=='cowrie.command.input')
+            .where(e.c.tipo_evento=='cowrie.command.input', e.c.id_sesion.in_(sessions))
             .order_by(e.c.fecha_hora.desc(),e.c.id_evento.desc()).limit(5)).mappings().all()
     recent_commands=[{'id_evento':row['id_evento'],'id_sesion':str(row['id_sesion']),
-        'fecha_hora':row['fecha_hora'],'comando':str(row['datos_originales'].get('input',''))[:2000]}
+        'fecha_hora':row['fecha_hora'],'comando':redact(str(row['datos_originales'].get('input','')))[:2000]}
         for row in commands]
     return {**counts, "actividad": [plain(x) for x in reversed(by_day)], "tipos_evento": [plain(x) for x in by_type], "ultimo_evento": latest_event,
             'ultimos_comandos':recent_commands}
@@ -448,7 +467,7 @@ def persist_findings(conn, analysis_id, result, events, rag=None, provenance=Non
 def get_analysis(id_analisis: UUID):
     a, action, link = (table(n) for n in ("analisis_llm", "accion_identificada", "accion_evento"))
     with app.state.engine.connect() as conn:
-        row = conn.execute(select(a).where(a.c.id_analisis == id_analisis)).mappings().first()
+        row = conn.execute(select(a).where(a.c.id_analisis == id_analisis, a.c.id_sesion.in_(sensor_sessions()))).mappings().first()
         if not row:
             raise HTTPException(404, "Análisis no encontrado")
         actions = conn.execute(select(action).where(action.c.id_analisis == id_analisis)).mappings().all()
@@ -468,7 +487,11 @@ def get_analysis(id_analisis: UUID):
         output = [{**plain(item), "eventos": evidence[item.id_accion],
                    "eventos_texto": [str(event_id) for event_id in evidence[item.id_accion]], "mitre": mappings[item.id_accion],
                    "observables": observables_by_action[item.id_accion]} for item in actions]
-    return {**plain(row), "resultado_estructurado": safe(row.resultado_estructurado), "acciones": output}
+    from .analysis_report import safeguard_cards
+    payload = safe(row.resultado_estructurado)
+    report = (payload or {}).get("informe") or {}
+    return {**plain(row), "resultado_estructurado": payload, "acciones": output,
+            "salvaguardas": safeguard_cards(report.get("recomendaciones") or [])}
 
 
 @app.get("/api/iocs", dependencies=[Depends(local_only)])
@@ -482,7 +505,7 @@ def list_iocs(limit: int = Query(100, ge=1, le=200), offset: int = Query(0, ge=0
 
     def representative(column):
         return (select(column).select_from(obs.join(event, event.c.id_evento == obs.c.id_evento))
-                .where(obs.c.id_ioc == i.c.id_ioc)
+                .where(obs.c.id_ioc == i.c.id_ioc, event.c.id_sesion.in_(sensor_sessions()))
                 .order_by(verified.desc(), event.c.fecha_hora.desc(), event.c.id_evento.desc())
                 .limit(1).correlate(i).scalar_subquery().label(column.name))
 
@@ -500,6 +523,7 @@ def list_iocs(limit: int = Query(100, ge=1, le=200), offset: int = Query(0, ge=0
             .join(typ, i.c.id_tipo_ioc == typ.c.id_tipo_ioc)
             .outerjoin(obs, obs.c.id_ioc == i.c.id_ioc)
             .outerjoin(event, event.c.id_evento == obs.c.id_evento)
+            .where(event.c.id_sesion.in_(sensor_sessions()))
             .group_by(i.c.id_ioc, typ.c.nombre)
             .order_by(latest.desc(), i.c.id_ioc)
             .limit(limit).offset(offset))
@@ -523,7 +547,7 @@ def ioc_observations(id_ioc: UUID, limit: int = Query(50, ge=1, le=200), offset:
         if indicator is None:
             raise HTTPException(404, "Observable no encontrado")
         query = (select(obs, *event_columns(event)[1:], event.c.datos_originales)
-                 .join(event, event.c.id_evento == obs.c.id_evento).where(obs.c.id_ioc == id_ioc)
+                 .join(event, event.c.id_evento == obs.c.id_evento).where(obs.c.id_ioc == id_ioc, event.c.id_sesion.in_(sensor_sessions()))
                  .order_by(event.c.fecha_hora.desc(), event.c.numero_secuencia.desc(), event.c.id_evento.desc())
                  .limit(limit).offset(offset))
         if id_evento is not None:
@@ -557,6 +581,7 @@ def list_mappings(limit: int = 100, offset: int = 0, id_mapeo: UUID | None = Non
                  act.c.tipo_accion, act.c.descripcion.label("descripcion_accion"),
                  m.c.fecha_mapeo)
              .join(act, m.c.id_accion == act.c.id_accion).join(analysis, act.c.id_analisis == analysis.c.id_analisis)
+             .where(analysis.c.id_sesion.in_(sensor_sessions()))
              .order_by(m.c.fecha_mapeo.desc(), m.c.id_mapeo).limit(min(max(limit, 1), 200)).offset(max(offset, 0)))
     if id_mapeo is not None:
         query = query.where(m.c.id_mapeo == id_mapeo)
@@ -569,6 +594,9 @@ def list_mappings(limit: int = 100, offset: int = 0, id_mapeo: UUID | None = Non
 def mapping_observables(id_mapeo: UUID, limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
     action, detection = table("accion_identificada"), table("deteccion_ioc")
     with app.state.engine.connect() as conn:
+        m = table("mapeo_mitre")
+        if conn.scalar(select(m.c.id_mapeo).where(m.c.id_mapeo == id_mapeo, m.c.id_accion.in_(sensor_actions()))) is None:
+            raise HTTPException(404, "Mapeo MITRE no encontrado")
         mapping = next(iter(mapping_evidence(conn, app.state.tables, mapping_id=id_mapeo)), None)
         if mapping is None:
             raise HTTPException(404, "Mapeo MITRE no encontrado")
@@ -633,12 +661,22 @@ def review_intelligence(kind: Literal["ioc", "observacion_ioc", "mitre"], item_i
     key = target.c[key_name]
     with app.state.engine.begin() as conn:
         _, actor = require_admin(conn, request)
-        existing = conn.execute(select(target).where(key == item_id).with_for_update()).mappings().first()
+        scoped = select(target).where(key == item_id)
+        observations = table("observacion_ioc")
+        if kind == "ioc":
+            scoped = scoped.where(key.in_(select(observations.c.id_ioc).where(observations.c.id_evento.in_(sensor_events()))))
+        elif kind == "observacion_ioc":
+            scoped = scoped.where(target.c.id_evento.in_(sensor_events()))
+        else:
+            scoped = scoped.where(target.c.id_accion.in_(sensor_actions()))
+        existing = conn.execute(scoped.with_for_update()).mappings().first()
         if existing is None:
             raise HTTPException(404, "Hallazgo no encontrado")
         reviewed = table("observacion_ioc") if kind == "ioc" else target
         review_key = reviewed.c.id_ioc if kind == "ioc" else key
         review = reviewed.update().where(review_key == item_id)
+        if kind == "ioc":
+            review = review.where(reviewed.c.id_evento.in_(sensor_events()))
         if kind == "ioc" or (kind == "observacion_ioc" and decision.estado == "confirmado"):
             review = review.where(func.jsonb_array_length(reviewed.c.detalles) > 0)
         result = conn.execute(review.values(

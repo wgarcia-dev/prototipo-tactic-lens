@@ -63,15 +63,16 @@ def run():
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
+    log = exporter.log_path(config)
     # Watch BEFORE the initial scan, eliminating the scan/subscribe race.
-    with exporter.delivery.sender_lock(exporter.DB), closing(LogWatch(exporter.LOG.parent)) as watch, closing(exporter.delivery.connect(exporter.DB)) as conn:
+    with exporter.delivery.sender_lock(exporter.DB), closing(LogWatch(log.parent)) as watch, closing(exporter.delivery.connect(exporter.DB)) as conn:
         mapping = exporter.mapping(conn)
         if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='tacticlens_captura_origen'").fetchone():
             raise RuntimeError('La cola debe estar previamente preparada; no se migra automaticamente')
         dirty, heartbeat_at = True, 0
         while not stopping:
             if dirty:
-                result = exporter.ingest(conn, log=exporter.LOG, max_pending=int(config.get('TACTICLENS_MAX_PENDING', '50000')))
+                result = exporter.ingest(conn, log=log, max_pending=int(config.get('TACTICLENS_MAX_PENDING', '50000')))
                 dirty = result['limite_pendientes']
             size = max(1, min(200, int(config.get('TACTICLENS_BATCH_SIZE', '50'))))
             # Drain backlog fairly; kernel changes remain queued while HTTP is running.

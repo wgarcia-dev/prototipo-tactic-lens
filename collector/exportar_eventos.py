@@ -24,6 +24,13 @@ DB=Path('/var/lib/tacticlens-cowrie/cola.sqlite3')
 ENV=Path('/etc/tacticlens-cowrie/exportador.env')
 
 
+def log_path(config):
+    if config.get('COWRIE_LOG'):
+        return Path(config['COWRIE_LOG'])
+    alternate = Path('/home/cowrie/my-honeypot/var/log/cowrie/cowrie.json')
+    return alternate if not LOG.exists() and alternate.exists() else LOG
+
+
 def mapping(conn):
     columns={r[1]:r for r in conn.execute('PRAGMA table_info(events)')}
     if set(columns)!={'id','payload','created_at'} or not columns['id'][5]:
@@ -181,10 +188,12 @@ def main():
     if args.prepare:
         print('Respaldo privado SQLite:',prepare(DB,DB.parent/'backups'))
         return
-    with delivery.sender_lock(DB),closing(delivery.connect(DB)) as conn:
-        if args.status:
+    if args.status:
+        with closing(sqlite3.connect(DB.resolve().as_uri()+"?mode=ro", uri=True)) as conn:
+            conn.execute("BEGIN")
             print(json.dumps(full_status(conn)))
-            return
+        return
+    with delivery.sender_lock(DB),closing(delivery.connect(DB)) as conn:
         if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='tacticlens_captura_origen'").fetchone():
             raise ValueError('Ejecute --prepare antes de cambiar la captura')
         if args.retry_now:
@@ -193,7 +202,7 @@ def main():
         transport=config.get('TACTICLENS_TRANSPORT','ssh-loopback')
         if url and not args.capture_only:
             delivery.validate_endpoint(url,key,transport)
-        result=ingest(conn,max_pending=int(config.get('TACTICLENS_MAX_PENDING','50000')))
+        result=ingest(conn,log=log_path(config),max_pending=int(config.get('TACTICLENS_MAX_PENDING','50000')))
         if url and not args.capture_only:
             size=max(1,min(200,int(config.get('TACTICLENS_BATCH_SIZE','50'))))
             delivery.deliver_pending(conn,mapping(conn),url,key,size,transport=transport)

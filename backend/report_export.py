@@ -4,16 +4,11 @@ import json
 import subprocess
 from pathlib import Path
 import re
-from xml.sax.saxutils import escape
 
 from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.platypus import CondPageBreak, LongTable, Paragraph, SimpleDocTemplate, Spacer, TableStyle
 
 INK = "#172A40"
 MUTED = "#485C70"
@@ -39,6 +34,13 @@ def render_pdf(report):
     result = subprocess.run(["node", str(renderer)], input=json.dumps(report).encode(),
                             stdout=subprocess.PIPE, check=True, timeout=90)
     return result.stdout
+
+
+def word_property(parent, name, value):
+    element = OxmlElement("w:" + name)
+    element.set(qn("w:val"), value)
+    parent.append(element)
+    return element
 
 
 def render_docx(report):

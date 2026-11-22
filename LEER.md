@@ -1,0 +1,1 @@
+Lee esto --> docs\REGISTRO_CAMBIOS_CHAT_2026-11-21.md

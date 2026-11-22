@@ -1,7 +1,7 @@
 import React, {useEffect, useRef, useState} from 'react'
 import {createRoot} from 'react-dom/client'
 import {BrowserRouter, Link, NavLink, Route, Routes, useNavigate, useParams, useSearchParams} from 'react-router-dom'
-import {Activity, ArrowLeft, Database, FileUp, Fingerprint, LayoutDashboard, Search, Shield, Workflow} from 'lucide-react'
+import {Activity, ArrowLeft, CheckCircle2, Database, FileUp, Fingerprint, LayoutDashboard, Search, Shield, Workflow, X} from 'lucide-react'
 import {Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis} from 'recharts'
 import './index.css'
 import {api, mutate} from './auth/client'
@@ -91,13 +91,14 @@ function usePagedData<T>(path:string,page:number,pageSize=PAGE_SIZE,interval=500
   return {rows,setRows,hasNext,loading,error}
 }
 
-function Pager({page,pageSize,count,hasNext,onChange,label}:{page:number,pageSize:number,count:number,hasNext:boolean,onChange:(page:number)=>void,label:string}){
+function Pager({page,pageSize,count,hasNext,onChange,label,total}:{page:number,pageSize:number,count:number,hasNext:boolean,onChange:(page:number)=>void,label:string,total?:number}){
+  const pages=total===undefined?undefined:Math.max(1,Math.ceil(total/pageSize))
   return <nav className="pager" aria-label={'Paginacion de '+label}>
-    <span className="muted text-xs" aria-live="polite">{count ? 'Mostrando '+(page*pageSize+1)+'–'+(page*pageSize+count) : 'Sin resultados'} · Página {page+1}</span>
-    <div className="flex gap-2">
+    <span className="muted text-xs" aria-live="polite">{count ? 'Mostrando '+(page*pageSize+1)+'–'+(page*pageSize+count)+(total===undefined?'':' de '+total) : 'Sin resultados'} · Página {page+1}{pages===undefined?'':' de '+pages}{!hasNext&&page>0?' · Última página':''}</span>
+    {(page>0||hasNext)&&<div className="flex gap-2">
       <button type="button" className="btn-secondary" disabled={page===0} onClick={()=>onChange(page-1)}>Anterior</button>
       <button type="button" className="btn-secondary" disabled={!hasNext} onClick={()=>onChange(page+1)}>Siguiente</button>
-    </div>
+    </div>}
   </nav>
 }
 
@@ -221,12 +222,18 @@ function SessionDetail(){
   const [analysis,setAnalysis]=useState<Analysis|null>(null)
   const [error,setError]=useState('')
   const [busy,setBusy]=useState(false)
+  const [analysisNotice,setAnalysisNotice]=useState('')
+  useEffect(()=>{
+    if(!analysisNotice)return
+    const timeout=window.setTimeout(()=>setAnalysisNotice(''),6000)
+    return()=>window.clearTimeout(timeout)
+  },[analysisNotice])
   const [page,setPage]=useState(0)
   const eventPath='/sesiones/'+id+'/eventos'
-  const {rows:events,hasNext,loading,error:eventError}=usePagedData<Event>(eventPath,page,20,1000,session?.eventos??-1)
+  const {rows:events,hasNext,loading,error:eventError}=usePagedData<Event>(eventPath,page,10,1000,session?.eventos??-1)
   useEffect(()=>setPage(0),[id])
   const loadedAnalysis=useRef<string|null>(null)
-  useEffect(()=>{loadedAnalysis.current=null;setSession(null);setAnalysis(null)},[id,requestedAnalysis])
+  useEffect(()=>{loadedAnalysis.current=null;setSession(null);setAnalysis(null);setAnalysisNotice('')},[id,requestedAnalysis])
   usePolling(async signal=>{
     if(!id)return
     try{
@@ -244,11 +251,12 @@ function SessionDetail(){
     }catch(e){if(!signal.aborted)setError((e as Error).message);throw e}
   },1000,[id,requestedAnalysis])
   async function analyze(){
-    setBusy(true);setError('')
+    setBusy(true);setError('');setAnalysisNotice('')
     try{
       const result=await api<{id_analisis:string}>('/sesiones/'+id+'/analizar?actualizar_rag=true'+(analysis&&!hasCurrentReport(analysis)?'&actualizar_informe=true':''),{method:'POST'})
       setAnalysis(await api<Analysis>('/analisis/'+result.id_analisis))
       setSession(await api<Session>('/sesiones/'+id))
+      setAnalysisNotice('Análisis completado. Puede consultar el resultado y descargar el informe de esta sesión.')
     }catch(e){setError((e as Error).message)}
     finally{setBusy(false)}
   }
@@ -256,7 +264,18 @@ function SessionDetail(){
     <Header title={'Sesión '+(session?.cowrie_session_id||'')} description="Cronología y evidencia" action={<button className="btn-secondary flex gap-2 items-center" onClick={()=>window.history.state?.idx>0?navigate(-1):navigate('/sesiones',{replace:true})}><ArrowLeft size={16}/> Volver</button>}/>
     {error&&<ErrorBox error={error}/>}
     {eventError&&<ErrorBox error={eventError}/>}
-    {session&&<SessionReport key={session.id_sesion} id={session.id_sesion}/>}
+    {analysisNotice&&<div role="status" aria-live="polite" className="flex items-start gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 mb-5 text-sm text-emerald-100">
+      <CheckCircle2 size={19} aria-hidden className="shrink-0 mt-0.5 text-emerald-400"/>
+      <p className="flex-1">{analysisNotice}</p>
+      <button type="button" aria-label="Cerrar confirmación" className="shrink-0 rounded p-1 text-emerald-200 hover:bg-emerald-400/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-300" onClick={()=>setAnalysisNotice('')}><X size={16} aria-hidden/></button>
+    </div>}
+    {(busy||session?.estado_analisis==='en_proceso')&&<div role="status" aria-live="polite" className="panel p-4 mb-5 text-sm">
+      <p className="font-semibold">Análisis en curso</p>
+      <p className="muted mt-1">TacticLens está procesando los eventos de esta sesión. El resultado y su informe estarán disponibles al finalizar. Puede esperar aquí o volver al historial para consultar el estado.</p>
+      {analysis?.estado==='completado'&&<p className="muted mt-1">El informe disponible corresponde al análisis anterior guardado.</p>}
+    </div>}
+    {session&&analysis?.estado==='completado'&&
+      <SessionReport key={analysis.id_analisis+':'+session.eventos} id={session.id_sesion} analysisId={analysis.id_analisis}/>}
     <div className="grid gap-5 min-w-0">
       <section className="panel p-5"><h2 className="font-semibold mb-4">Datos de la sesión</h2><dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 xl:grid-cols-4">{[['ID',session?.id_sesion],['IP de origen',session?.ip_origen],['Inicio',date(session?.fecha_inicio)],['Cierre',date(session?.fecha_fin)]].map(([k,v])=><div className="min-w-0" key={k}><dt className="muted">{k}</dt><dd className="mt-1 break-words">{v||'—'}</dd></div>)}</dl></section>
       <section className="panel p-5">
@@ -264,7 +283,7 @@ function SessionDetail(){
           {requestedAnalysis?<Link className="btn-secondary text-xs" to={sessionEvidencePath(id??'')}>Ver sesión completa</Link>:
             session?.estado_analisis==='analizada'&&(!analysis||(hasCurrentReport(analysis)&&isRag(analysis)))?<span className="badge">Resultado guardado</span>:<button className="btn flex gap-2 items-center" onClick={analyze} disabled={busy||!session?.eventos||session?.estado_analisis==='en_proceso'}><Workflow size={16}/>{busy?'Analizando...':session?.estado_analisis==='analizada'?'Actualizar análisis':session?analysisActionLabel(session):'Analizar'}</button>}</div>
         {loading?<p className="muted text-sm py-8">Cargando eventos…</p>:<div className="timeline-events border-l border-[#2d5470] ml-2 space-y-5" tabIndex={0} role="region" aria-label="Eventos de la sesión">{events.map(x=><div key={x.id_evento_texto??x.id_evento} className="relative pl-6"><div className="absolute -left-[5px] top-2 w-[9px] h-[9px] rounded-full bg-[#43d7d4]"/><div className="flex flex-wrap gap-3 items-baseline"><span className="text-xs accent font-mono">{date(x.fecha_hora)}</span><span className="font-semibold text-sm">{x.tipo_evento}</span><span className="muted text-[11px]">#{x.id_evento_texto??x.id_evento}</span></div>{typeof x.datos_originales.input==='string'&&<div className="bg-[#0c1728] rounded-md px-3 py-2 text-sm font-mono mt-2 text-[#c4e5e2]">$ {x.datos_originales.input}</div>}<details className="mt-2 text-xs muted"><summary className="cursor-pointer hover:text-white">Ver JSON relevante</summary><pre className="overflow-auto whitespace-pre-wrap bg-[#0c1728] p-3 rounded mt-2">{JSON.stringify(x.datos_originales,null,2)}</pre></details></div>)}{!events.length&&<p className="pl-6 muted text-sm">No hay eventos registrados</p>}</div>}
-        <Pager page={page} pageSize={20} count={events.length} hasNext={hasNext} onChange={setPage} label="eventos"/>
+        <Pager page={page} pageSize={10} count={events.length} hasNext={hasNext} onChange={setPage} label="eventos" total={session?.eventos}/>
       </section>
       <section className="panel p-5 min-w-0"><div className="flex justify-between items-center mb-4"><h2 className="font-semibold">Análisis LLM</h2>{analysis&&badge(analysis.estado)}</div>{session?.analisis_desactualizado&&<p className="badge warn mb-3">Resultado anterior: hay eventos nuevos</p>}{session?.estado_analisis==='error'&&<p className="text-sm text-red-200 mb-3">{session.ultimo_intento?.mensaje_error||'El último intento falló. Puede reintentarlo.'}</p>}{analysis?<>{originBadge(analysis)}<AnalysisNarrative analysis={analysis}/><div className="mt-5 space-y-4">{analysis.acciones.filter(action=>!requestedAction||action.id_accion===requestedAction).map(action=>
         <ActionEvidence key={action.id_accion} action={action} sessionId={analysis.id_sesion}/>)}
@@ -385,8 +404,8 @@ function ReviewControls({kind,id,state,canConfirm=true,onReviewed}:{kind:'observ
       {observable?reviewLabels[current]:mappingReviewLabels[current]}
     </span>
     {session?.usuario.rol==='administrador'&&<div className="flex flex-wrap gap-2 mt-2">
-      {canConfirm&&<button className="btn text-xs" disabled={busy} onClick={()=>setDecision('confirmado')}>{observable?'Confirmar relevancia':'Confirmar'}</button>}
-      <button className="btn text-xs" disabled={busy} onClick={()=>setDecision('descartado')}>Descartar</button>
+      {canConfirm&&<button className="btn text-xs" disabled={busy} onClick={()=>setDecision('confirmado')}>{observable?'Confirmar relevancia':'Confirmar mapeo'}</button>}
+      <button className="btn text-xs" disabled={busy} onClick={()=>setDecision('descartado')}>{observable?'Descartar relevancia':'Descartar mapeo'}</button>
     </div>}
     {decision&&<div className="mt-2">
       <label className="block text-xs muted" htmlFor={`review-${id}`}>Motivo de la revisión</label>

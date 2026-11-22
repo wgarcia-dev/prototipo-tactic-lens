@@ -66,6 +66,14 @@ class CollaborativeIntegrationTests(fixtures.AuthFixture):
         recent = self.client.get(path + '/eventos?comandos_recientes=true&limit=6')
         self.assertEqual(recent.status_code, 200, recent.text)
         self.assertEqual([row['id_evento_texto'] for row in recent.json()], [str(receipt['id_evento'])])
+        self.assertEqual(self.client.get(path + '/informe').status_code, 409)
+        from test_analysis import report_data
+        from backend.routes import ensure_model
+        model_id = ensure_model(self.connection)
+        analysis_table = app.state.tables['analisis_llm']
+        self.connection.execute(analysis_table.insert().values(id_sesion=sid, id_modelo=model_id,
+            estado='completado', fecha_inicio=self.clock, fecha_fin=self.clock, resumen='Análisis de prueba', resultado_estructurado={
+                'eventos_analizados':503, 'version_informe':4, 'informe':report_data()}))
         report = report_snapshot(self.connection, app.state.tables, app.state.honeypot_id, sid)
         self.assertNotIn('private fixture', json.dumps(report))
         self.assertIn('[REDACTED]', json.dumps(report))
@@ -81,6 +89,40 @@ class CollaborativeIntegrationTests(fixtures.AuthFixture):
         self.assertIsNone(self.connection.scalar(select(s.c.id_sesion).where(s.c.cowrie_session_id==raw['session'])))
         self.assertIsNone(self.connection.scalar(select(o.c.id_evento).where(o.c.origen_id==raw['_collector']['source_id'])))
         self.assertEqual(self.ingest([raw])['insertados'],1)
+
+    def test_report_is_bound_to_selected_session_analysis_and_current_coverage(self):
+        self.enroll(96, admin=True)
+        from backend.routes import ensure_model
+        from test_analysis import report_data
+        model_id = ensure_model(self.connection)
+        event_table, analysis = app.state.tables['evento'], app.state.tables['analisis_llm']
+        results = []
+        for marker in ('SESION-ALFA', 'SESION-BETA'):
+            receipt = self.ingest([self.event(input='echo ' + marker)])['confirmaciones'][0]
+            sid = self.connection.scalar(select(event_table.c.id_sesion).where(event_table.c.id_evento==receipt['id_evento']))
+            aid = self.connection.scalar(analysis.insert().values(id_sesion=sid, id_modelo=model_id,
+                estado='completado', fecha_inicio=self.clock, fecha_fin=self.clock, resumen=marker, resultado_estructurado={
+                    'eventos_analizados':1, 'version_informe':4, 'informe':report_data()}).returning(analysis.c.id_analisis))
+            response = self.client.get(f'/api/sesiones/{sid}/informe?id_analisis={aid}')
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()['id_analisis'], str(aid))
+            results.append((sid, aid, response.json()))
+        self.assertNotIn('SESION-BETA', json.dumps(results[0][2]))
+        self.assertNotIn('SESION-ALFA', json.dumps(results[1][2]))
+        sid, aid, _ = results[0]
+        wrong = results[1][1]
+        self.assertEqual(self.client.get(f'/api/sesiones/{sid}/informe?id_analisis={wrong}').status_code,409)
+        self.connection.execute(analysis.update().where(analysis.c.id_analisis==aid).values(
+            resultado_estructurado={'eventos_analizados':0, 'informe':report_data()}))
+        historical = self.client.get(f'/api/sesiones/{sid}/informe?id_analisis={aid}')
+        self.assertEqual(historical.status_code,200,historical.text)
+        self.assertEqual(historical.json()['status'],'Análisis desactualizado')
+        self.connection.execute(analysis.update().where(analysis.c.id_analisis==aid).values(
+            resultado_estructurado={'acciones':[]}))
+        legacy = self.client.get(f'/api/sesiones/{sid}/informe?id_analisis={aid}')
+        self.assertEqual(legacy.status_code,200,legacy.text)
+        self.assertEqual(legacy.json()['status'],'Cobertura del análisis sin verificar')
+        self.assertIn('Formato del análisis conservado',json.dumps(legacy.json(),ensure_ascii=False))
 
     def test_review_survives_reingestion_and_backfill_with_audit(self):
         self.enroll(91,admin=True)

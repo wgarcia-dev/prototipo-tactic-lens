@@ -5,7 +5,7 @@ import json
 from pydantic import BaseModel, Field, StrictInt
 
 
-REPORT_VERSION = 3
+REPORT_VERSION = 4
 
 
 class BehaviorPhase(BaseModel):
@@ -123,6 +123,12 @@ Devuelve únicamente un objeto JSON válido, sin Markdown, con esta estructura (
 sustitúyelo por IDs reales de la entrada):
 """ + json.dumps(example, ensure_ascii=False) + """
 REQUISITOS DEL INFORME:
+- Redacta el informe como soporte de evaluación de incidente. Relaciona cada hipótesis con hechos,
+  explicaciones alternativas y evidencia adicional necesaria para confirmarla. Documenta los vacíos
+  de telemetría y el alcance afectado que realmente puede sostenerse. Usa los criterios de triaje
+  calculados por FastAPI para contextualizar la sesión. La declaración de incidente y su severidad
+  corresponden a la decisión documentada del analista. Las recomendaciones deben indicar qué
+  evidencia conservar y cómo verificar la eficacia de cada medida propuesta.
 - Redacta para el analista que revisa esta sesión. No atribuyas los eventos a una tesis, trabajo académico,
   práctica estudiantil, demostración o prueba autorizada. Una IP privada, Cowrie o un comando trivial
   no permiten inferir quién participó ni con qué propósito. Si la finalidad es indeterminada, indícalo.
@@ -139,10 +145,19 @@ REQUISITOS DEL INFORME:
   registrado, persistencia propuesta/observada. Sin salida o evento que lo confirme, di 'no confirmado'.
 - informe.hipotesis: objetivos probables sustentados con IDs y confianza; déjalo vacío si no hay base.
   No atribuyas familias de malware, campañas, herramientas o actores sin evidencia específica.
+  Usa 'entorno observado' o 'señuelo' al describir Cowrie. Reserva 'sistema comprometido' para
+  evidencia independiente de compromiso real. La variedad de órdenes por sí sola no permite
+  decidir si la actividad fue autorizada. Explica qué observación adicional discriminaría las
+  alternativas. La confianza es una estimación subjetiva del modelo.
 - informe.conclusion: vincula las fases y explica hasta dónde llegó la actividad en el entorno simulado.
   Acceder a Cowrie no demuestra compromiso de la máquina real ni de la red de la organización.
 - informe.limitaciones: explica vacíos concretos (salidas ausentes, descarga no confirmada, captura parcial,
   capacidades de emulación). La ausencia de un evento no prueba que una acción no haya ocurrido.
+  Vincula cada limitación con la conclusión que restringe y la evidencia necesaria para resolverla.
+  Si el prompt carece de salidas, indica 'Las salidas no están incluidas en los datos del análisis';
+  no afirmes que Cowrie nunca las capturó: puede conservar grabaciones TTY fuera de esta entrada.
+  La redacción de credenciales es una medida de protección. Inclúyela como limitación únicamente
+  si una conclusión específica depende de esos valores. Evita listas genéricas repetidas.
 - informe.recomendaciones: salvaguardas defensivas proporcionales a los hechos, concretas y pendientes de validación humana; no afirmes que ya se aplicaron.
 - Profundidad proporcional: en sesiones ricas busca aproximadamente 400–900 palabras entre las secciones;
   en sesiones cortas explica solo lo sustentable, sin rellenar ni inventar fases o acciones.

@@ -5,6 +5,8 @@ import {Download, FileText} from 'lucide-react'
 import {api, apiBlob} from '../auth/client'
 
 type Report = {
+  id_sesion: string
+  id_analisis: string
   title: string
   reference: string
   status: string
@@ -12,22 +14,29 @@ type Report = {
   sections: {title: string, paragraphs: string[], columns: string[], rows: string[][]}[]
 }
 
-export function SessionReport({id}: {id: string}) {
+export function SessionReport({id,analysisId}: {id: string;analysisId:string}) {
   const [open, setOpen] = useState(false)
   const [report, setReport] = useState<Report | null>(null)
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
   const [downloading, setDownloading] = useState<'pdf' | 'docx' | null>(null)
-  const path = '/sesiones/' + id + '/informe'
+  const path = '/sesiones/' + id + '/informe?id_analisis=' + encodeURIComponent(analysisId)
 
   useEffect(() => {
     if (!open) return
     const controller = new AbortController()
-    api<Report>(path, {signal: controller.signal}).then(setReport).catch(err => {
+    setReport(null)
+    setError('')
+    api<Report>(path, {signal: controller.signal}).then(value=>{
+      if(controller.signal.aborted)return
+      if(value.id_sesion!==id||value.id_analisis!==analysisId)throw new Error('El informe recibido corresponde a otro resultado. Vuelva a cargarlo.')
+      setError('')
+      setReport(value)
+    }).catch(err => {
       if (!controller.signal.aborted) setError(err.message)
     })
     return () => controller.abort()
-  }, [open, path, attempt])
+  }, [open, path, attempt, id, analysisId])
 
   function refresh() {
     setError('')
@@ -39,11 +48,11 @@ export function SessionReport({id}: {id: string}) {
     setDownloading(format)
     setError('')
     try {
-      const blob = await apiBlob(path + '?formato=' + format)
+      const blob = await apiBlob(path + '&formato=' + format)
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = 'TacticLens-' + id + '.' + format
+      link.download = 'TacticLens-' + id + '-' + analysisId + '.' + format
       link.click()
       window.setTimeout(() => URL.revokeObjectURL(url), 30000)
     } catch (err) {

@@ -111,7 +111,8 @@ class LiveTests(unittest.TestCase):
                     self.assertNotEqual(upgraded.json()["id_analisis"], analysis.json()["id_analisis"])
                     self.assertEqual(client.get("/api/analisis/" + analysis.json()["id_analisis"]).json()["resumen"], result.resumen)
                     stored = client.get("/api/analisis/" + upgraded.json()["id_analisis"]).json()["resultado_estructurado"]
-                    self.assertEqual(stored["version_informe"], 3)
+                    from backend.analysis_report import REPORT_VERSION
+                    self.assertEqual(stored["version_informe"], REPORT_VERSION)
                     self.assertEqual(stored["informe"]["fases"][0]["eventos"], [event_id])
                     self.assertEqual(stored["contexto_observado"]["comandos"], 1)
                     with patch("backend.routes.real_result", side_effect=AssertionError("Do not bill twice for the same report")):

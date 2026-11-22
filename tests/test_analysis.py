@@ -132,7 +132,8 @@ class AnalysisReportTests(unittest.TestCase):
             real_result(self.events)
         self.assertTrue(needs_report_upgrade(legacy))
         self.assertTrue(needs_report_upgrade({"version_informe": 2, "informe": report_data()}))
-        self.assertFalse(needs_report_upgrade({"version_informe": 3, "informe": report_data()}))
+        self.assertTrue(needs_report_upgrade({"version_informe": 3, "informe": report_data()}))
+        self.assertFalse(needs_report_upgrade({"version_informe": 4, "informe": report_data()}))
         self.assertTrue(needs_report_upgrade({"version_informe": 2}))
 
     def test_truncated_output_is_rejected_even_if_json_is_parseable(self):

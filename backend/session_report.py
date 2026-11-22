@@ -1,5 +1,6 @@
 """A consistent, read-only view of the evidence behind a Cowrie session."""
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import HTTPException
@@ -13,11 +14,24 @@ OBSERVABLE_LIMIT = 100
 FINDING_LIMIT = 100
 
 
-def utc(value):
-    return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if value else "Sin registro"
+def ecuador_time(value):
+    if value is None:
+        return "Sin registro"
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(ZoneInfo("America/Guayaquil")).strftime("%Y-%m-%d %H:%M:%S UTC-05:00")
 
 
-def report_snapshot(conn, tables, honeypot_id, session_id):
+def stored_time(value):
+    if not value:
+        return "Sin fecha"
+    try:
+        return ecuador_time(datetime.fromisoformat(str(value).replace("Z", "+00:00")))
+    except ValueError:
+        return "Fecha sin verificar"
+
+
+def report_snapshot(conn, tables, honeypot_id, session_id, analysis_id=None):
     session, event, analysis = (tables[name] for name in ("sesion", "evento", "analisis_llm"))
     record = conn.execute(select(session).where(
         session.c.id_sesion == session_id, session.c.id_honeypot == honeypot_id
@@ -33,10 +47,15 @@ def report_snapshot(conn, tables, honeypot_id, session_id):
     counts = {kind: count for kind, count, _ in groups}
     examples = {kind: eid for kind, _, eid in groups}
     total = sum(counts.values())
-    saved = conn.execute(select(analysis).where(
+    analysis_query = select(analysis).where(
         analysis.c.id_sesion == session_id, analysis.c.estado == "completado"
-    ).order_by(func.coalesce(analysis.c.fecha_inicio, analysis.c.creado_en).desc(),
+    )
+    if analysis_id is not None:
+        analysis_query = analysis_query.where(analysis.c.id_analisis == analysis_id)
+    saved = conn.execute(analysis_query.order_by(func.coalesce(analysis.c.fecha_inicio, analysis.c.creado_en).desc(),
                analysis.c.id_analisis.desc()).limit(1)).mappings().first()
+    if not saved:
+        raise HTTPException(409, "Complete el análisis de esta sesión antes de generar el informe")
     covered = analyzed_count(saved) if saved else None
     status = (
         "Sin análisis guardado" if not saved else
@@ -74,11 +93,42 @@ def report_snapshot(conn, tables, honeypot_id, session_id):
         event.c.numero_secuencia, event.c.id_evento).limit(EVENT_LIMIT)).all()
     report = assemble_report(record, total, counts, events, saved, covered, status, observations, mappings, examples)
     sections = report["sections"]
-    sections.insert(1, dict(title="Registro de comandos", columns=["Hora UTC", "Entrada en Cowrie", "Evento"],
+    from .analysis_report import needs_report_upgrade
+    if needs_report_upgrade(saved.resultado_estructurado):
+        sections.insert(0, dict(title="Formato del análisis conservado", columns=[], rows=[],
+            paragraphs=["Este informe reproduce un análisis histórico. Las secciones disponibles dependen del formato guardado. Puede actualizar el análisis para obtener la estructura actual."]))
+    if covered != total:
+        sections.insert(0, dict(title="Cobertura del análisis", columns=[], rows=[], paragraphs=[
+            "El análisis seleccionado tiene cobertura sin verificar." if covered is None else
+            f"El análisis seleccionado cubre {covered} eventos de los {total} actualmente almacenados.",
+            "La cronología y los observables corresponden a los registros actuales de la sesión. La interpretación y los mapeos corresponden al análisis seleccionado."]))
+    sections.insert(1, dict(title="Registro de comandos", columns=["Hora Ecuador", "Entrada en Cowrie", "Evento"],
         paragraphs=[f"{len(commands)} entradas mostradas de {counts.get('cowrie.command.input', 0)} registradas. "
                     "Cada fila identifica el texto recibido por el señuelo. La entrada por sí sola no acredita su resultado."],
-        rows=[[utc(when), command or "Entrada sin texto", f"#{eid}"] for eid, when, command in commands]))
+        rows=[[ecuador_time(when), command or "Entrada sin texto", f"#{eid}"] for eid, when, command in commands]))
     detail = ((saved.resultado_estructurado or {}).get("informe") or {}) if saved else {}
+    enrichment = (saved.resultado_estructurado or {}).get("enriquecimiento") or {}
+    external_rows = []
+    for observable in enrichment.get("observables", []):
+        for provider, result in observable.get("proveedores", {}).items():
+            results = result if isinstance(result, list) else [result]
+            for entry in results:
+                external_rows.append([provider, str(entry.get("estado", entry.get("resultado", "coincidencia"))),
+                                      stored_time(entry.get("consultado_en")) + " " + str(entry.get("url", ""))])
+    sections.append(dict(title="Fuentes externas consultadas", columns=["Proveedor", "Resultado", "Fecha y referencia"],
+        paragraphs=[] if external_rows else ["El análisis seleccionado carece de resultados de enriquecimiento externo registrados."],
+        rows=external_rows))
+    assessment = ((saved.resultado_estructurado or {}).get("evaluacion_incidente") or {}) if saved else {}
+    if assessment:
+        sections.insert(0, dict(title="Evaluación de incidente", columns=["Campo", "Valor"],
+            paragraphs=[assessment.get("fundamento_prioridad", ""), *assessment.get("limitaciones", [])],
+            rows=[[key.replace('_', ' '), str(assessment.get(key, ""))] for key in
+                  ("clasificacion", "estado", "severidad", "prioridad_triaje", "metodologia", "snapshot_sha256")]))
+        for revision in assessment.get("revisiones", []):
+            sections.append(dict(title="Decisión documentada del analista", columns=["Campo", "Valor"], paragraphs=[],
+                rows=[[key.replace('_', ' '), stored_time(revision.get(key)) if key == "revisado_en" else str(revision.get(key, ""))] for key in
+                      ("decision", "severidad", "justificacion", "criterio_incidente", "impacto", "alcance",
+                       "responsable", "medidas", "estado", "criterio_cierre", "revisado_por", "revisado_en", "eventos")]))
     narrative = []
     def add(title, paragraphs):
         text = [item for item in paragraphs if isinstance(item, str) and item.strip()]
@@ -164,8 +214,8 @@ def assemble_report(record, total, counts, events, saved, covered, status, obser
         section("Cronología de evidencia",
                 [f"Se muestran los primeros {len(events)} de {total} eventos. Consulte la sesión para revisar el resto."]
                 if total > len(events) else ([] if events else ["No hay eventos registrados."]),
-                ("Hora UTC", "Evento Cowrie", "Referencia"),
-                [(utc(when), kind, reference(event_id)) for event_id, kind, when in events]),
+                ("Hora Ecuador", "Evento Cowrie", "Referencia"),
+                [(ecuador_time(when), kind, reference(event_id)) for event_id, kind, when in events]),
         section("Observables",
                 ["Los valores se agrupan por estado de revisión. Las URL se muestran sin credenciales, consulta ni fragmento. La referencia es un evento de ejemplo."] +
                 (["Se muestran los primeros 100 grupos."] if len(observations) > OBSERVABLE_LIMIT else []) +
@@ -180,8 +230,8 @@ def assemble_report(record, total, counts, events, saved, covered, status, obser
                 ("Técnica", "Revisión", "Referencia"),
                 [(f"{code} · {name}", review.get(state, state), reference(event_id))
                  for code, name, state, event_id in mappings[:FINDING_LIMIT]]),
-        section("Comprobaciones vinculadas a la evidencia",
-                ["Medidas propuestas para revisión humana. La referencia identifica un evento de la sesión o de la acción asociada."]
+        section("Comprobaciones automáticas de la captura",
+                ["Lista calculada por reglas según los tipos de evento y revisiones pendientes. La referencia identifica su evidencia. Las salvaguardas específicas del análisis se presentan en sus fichas."]
                 if safeguards else ["La evidencia disponible no activa una recomendación específica."],
                 ("Medida propuesta", "Comprobación", "Evento de referencia"), safeguards),
     ]
@@ -191,15 +241,17 @@ def assemble_report(record, total, counts, events, saved, covered, status, obser
             saved.resumen[:3500] + ("… Consulte el resultado completo en TacticLens." if len(saved.resumen) > 3500 else ""),
         ]))
     return {
-        "title": "Informe de actividad observada",
-        "reference": str(record.id_sesion),
+        "title": "Informe de análisis de sesión " + record.cowrie_session_id,
+        "reference": str(record.id_sesion) + " / " + str(saved.id_analisis) if saved else str(record.id_sesion),
+        "id_sesion": str(record.id_sesion),
+        "id_analisis": str(saved.id_analisis) if saved else None,
         "status": status,
         "metadata": [
             ("Sesión Cowrie", record.cowrie_session_id),
             ("Origen observado", str(record.ip_origen or "Sin registro")),
-            ("Inicio UTC", utc(record.fecha_inicio)),
-            ("Cierre UTC", utc(record.fecha_fin)),
-            ("Generado UTC", utc(datetime.now(timezone.utc))),
+            ("Inicio Ecuador", ecuador_time(record.fecha_inicio)),
+            ("Cierre Ecuador", ecuador_time(record.fecha_fin)),
+            ("Generado Ecuador", ecuador_time(datetime.now(timezone.utc))),
             ("Análisis", str(saved.id_analisis) if saved else "Sin registro"),
         ],
         "event_counts": counts,

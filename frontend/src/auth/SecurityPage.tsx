@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useState } from "react";
-import { ShieldCheck, LogOut, Users } from "lucide-react";
+import { ShieldCheck, LogOut, Users, CircleHelp } from "lucide-react";
 import { mutate } from "./client";
 import { useAuth } from "./context";
 import {
@@ -28,7 +28,7 @@ export function SessionControls() {
         <ShieldCheck size={15} />
         Seguridad de mi cuenta
       </Link>
-      <Link to="/ayuda">Ayuda y soporte</Link>
+      <Link to="/ayuda"><CircleHelp size={15} />Ayuda y soporte</Link>
       {session?.usuario.rol === "administrador" && (
         <Link to="/usuarios">
           <Users size={15} />

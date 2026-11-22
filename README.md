@@ -10,6 +10,8 @@ distingue las funciones actuales del desarrollo pendiente. La integración Cowri
 
 **DeepSeek + RAG MITRE:** [implementación, catálogo Enterprise 20.1, embeddings locales CPU y búsqueda híbrida pgvector + texto](docs/IMPLEMENTACION_RAG_MITRE.md). El análisis sigue siendo manual y las propuestas requieren revisión humana; los resultados históricos se conservan.
 
+**Fuentes verificables:** el [enriquecimiento de observables](docs/ENRIQUECIMIENTO_VERIFICABLE.md) conserva por análisis los eventos Cowrie y los resultados separados de MISP Warning Lists, ThreatFox y URLhaus cuando están configurados. Las consultas externas son opcionales; revise `.env.example` para las variables y los límites de privacidad. Los resultados históricos siguen visibles sin atribuirles enriquecimiento retroactivo.
+
 **Despliegue actual entre laptops físicas:** siga [la demostración Windows + Ubuntu mediante HTTP local y SQLite](docs/DEMO_LAPTOPS.md). El backend existente acepta ingesta únicamente desde Ubuntu en la interfaz seleccionada; React conserva su proxy local. No se utiliza túnel SSH. Las instrucciones de VirtualBox y `192.168.56.*` que aparecen más abajo describen el laboratorio anterior. `collector/collector.py` queda retirado como emisor directo. Consulte los [resultados reales](docs/RESULTADOS_HTTP_LOCAL.md).
 
 La [integración colaborativa del 12 de noviembre](docs/INTEGRACION_COLABORATIVA_2026-11-12.md) documenta los respaldos, conflictos, migraciones conservadas y pruebas de la versión unificada.
@@ -31,6 +33,10 @@ TacticLens es un prototipo académico para observar intentos de acceso SSH en un
 **Diseño de correos:** [plantillas TacticLens y galería local](docs/CORREOS.md), con códigos destacados, botones de acción y notificaciones adaptadas a cada estado.
 
 **Informes LLM:** consulte [el análisis detallado con evidencia y ampliación de resultados anteriores](docs/ANALISIS_LLM.md).
+
+**Evaluación de incidentes:** el [expediente de evaluación y revisión humana](docs/EVALUACION_INCIDENTES.md) incorpora criterios Cowrie, prioridad de triaje, severidad documentada, impacto, alcance, responsable, medidas e historial de decisiones en el detalle del análisis y su exportación.
+
+El [registro de trabajo de esta actualización](docs/REGISTRO_CAMBIOS_CHAT_2026-11-21.md) detalla cambios, correcciones de informes históricos, pruebas y pendientes de integración.
 
 ## Arquitectura
 

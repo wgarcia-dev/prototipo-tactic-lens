@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import os
+import subprocess
 import time
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -23,6 +24,8 @@ from .correlation import (action_link, action_observable_query, event_columns, m
 from .analysis_report import (BehaviorReport, REPORT_VERSION, analysis_instruction,
                               needs_report_upgrade, observation_context, validate_report_evidence)
 from .intelligence import extract_observables, normalized_value, observables, persist_observables
+from .enrichment import enrich
+from .incident_assessment import assess, IncidentDecision, validate_decision
 from .auth.store import require_admin, audit
 from .session_report import report_snapshot
 from .rag.retrieval import context as retrieve_context
@@ -156,16 +159,23 @@ def dashboard_snapshot():
 
 
 @app.get("/api/sesiones/{id_sesion}/informe", dependencies=[Depends(local_only)])
-def session_report(id_sesion: UUID, formato: Literal["json", "pdf", "docx"] = "json"):
-    with app.state.engine.connect().execution_options(isolation_level="REPEATABLE READ") as conn:
-        report = report_snapshot(conn, app.state.tables, app.state.honeypot_id, id_sesion)
+def session_report(id_sesion: UUID, formato: Literal["json", "pdf", "docx"] = "json", id_analisis: UUID | None = None):
+    with app.state.engine.connect() as conn:
+        if not conn.in_transaction():
+            conn.execution_options(isolation_level="REPEATABLE READ")
+        report = report_snapshot(conn, app.state.tables, app.state.honeypot_id, id_sesion, analysis_id=id_analisis)
     if formato == "json":
-        return report
+        from fastapi.responses import JSONResponse
+        return JSONResponse(report, headers={"Cache-Control": "no-store, private"})
     from .report_export import PDF_TYPE, WORD_TYPE, render_docx, render_pdf
 
-    content, media_type = (render_pdf(report), PDF_TYPE) if formato == "pdf" else (render_docx(report), WORD_TYPE)
+    try:
+        content, media_type = (render_pdf(report), PDF_TYPE) if formato == "pdf" else (render_docx(report), WORD_TYPE)
+    except (subprocess.SubprocessError, OSError):
+        raise HTTPException(503, "No se pudo generar el archivo. Verifique el motor de exportación y vuelva a intentar") from None
     return Response(content, media_type=media_type, headers={
-        "Content-Disposition": f'attachment; filename="TacticLens-{id_sesion}.{formato}"',
+        "Content-Disposition": f'attachment; filename="TacticLens-{id_sesion}-{id_analisis or "actual"}.{formato}"',
+        "Cache-Control": "no-store, private",
     })
 
 
@@ -281,7 +291,9 @@ def real_result(events, rag=None):
                "observables_por_evento": observed,
                "tecnicas_mitre_permitidas": candidates,'catalogo':rag['catalogo'],
                'comportamiento_observado':rag['representacion'],
-               'muestreo':{'eventos_snapshot':len(events),'eventos_en_prompt':len(facts)}}
+               'muestreo':{'eventos_snapshot':len(events),'eventos_en_prompt':len(facts)},
+               'enriquecimiento_verificado':rag.get('enriquecimiento_prompt', {})}
+    payload['criterios_triaje'] = assess(events)
     request_body={"model":model,"temperature":0,"thinking":{"type":"disabled"},
         "response_format":{"type":"json_object"},"max_tokens":8192,"messages":[
             {"role":"system","content":analysis_instruction()+RAG_INSTRUCTION},
@@ -366,6 +378,14 @@ def analyze(id_sesion: UUID, actualizar_informe: bool = False, actualizar_rag: b
         rag['modelo_llm']={'proveedor':os.getenv('LLM_PROVIDER','deepseek'),'modelo':os.getenv('LLM_MODEL','')}
         rag['eventos_entregados']=[e.id_evento for e in evidence_sample(events)]
         rag['eventos_snapshot']=len(events)
+        enrichment = enrich(events)
+        incident_assessment = assess(events)
+        # Provider identifiers and URLs are server-owned. The model sees only
+        # bounded status and event references, never external keys or raw URLs.
+        rag['enriquecimiento_prompt'] = [{"tipo": item['tipo'], "eventos": item['eventos'],
+            "proveedores": {name: ({"estado": value.get('estado')} if isinstance(value, dict) else
+                                    {"coincidencias": len(value)}) for name, value in item['proveedores'].items()}}
+            for item in enrichment['observables']]
         result = real_result(events,rag=rag)
         valid_ids = {x.id_evento for x in events}
         validate_report_evidence(result.informe, valid_ids)
@@ -393,7 +413,8 @@ def analyze(id_sesion: UUID, actualizar_informe: bool = False, actualizar_rag: b
                 resultado_estructurado={**result.model_dump(exclude_none=True), "eventos_analizados": len(events),
                     "version_informe": REPORT_VERSION if result.informe else 1,
                     "contexto_observado": observation_context(events), "mapeos_descartados": discarded,
-                    "propuestas_ioc_descartadas": rejected_iocs, 'rag':rag},
+                    "propuestas_ioc_descartadas": rejected_iocs, 'rag':rag,
+                    "enriquecimiento": enrichment, "evaluacion_incidente": incident_assessment},
                 actualizado_en=func.clock_timestamp()
             ))
             persist_findings(conn, analysis_id, result, events, rag=rag, provenance=provenance, by_event=by_event)
@@ -494,6 +515,68 @@ def get_analysis(id_analisis: UUID):
         item["eventos_texto"] = [str(eid) for eid in item.get("eventos", [])]
     return {**plain(row), "resultado_estructurado": payload, "acciones": output,
             "salvaguardas": safeguard_cards(report.get("recomendaciones") or [])}
+
+
+@app.post("/api/analisis/{id_analisis}/evaluacion-incidente", dependencies=[Depends(local_only)])
+def review_incident(id_analisis: UUID, decision: IncidentDecision, request: Request):
+    analysis = table("analisis_llm")
+    with app.state.engine.begin() as conn:
+        _, actor = require_admin(conn, request)
+        row = conn.execute(select(analysis).where(analysis.c.id_analisis == id_analisis,
+            analysis.c.id_sesion.in_(sensor_sessions())).with_for_update()).mappings().first()
+        if row is None:
+            raise HTTPException(404, "Análisis no encontrado")
+        if row.estado != "completado":
+            raise HTTPException(409, "Se requiere un análisis completado")
+        payload = dict(row.resultado_estructurado or {})
+        assessment = dict(payload.get("evaluacion_incidente") or {})
+        if not assessment:
+            raise HTTPException(409, "El análisis histórico requiere preparar su evaluación")
+        revisions = list(assessment.get("revisiones", []))
+        if decision.revision_esperada != len(revisions):
+            raise HTTPException(409, "La evaluación cambió. Recargue antes de guardar")
+        valid_ids = {int(eid) for eid in assessment["eventos"]}
+        try:
+            validate_decision(decision, valid_ids)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+        revision = {**decision.model_dump(exclude={"revision_esperada"}), "eventos": [str(eid) for eid in decision.eventos],
+                    "revisado_por": str(actor.id_usuario), "revisado_en": datetime.now(timezone.utc).isoformat()}
+        revisions.append(revision)
+        assessment.update(revisiones=revisions, estado=decision.estado, clasificacion=decision.decision,
+                          severidad=decision.severidad)
+        payload["evaluacion_incidente"] = assessment
+        conn.execute(analysis.update().where(analysis.c.id_analisis == id_analisis).values(
+            resultado_estructurado=payload, actualizado_en=func.clock_timestamp()))
+        audit(conn, request, "evaluacion_incidente_revisada", actor=actor.id_usuario,
+              reason=f"{id_analisis}:{decision.decision}:{decision.estado}")
+    return assessment
+
+
+@app.post("/api/analisis/{id_analisis}/preparar-evaluacion", dependencies=[Depends(local_only)])
+def prepare_incident(id_analisis: UUID, request: Request):
+    analysis, event = table("analisis_llm"), table("evento")
+    with app.state.engine.begin() as conn:
+        _, actor = require_admin(conn, request)
+        row = conn.execute(select(analysis).where(analysis.c.id_analisis == id_analisis,
+            analysis.c.id_sesion.in_(sensor_sessions())).with_for_update()).mappings().first()
+        if row is None:
+            raise HTTPException(404, "Análisis no encontrado")
+        if row.estado != "completado":
+            raise HTTPException(409, "Se requiere un análisis completado")
+        payload = dict(row.resultado_estructurado or {})
+        if payload.get("evaluacion_incidente"):
+            return payload["evaluacion_incidente"]
+        events = conn.execute(select(event.c.id_evento, event.c.tipo_evento, event.c.fecha_hora,
+            event.c.datos_originales).where(event.c.id_sesion == row.id_sesion)
+            .order_by(event.c.fecha_hora, event.c.id_evento)).all()
+        assessment = assess(events)
+        assessment["origen"] = "Evaluación posterior sobre los eventos actualmente almacenados de la sesión"
+        payload["evaluacion_incidente"] = assessment
+        conn.execute(analysis.update().where(analysis.c.id_analisis == id_analisis).values(
+            resultado_estructurado=payload, actualizado_en=func.clock_timestamp()))
+        audit(conn, request, "evaluacion_incidente_preparada", actor=actor.id_usuario, reason=str(id_analisis))
+    return assessment
 
 
 @app.get("/api/iocs", dependencies=[Depends(local_only)])

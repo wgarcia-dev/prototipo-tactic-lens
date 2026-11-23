@@ -1,0 +1,47 @@
+﻿.session-narrative { container-type:inline-size; display:grid; gap:1.25rem; }
+.session-narrative > section:first-child { border-left:3px solid #48beba; padding:.3rem 1rem; }
+.session-narrative > section:first-child h3 { font-size:1.14rem; }
+.session-narrative > section:first-child p { max-width:85ch; line-height:1.7; }
+.session-narrative > dl { background:#101f31; border:1px solid #304459; padding:1rem; border-radius:.6rem; }
+.session-narrative > dl dd { margin-top:.3rem; font-size:1.05rem; font-weight:600; font-variant-numeric:tabular-nums; }
+.session-findings { display:grid; gap:.5rem; align-items:start; }
+.session-findings > details, .session-narrative > details { min-width:0; border:1px solid #304459; border-radius:.5rem; padding:0; background:#102033; }
+.session-findings > details[open], .session-narrative > details[open] { border-color:#427279; padding-bottom:1rem; }
+.session-findings > details > :not(summary), .session-narrative > details > :not(summary) { margin-inline:1rem; }
+.session-findings > details > summary, .session-narrative > details > summary { display:flex; gap:.75rem; align-items:center; padding:.9rem 1rem; list-style:none; line-height:1.4; }
+.session-narrative summary:focus-visible { outline:2px solid #6ed9d6; outline-offset:2px; }
+.session-findings summary svg, .session-narrative > details > summary svg, .session-narrative h3 svg { color:#6bc5c2; flex:none; }
+.session-findings > details > summary::after, .session-narrative > details > summary::after { content:""; margin-left:auto; flex:none; width:.45rem; height:.45rem; border:solid #9fb7c7; border-width:0 1.5px 1.5px 0; transform:rotate(45deg); }
+.session-findings > details[open] > summary::after, .session-narrative > details[open] > summary::after { transform:rotate(225deg); }
+.session-narrative section[aria-label="Salvaguardas"] h3 { display:flex; align-items:center; gap:.6rem; font-size:1.05rem; margin:.4rem 0 .85rem; }
+.session-narrative section[aria-label="Salvaguardas"] details { background:#101f31; }
+.session-narrative section[aria-label="Salvaguardas"] summary strong { background:#193d46; padding:.2rem .45rem; border-radius:.25rem; font-family:monospace; }
+@container (min-width:42rem) {
+  .session-findings { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .session-findings > details:first-child, .session-findings > details[open] { grid-column:1/-1; }
+}
+
+.session-workspace { container-type:inline-size; min-width:0; }
+.session-workspace .panel h2 { font-size:1.1rem; letter-spacing:-.015em; }
+.session-workspace .panel h2, .session-workspace .session-actions h4 { color:#e1edf5; }
+.session-workspace .session-narrative > section:last-child,
+.session-workspace [aria-label="Buscador RAG MITRE"] { background:#101f31; border:1px solid #304459; border-left:3px solid #48beba; border-radius:.6rem; }
+.session-workspace .session-narrative > section:last-child > dl { gap:1rem; padding:1rem; background:#15273a; border-radius:.45rem; }
+.session-workspace .session-narrative > section:last-child > ul { display:grid; gap:.5rem; }
+.session-workspace .session-narrative > section:last-child > ul > li,
+.session-workspace [aria-label="Buscador RAG MITRE"] li,
+.session-workspace .session-actions article { margin:0; padding:1rem; min-width:0; border:1px solid #304459; border-radius:.5rem; background:#102033; }
+.session-workspace .session-narrative > section:last-child > details,
+.session-workspace .session-actions article > details { border-top:1px solid #304459; padding-top:.65rem; }
+.session-actions { display:grid; gap:.75rem; margin-top:1.25rem; align-items:stretch; }
+.session-actions:empty { display:none; }
+.session-workspace .session-actions article > div:has(> .badge) { border-left:2px solid #427279; padding-left:.75rem; }
+.session-workspace .session-actions article a, .session-workspace .timeline-events { overflow-wrap:anywhere; }
+.session-workspace [aria-label="Buscador RAG MITRE"] ul { display:grid; gap:.75rem; align-items:start; }
+.session-workspace .timeline-events > div { padding-bottom:.6rem; }
+.session-workspace :is(summary,button,a):focus-visible { outline:2px solid #6ed9d6; outline-offset:2px; }
+@container (min-width:45rem) {
+  .session-actions, .session-workspace [aria-label="Buscador RAG MITRE"] ul,
+  .session-workspace .session-narrative > section:last-child > ul { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .session-workspace .session-narrative > section:last-child > dl { grid-template-columns:repeat(4,minmax(0,1fr)); }
+}

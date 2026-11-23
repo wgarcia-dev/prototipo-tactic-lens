@@ -260,7 +260,9 @@ function SessionDetail(){
     }catch(e){setError((e as Error).message)}
     finally{setBusy(false)}
   }
-  return <>
+  const analysisInProgress=busy||session?.estado_analisis==='en_proceso'
+  const reportAnalysisId=requestedAnalysis??session?.analisis?.id_analisis
+  return <div className="session-workspace">
     <Header title={'Sesión '+(session?.cowrie_session_id||'')} description="Cronología y evidencia" action={<button className="btn-secondary flex gap-2 items-center" onClick={()=>window.history.state?.idx>0?navigate(-1):navigate('/sesiones',{replace:true})}><ArrowLeft size={16}/> Volver</button>}/>
     {error&&<ErrorBox error={error}/>}
     {eventError&&<ErrorBox error={eventError}/>}
@@ -269,12 +271,11 @@ function SessionDetail(){
       <p className="flex-1">{analysisNotice}</p>
       <button type="button" aria-label="Cerrar confirmación" className="shrink-0 rounded p-1 text-emerald-200 hover:bg-emerald-400/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-300" onClick={()=>setAnalysisNotice('')}><X size={16} aria-hidden/></button>
     </div>}
-    {(busy||session?.estado_analisis==='en_proceso')&&<div role="status" aria-live="polite" className="panel p-4 mb-5 text-sm">
+    {analysisInProgress&&<div role="status" aria-live="polite" className="panel p-4 mb-5 text-sm">
       <p className="font-semibold">Análisis en curso</p>
       <p className="muted mt-1">TacticLens está procesando los eventos de esta sesión. El resultado y su informe estarán disponibles al finalizar. Puede esperar aquí o volver al historial para consultar el estado.</p>
-      {analysis?.estado==='completado'&&<p className="muted mt-1">El informe disponible corresponde al análisis anterior guardado.</p>}
     </div>}
-    {session&&analysis?.estado==='completado'&&
+    {!analysisInProgress&&session&&analysis?.estado==='completado'&&analysis.id_analisis===reportAnalysisId&&
       <SessionReport key={analysis.id_analisis+':'+session.eventos} id={session.id_sesion} analysisId={analysis.id_analisis}/>}
     <div className="grid gap-5 min-w-0">
       <section className="panel p-5"><h2 className="font-semibold mb-4">Datos de la sesión</h2><dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 xl:grid-cols-4">{[['ID',session?.id_sesion],['IP de origen',session?.ip_origen],['Inicio',date(session?.fecha_inicio)],['Cierre',date(session?.fecha_fin)]].map(([k,v])=><div className="min-w-0" key={k}><dt className="muted">{k}</dt><dd className="mt-1 break-words">{v||'—'}</dd></div>)}</dl></section>
@@ -285,12 +286,12 @@ function SessionDetail(){
         {loading?<p className="muted text-sm py-8">Cargando eventos…</p>:<div className="timeline-events border-l border-[#2d5470] ml-2 space-y-5" tabIndex={0} role="region" aria-label="Eventos de la sesión">{events.map(x=><div key={x.id_evento_texto??x.id_evento} className="relative pl-6"><div className="absolute -left-[5px] top-2 w-[9px] h-[9px] rounded-full bg-[#43d7d4]"/><div className="flex flex-wrap gap-3 items-baseline"><span className="text-xs accent font-mono">{date(x.fecha_hora)}</span><span className="font-semibold text-sm">{x.tipo_evento}</span><span className="muted text-[11px]">#{x.id_evento_texto??x.id_evento}</span></div>{typeof x.datos_originales.input==='string'&&<div className="bg-[#0c1728] rounded-md px-3 py-2 text-sm font-mono mt-2 text-[#c4e5e2]">$ {x.datos_originales.input}</div>}<details className="mt-2 text-xs muted"><summary className="cursor-pointer hover:text-white">Ver JSON relevante</summary><pre className="overflow-auto whitespace-pre-wrap bg-[#0c1728] p-3 rounded mt-2">{JSON.stringify(x.datos_originales,null,2)}</pre></details></div>)}{!events.length&&<p className="pl-6 muted text-sm">No hay eventos registrados</p>}</div>}
         <Pager page={page} pageSize={10} count={events.length} hasNext={hasNext} onChange={setPage} label="eventos" total={session?.eventos}/>
       </section>
-      <section className="panel p-5 min-w-0"><div className="flex justify-between items-center mb-4"><h2 className="font-semibold">Análisis LLM</h2>{analysis&&badge(analysis.estado)}</div>{session?.analisis_desactualizado&&<p className="badge warn mb-3">Resultado anterior: hay eventos nuevos</p>}{session?.estado_analisis==='error'&&<p className="text-sm text-red-200 mb-3">{session.ultimo_intento?.mensaje_error||'El último intento falló. Puede reintentarlo.'}</p>}{analysis?<>{originBadge(analysis)}<AnalysisNarrative analysis={analysis}/><div className="mt-5 space-y-4">{analysis.acciones.filter(action=>!requestedAction||action.id_accion===requestedAction).map(action=>
+      <section className="panel p-5 min-w-0"><div className="flex justify-between items-center mb-4"><h2 className="font-semibold">Análisis LLM</h2>{analysis&&badge(analysis.estado)}</div>{session?.analisis_desactualizado&&<p className="badge warn mb-3">Resultado anterior: hay eventos nuevos</p>}{session?.estado_analisis==='error'&&<p className="text-sm text-red-200 mb-3">{session.ultimo_intento?.mensaje_error||'El último intento falló. Puede reintentarlo.'}</p>}{analysis?<>{originBadge(analysis)}<AnalysisNarrative analysis={analysis}/><div className="session-actions">{analysis.acciones.filter(action=>!requestedAction||action.id_accion===requestedAction).map(action=>
         <ActionEvidence key={action.id_accion} action={action} sessionId={analysis.id_sesion}/>)}
         {requestedAction&&!analysis.acciones.some(action=>action.id_accion===requestedAction)&&<p className="muted text-sm">La acción solicitada no está en este análisis.</p>}</div></>:<p className="muted text-sm">Esta sesión aún no se ha analizado.</p>}</section>
     </div>
     <RagCandidates sessionId={id}/>
-  </>
+  </div>
 }
 function AnalysisPage(){
   const [page,setPage]=useState(0)
@@ -503,7 +504,7 @@ function IocsPage() {
   const {rows,hasNext,loading,error}=usePagedData<IocRow>(path,linkedIoc?0:page)
   const selected=rows.find(row=>row.id_ioc===selectedId)
   return <>
-    <Header title="Observables de Cowrie" description="Valores observados y estado de revisión"
+    <Header title="Observables de Cowrie" description="Seleccione un valor para revisar su relevancia en cada evento de Cowrie."
       action={linkedIoc?<Link className="btn-secondary" to="/iocs">Ver todos los observables</Link>:undefined}/>
     {error&&<ErrorBox error={error}/>}
     <div className="space-y-5">
@@ -513,9 +514,10 @@ function IocsPage() {
             {rows.map(row=><li key={row.id_ioc} className="grid sm:grid-cols-[2fr_1.2fr_1fr] gap-3 py-4 items-start border-b line last:border-b-0">
               <div className="min-w-0">
                 <span className="text-xs muted block">{row.tipo}</span>
-                <button type="button" className="accent font-mono text-sm text-left hover:underline break-all min-h-10"
+                <p className="font-mono text-sm break-all">{row.valor}</p>
+                <button type="button" className="btn-secondary text-xs mt-2"
                   aria-expanded={row.id_ioc===selectedId} aria-controls={row.id_ioc===selectedId?'ioc-observations':undefined}
-                  onClick={()=>setSelectedId(row.id_ioc===selectedId?null:row.id_ioc)}>{row.valor}</button>
+                  onClick={()=>setSelectedId(row.id_ioc===selectedId?null:row.id_ioc)}>{row.id_ioc===selectedId?'Ocultar observaciones':'Revisar observaciones'}</button>
               </div>
               <dl className="text-xs space-y-1">
                 <div><dt className="inline muted">Primera </dt><dd className="inline">{date(row.primera_observacion)}</dd></div>
@@ -555,7 +557,7 @@ function MitrePage(){
       action={linkedMapping?<Link className="btn-secondary" to="/mitre">Ver todos los mapeos</Link>:undefined}/>
     {error&&<ErrorBox error={error}/>}
     <div className="mitre-review-layout grid lg:grid-cols-[minmax(0,1.15fr)_minmax(22rem,.85fr)] gap-5 items-start">
-      <section className="panel p-5"><div className="flex flex-wrap justify-between gap-3 mb-4"><div><h2 className="font-semibold">Hallazgos MITRE</h2><p className="muted text-xs mt-1">Cada registro corresponde a una técnica propuesta para una acción y sesión concretas</p></div><span className="badge">{maps.length} en esta página</span></div>
+      <section className="panel p-5"><div className="flex flex-wrap justify-between gap-3 mb-4"><div><h2 className="font-semibold">Hallazgos MITRE</h2><p className="muted text-xs mt-1">El análisis propone las técnicas automáticamente. Compare cada propuesta con los eventos de su sesión para validar el comportamiento observado.</p></div><span className="badge">{maps.length} en esta página</span></div>
         {loading?<p className="muted text-sm py-8" role="status">Cargando hallazgos…</p>:<ul className="divide-y line" aria-label="Mapeos MITRE">{maps.map(x=>{const state=reviewState(x);return <li key={x.id_mapeo}>
           <button type="button" aria-pressed={selectedId===x.id_mapeo} onClick={()=>setSelectedId(x.id_mapeo)} className="mitre-finding w-full text-left px-3 py-4 rounded-md">
             <span className="flex flex-wrap items-center justify-between gap-2"><span className="font-semibold"><span className="font-mono accent mr-2">{x.codigo_tecnica}</span>{x.tecnica}</span><span className={'badge '+(state==='pendiente'?'warn':'')}>{mappingReviewLabels[state]}</span></span>
@@ -570,17 +572,18 @@ function MitrePage(){
         {selected?<><p className="muted text-xs mt-1">Mapeo {selected.id_mapeo.slice(0,8)} · sesión {selected.id_sesion.slice(0,8)}</p><h3 className="text-2xl font-bold mt-5">{selected.tecnica}</h3>
           <div className="flex flex-wrap gap-2 items-baseline mt-3"><span className="badge">{selected.codigo_tecnica}</span><span className="badge contextual">{selected.tactica}</span>{selected.confianza!=null&&<span className="muted text-xs">{Math.round(Number(selected.confianza)*100)} % de confianza declarada</span>}</div>
           <div className="mt-5 rounded-lg bg-[#0d192a] p-4"><p className="muted text-xs">Acción analizada</p><p className="font-semibold mt-1">{selected.tipo_accion}</p><p className="text-sm mt-2">{selected.descripcion_accion}</p></div>
-          <ReviewControls key={selected.id_mapeo} kind="mitre" id={selected.id_mapeo} state={reviewState(selected)} onReviewed={state=>setMaps(rows=>rows.map(row=>row.id_mapeo===selected.id_mapeo?{...row,estado_revision:state}:row))}/>
+
           <div className="flex flex-wrap gap-3 mt-5 text-xs">
             <Link to={sessionEvidencePath(selected.id_sesion)} className="accent hover:underline">Ver sesión</Link>
             <Link to={actionEvidencePath(selected.id_sesion,selected.id_analisis,selected.id_accion)} className="accent hover:underline">Ver acción</Link>
           </div>
           <div className="border-t line mt-5 pt-4 text-sm"><h4 className="muted text-xs mb-2">Justificación del mapeo</h4><p>{selected.justificacion}</p></div>
-          <details className="mt-3 text-xs muted"><summary className="cursor-pointer">Evidencia original del mapeo</summary>
+          <details open className="mt-3 text-xs muted"><summary className="cursor-pointer">Evidencia original del mapeo</summary>
             <p className="mt-2 break-words">{selected.evidencia}</p>
           </details>
           <MappingObservables key={selected.id_mapeo} id={selected.id_mapeo} review={selected.estado_revision}/>
           <p className="muted text-xs mt-3">{selected.rag_procedencia?.metodo?'DeepSeek + RAG · ATT&CK '+selected.rag_procedencia.catalogo?.version:'Método anterior'}{selected.grado_evidencia?' · '+selected.grado_evidencia.replaceAll('_',' '):''}</p>
+          <ReviewControls key={selected.id_mapeo} kind="mitre" id={selected.id_mapeo} state={reviewState(selected)} onReviewed={state=>setMaps(rows=>rows.map(row=>row.id_mapeo===selected.id_mapeo?{...row,estado_revision:state}:row))}/>
           {selected.revisado_en&&<p className="muted text-xs">Revisado {date(selected.revisado_en)}</p>}
           {selected.motivo_revision&&<p className="muted text-xs mt-2">{selected.motivo_revision}</p>}
         </>:<div className="mt-8 rounded-lg border line p-5"><p className="font-semibold">Seleccione un hallazgo</p><p className="muted text-sm mt-2">Abre un registro para revisar su evidencia.</p></div>}

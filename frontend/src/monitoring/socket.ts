@@ -1,5 +1,6 @@
 export type Notice = {tipo:string, epoca?:string, revision?:number, recibido_api?:string, confirmado_api?:string, eventos?:number[]}
 type Socket = Pick<WebSocket,'send'|'close'> & {
+  readyState?:number
   onopen: ((event: Event) => void)|null
   onmessage: ((event: MessageEvent) => void)|null
   onclose: ((event: CloseEvent) => void)|null
@@ -14,7 +15,15 @@ export type SocketEnvironment = {
 export function startMonitor(env:SocketEnvironment, update:(connected:boolean,notice?:Notice)=>void, expired:()=>void) {
   let stopped=false, denied=false, socket:Socket|undefined, timer:unknown, watchdog:unknown, failures=0, seen=0
   const cancel=()=>{env.cancel(timer);env.cancel(watchdog)}
-  const retire=()=>{const old=socket;socket=undefined;if(old){old.onclose=null;old.onmessage=null;old.onerror=null;old.onopen=null;old.close()}}
+  const retire=()=>{
+    const old=socket;socket=undefined
+    if(!old)return
+    old.onclose=null;old.onmessage=null;old.onerror=null;old.onopen=null
+    // Let an in-flight upgrade complete before sending a normal close frame.
+    // Aborting CONNECTING sockets produces ECONNABORTED in the Windows proxy.
+    if(old.readyState===0)old.onopen=()=>{old.onopen=null;old.close()}
+    else old.close()
+  }
   function open(){
     if(stopped||denied||!env.visible()||socket)return
     try {

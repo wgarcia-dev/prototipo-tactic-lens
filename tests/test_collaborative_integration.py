@@ -122,7 +122,7 @@ class CollaborativeIntegrationTests(fixtures.AuthFixture):
         legacy = self.client.get(f'/api/sesiones/{sid}/informe?id_analisis={aid}')
         self.assertEqual(legacy.status_code,200,legacy.text)
         self.assertEqual(legacy.json()['status'],'Cobertura del análisis sin verificar')
-        self.assertIn('Formato del análisis conservado',json.dumps(legacy.json(),ensure_ascii=False))
+        self.assertNotIn('Formato del análisis conservado',json.dumps(legacy.json(),ensure_ascii=False))
 
     def test_review_survives_reingestion_and_backfill_with_audit(self):
         self.enroll(91,admin=True)

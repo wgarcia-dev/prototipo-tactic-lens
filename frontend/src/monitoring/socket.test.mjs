@@ -33,3 +33,15 @@ test('watchdog closes a silent connection; invalid JSON is rejected',()=>{
   const f=fixture();f.advance(46000);assert.equal(f.sockets[0].closed,1)
   f.sockets[0].onmessage({data:'{invalid'});assert.equal(f.sockets[0].closed,2);f.stop()
 })
+test('retiring a connecting socket closes after upgrade without notifying the retired view',()=>{
+  const f=fixture(),socket=f.sockets[0]
+  socket.readyState=0
+  f.stop()
+  assert.equal(socket.closed,0)
+  assert.equal(socket.onmessage,null)
+  socket.readyState=1
+  socket.onopen({})
+  assert.equal(socket.closed,1)
+  assert.equal(socket.onopen,null)
+  assert.equal(f.updates.length,0)
+})

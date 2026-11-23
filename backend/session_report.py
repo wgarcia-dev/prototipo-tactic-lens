@@ -77,15 +77,17 @@ def report_snapshot(conn, tables, honeypot_id, session_id, analysis_id=None):
     if saved:
         m, a, tt, tech = (tables[name] for name in
             ("mapeo_mitre", "accion_identificada", "tecnica_tactica", "tecnica_mitre"))
-        link = tables["accion_evento"]
-        example = select(func.min(link.c.id_evento)).where(link.c.id_accion == a.c.id_accion)
-        example = example.correlate(a).scalar_subquery()
-        mappings = conn.execute(select(tech.c.codigo_tecnica, tech.c.nombre, m.c.estado_revision, example)
+        mapping_rows = conn.execute(select(tech.c.codigo_tecnica, tech.c.nombre, m.c.estado_revision, m.c.id_mapeo)
             .select_from(m).join(a, m.c.id_accion == a.c.id_accion)
             .join(tt, m.c.id_vinculo == tt.c.id_vinculo)
             .join(tech, tt.c.codigo_tecnica == tech.c.codigo_tecnica)
             .where(a.c.id_analisis == saved.id_analisis)
             .order_by(tech.c.codigo_tecnica, m.c.id_mapeo).limit(FINDING_LIMIT + 1)).all()
+        citation = tables.get("mapeo_mitre_evento")
+        for code, name, state, mapping_id in mapping_rows:
+            refs = [] if citation is None else list(conn.scalars(select(citation.c.id_evento)
+                .where(citation.c.id_mapeo == mapping_id).order_by(citation.c.id_evento)))
+            mappings.append((code, name, state, refs))
 
     commands = conn.execute(select(event.c.id_evento, event.c.fecha_hora,
         event.c.datos_originales["input"].as_string()).where(event.c.id_sesion == session_id,
@@ -93,10 +95,6 @@ def report_snapshot(conn, tables, honeypot_id, session_id, analysis_id=None):
         event.c.numero_secuencia, event.c.id_evento).limit(EVENT_LIMIT)).all()
     report = assemble_report(record, total, counts, events, saved, covered, status, observations, mappings, examples)
     sections = report["sections"]
-    from .analysis_report import needs_report_upgrade
-    if needs_report_upgrade(saved.resultado_estructurado):
-        sections.insert(0, dict(title="Formato del análisis conservado", columns=[], rows=[],
-            paragraphs=["Este informe reproduce un análisis histórico. Las secciones disponibles dependen del formato guardado. Puede actualizar el análisis para obtener la estructura actual."]))
     if covered != total:
         sections.insert(0, dict(title="Cobertura del análisis", columns=[], rows=[], paragraphs=[
             "El análisis seleccionado tiene cobertura sin verificar." if covered is None else
@@ -113,11 +111,17 @@ def report_snapshot(conn, tables, honeypot_id, session_id, analysis_id=None):
         for provider, result in observable.get("proveedores", {}).items():
             results = result if isinstance(result, list) else [result]
             for entry in results:
-                external_rows.append([provider, str(entry.get("estado", entry.get("resultado", "coincidencia"))),
+                if entry.get("estado") == "omitido":
+                    reason = ("Esta integración de URLhaus evalúa archivos por SHA-256. La dirección IP no identifica un archivo."
+                              if provider == "urlhaus" else
+                              "La IP tiene alcance local. Su reputación pública no permite atribuir la actividad de esta sesión. Contrastar con los registros de la red del sensor.")
+                    external_rows.append([provider, observable.get("valor", ""), reason, "Evaluación local, sin consulta remota"])
+                    continue
+                external_rows.append([provider, observable.get("valor", ""), str(entry.get("estado", entry.get("resultado", "coincidencia"))),
                                       stored_time(entry.get("consultado_en")) + " " + str(entry.get("url", ""))])
-    sections.append(dict(title="Fuentes externas consultadas", columns=["Proveedor", "Resultado", "Fecha y referencia"],
-        paragraphs=[] if external_rows else ["El análisis seleccionado carece de resultados de enriquecimiento externo registrados."],
-        rows=external_rows))
+    if external_rows:
+        sections.append(dict(title="Evaluación por fuente externa", columns=["Proveedor", "Observable", "Evaluación", "Referencia"],
+                             paragraphs=[], rows=external_rows))
     assessment = ((saved.resultado_estructurado or {}).get("evaluacion_incidente") or {}) if saved else {}
     if assessment:
         sections.insert(0, dict(title="Evaluación de incidente", columns=["Campo", "Valor"],
@@ -152,6 +156,13 @@ def report_snapshot(conn, tables, honeypot_id, session_id, analysis_id=None):
                               paragraphs=[], columns=["Campo", "Detalle"], rows=card["rows"]))
     index = next(i for i, item in enumerate(sections) if item["title"] == "Cronología de evidencia")
     sections[index:index] = narrative
+    from .operational_report import analyst_sections
+    report = analyst_sections(report, saved.resultado_estructurado or {}, commands)
+    raw_events = conn.execute(select(event.c.id_evento, event.c.tipo_evento, event.c.fecha_hora, event.c.datos_originales)
+        .where(event.c.id_sesion == session_id).order_by(event.c.fecha_hora, event.c.id_evento).limit(EVENT_LIMIT)).all()
+    from .report_evidence import complete_assessment
+    report = complete_assessment(report, raw_events, record, saved.resultado_estructurado or {}, total)
+    sections = report["sections"]
     # Preserve every section and row, including tuple-backed SQL results.
     report["metadata"] = [[label, redact(value)] for label, value in report["metadata"]]
     for section in sections:
@@ -178,6 +189,8 @@ def assemble_report(record, total, counts, events, saved, covered, status, obser
         return dict(title=title, paragraphs=list(paragraphs), columns=list(columns), rows=list(rows))
 
     def reference(event_id):
+        if isinstance(event_id, (list, tuple)):
+            return ", ".join(f"#{eid}" for eid in event_id) or "Sin cita específica guardada"
         return f"#{event_id}" if event_id is not None else "Sin referencia"
 
     review = {"pendiente": "Pendiente", "confirmado": "Confirmado", "descartado": "Descartado"}
@@ -224,7 +237,7 @@ def assemble_report(record, total, counts, events, saved, covered, status, obser
                 [(kind, observable_value(kind, value), review.get(state, state), str(count), reference(event_id))
                  for kind, value, state, count, event_id in observations[:OBSERVABLE_LIMIT]]),
         section("Mapeos MITRE ATT&CK",
-                ["Asociaciones del análisis guardado. La referencia corresponde a un evento de la acción asociada."] +
+                ["Las referencias corresponden a citas específicas de cada mapeo. Los registros sin cita específica requieren revisión."] +
                 (["Se muestran los primeros 100 mapeos."] if len(mappings) > FINDING_LIMIT else []) +
                 ([] if mappings else ["No hay mapeos registrados para el análisis de la sesión."]),
                 ("Técnica", "Revisión", "Referencia"),

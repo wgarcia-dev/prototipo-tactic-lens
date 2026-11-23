@@ -178,6 +178,23 @@ class CatalogParsingTests(unittest.TestCase):
 
 
 class RagIntegrationTests(fixtures.AuthFixture):
+    def test_report_uses_specific_mapping_citations_instead_of_first_action_event(self):
+        self.enroll(709,admin=True)
+        sid,ids=self.session_with(['uname -a','whoami'])
+        candidate=proposal(code='T1033',tactic='TA0007',eventos=[ids[1]],
+            ).model_dump()
+        candidate['justificacion']='El comando whoami solicita la identidad del usuario actual en el entorno observado.'
+        with self.llm(ids,[candidate]):
+            response=self.client.post('/api/sesiones/'+str(sid)+'/analizar')
+        self.assertEqual(response.status_code,200,response.text)
+        aid=response.json()['id_analisis']
+        report=self.client.get(f'/api/sesiones/{sid}/informe?id_analisis={aid}')
+        self.assertEqual(report.status_code,200,report.text)
+        mappings=next(item for item in report.json()['sections'] if item['title']=='Mapeos MITRE ATT&CK')
+        row=next(row for row in mappings['rows'] if row[0].startswith('T1033'))
+        self.assertEqual(row[2],f'#{ids[1]}')
+        self.assertNotEqual(row[2],f'#{ids[0]}')
+
     def session_with(self,commands):
         sid='rag-test-'+uuid4().hex
         raw=[{'session':sid,'eventid':'cowrie.command.input','timestamp':(self.clock+timedelta(seconds=i)).isoformat(),'input':command,'_collector':{'source_id':sid+':'+str(i)}} for i,command in enumerate(commands)]

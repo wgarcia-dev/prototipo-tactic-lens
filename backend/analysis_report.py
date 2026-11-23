@@ -5,7 +5,7 @@ import json
 from pydantic import BaseModel, Field, StrictInt
 
 
-REPORT_VERSION = 4
+REPORT_VERSION = 5
 
 
 class BehaviorPhase(BaseModel):
@@ -143,6 +143,10 @@ REQUISITOS DEL INFORME:
   Distingue observado, interpretación y resultado. No conviertas un comando enviado en ejecución exitosa.
   Diferencia autenticación fallida/exitosa, descarga intentada/confirmada, ejecución intentada/resultado
   registrado, persistencia propuesta/observada. Sin salida o evento que lo confirme, di 'no confirmado'.
+  Desarrolla cada fase como un hallazgo técnico para un informe operativo: describe las entradas
+  significativas, explica su función, enlaza su secuencia con los hechos anteriores y precisa
+  qué resultado está acreditado. Explica las implicaciones defensivas concretas sin repetir
+  definiciones genéricas. La extensión depende de la evidencia; evita rellenar con campos vacíos.
 - informe.hipotesis: objetivos probables sustentados con IDs y confianza; déjalo vacío si no hay base.
   No atribuyas familias de malware, campañas, herramientas o actores sin evidencia específica.
   Usa 'entorno observado' o 'señuelo' al describir Cowrie. Reserva 'sistema comprometido' para
@@ -159,6 +163,10 @@ REQUISITOS DEL INFORME:
   La redacción de credenciales es una medida de protección. Inclúyela como limitación únicamente
   si una conclusión específica depende de esos valores. Evita listas genéricas repetidas.
 - informe.recomendaciones: salvaguardas defensivas proporcionales a los hechos, concretas y pendientes de validación humana; no afirmes que ya se aplicaron.
+  Para cada recomendación estructurada, indica en medidas el orden de intervención y los eventos
+  que la motivan. En validacion especifica la evidencia que el analista debe reunir y un criterio
+  observable de eficacia. En riesgo distingue impacto potencial de impacto acreditado. Prioriza
+  preservación de evidencia, investigación, contención condicionada al contexto y verificación.
 - Profundidad proporcional: en sesiones ricas busca aproximadamente 400–900 palabras entre las secciones;
   en sesiones cortas explica solo lo sustentable, sin rellenar ni inventar fases o acciones.
 - Acciones sin evidencia: no las incluyas. Se permite acciones=[] si solo hay conexión o desconexión.

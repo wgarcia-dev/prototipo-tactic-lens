@@ -6,14 +6,20 @@ import {invalidationTask} from './invalidation'
 const Context=createContext({connected:false,revision:0,notice:null as Notice|null})
 export function RealtimeProvider({children}:{children:ReactNode}){
   const [state,setState]=useState({connected:false,revision:0,notice:null as Notice|null})
-  useEffect(()=>startMonitor({
+  useEffect(()=>{
+    let dispose:(()=>void)|undefined
+    // StrictMode probes effects with mount/cleanup/mount. Defer the handshake
+    // so the discarded mount cannot abort a CONNECTING socket through Vite.
+    const timer=window.setTimeout(()=>{dispose=startMonitor({
     connect:()=>new WebSocket(`${location.protocol==='https:'?'wss:':'ws:'}//${location.host}/api/monitor/ws`,'tacticlens.monitor.v1'),
     now:()=>Date.now(),random:()=>Math.random(),
     schedule:(fn,ms)=>window.setTimeout(fn,ms),cancel:id=>window.clearTimeout(id as number),
     visible:()=>document.visibilityState==='visible',
     subscribe:fn=>{document.addEventListener('visibilitychange',fn);return()=>document.removeEventListener('visibilitychange',fn)},
   },(connected,notice)=>setState(previous=>({connected,revision:previous.revision+(notice?1:0),notice:notice??previous.notice})),
-  ()=>window.dispatchEvent(new Event('tacticlens:session-expired'))),[])
+    ()=>window.dispatchEvent(new Event('tacticlens:session-expired')))},0)
+    return()=>{window.clearTimeout(timer);dispose?.()}
+  },[])
   return <Context.Provider value={state}>{children}</Context.Provider>
 }
 export const useRealtime=()=>useContext(Context)

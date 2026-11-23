@@ -49,6 +49,20 @@ La captura original mostraba 17 eventos, que antes cabían en una página de 20.
 
 ## Informes PDF y Word
 
+### Corrección de consistencia y controles defensivos
+
+La síntesis ejecutiva se construye ahora con recuentos observados y la última decisión humana, para evitar contradicciones de severidad con la tabla de valoración. Se retiró la sección que recomendaba actualizar el formato del análisis. Los mapeos MITRE utilizan sus citas específicas en `mapeo_mitre_evento` en lugar del primer evento de la acción. Cuando falta una cita específica, esa ausencia se declara.
+
+`backend/report_evidence.py` incorpora nodo y puerto de captura, perfil de acceso inicial con puerto efímero, banner y HASSH, motivo de omisión del enriquecimiento público para direcciones privadas, revisión explícita de persistencia, exfiltración y pivoteo, y salvaguardas Linux preventivas, detectivas y correctivas. Las salvaguardas se vinculan a eventos y hallazgos e incluyen prioridad, validación e impacto operativo. La relación 2222 Shell, 2223 Proxy Alpine/QEMU y 2224 LLM DeepSeek se identifica como arquitectura declarada. La verificación real del guest requiere evidencia administrativa independiente.
+
+El ciclo de vida de WebSocket se ajustó para evitar aperturas duplicadas durante la comprobación de efectos de React StrictMode. Una conexión todavía en negociación se retira cerrándola después del upgrade, con sus callbacks de vista desactivados. Se añadió una prueba de este cierre para evitar el aborto TCP que Vite puede registrar como ECONNABORTED en Windows. La comprobación visual del login del usuario debe confirmar el comportamiento en su navegador.
+
+### Rediseño del informe operativo
+
+Tras la observación de que el documento seguía pareciéndose a un listado, se incorporó `backend/operational_report.py`. El cuerpo comienza con síntesis ejecutiva y valoración del alcance, impacto y decisión humana. Cada fase guardada se desarrolla como un hallazgo con interpretación, resultado y referencias. Se incluyen fundamento de asociaciones MITRE, hipótesis y diligencias, intervenciones propuestas y criterios de eficacia. Los comandos, frecuencias y eventos pasan a anexos. Los estados pendientes identifican cuestiones que requieren intervención del analista.
+
+La presentación PDF utiliza una jerarquía nueva de título, identificación del caso, contenido navegable, síntesis destacada, hallazgos y plan de respuesta. El anexo comienza en una página nueva. Word y la vista previa consumen las mismas secciones operativas. La extensión depende de los datos del caso. El rediseño puede aplicarse al resultado guardado sin consumir DeepSeek. Las instrucciones para nuevos análisis también exigen mayor explicación técnica por fase y validación de las medidas. Los análisis históricos limitados pueden requerir ampliación para obtener ese contenido adicional.
+
 Las fechas principales del informe y las tablas de comandos y eventos se muestran en `America/Guayaquil`, con indicación UTC-05:00. La vista de sesión incorpora un mensaje de análisis en curso y un aviso al completarlo. Cuando existe un informe anterior durante la actualización, se identifica como resultado guardado previo.
 
 Se corrigió además la limpieza de errores al reintentar la vista previa y al recibir un informe correcto. Se identificó un backend DemoHTTP anterior que seguía ocupando el puerto 8000 y se reinició conservando Windows `192.168.56.1` y Ubuntu `192.168.56.101`, tras comprobar que no había análisis en proceso. La salud de la API respondió correctamente después del reinicio. Se verificó la generación de datos del informe de la sesión `483f9460d7c0`, con inicio local `2026-11-21 20:07:42 UTC-05:00`. Las fechas de consulta de proveedores y revisión del analista también se convierten a la hora de Ecuador en la exportación.

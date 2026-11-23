@@ -7,7 +7,7 @@ import {eventEvidencePath} from './iocEvidence'
 export type Assessment = {
   metodologia:string; clasificacion:string; estado:string; severidad:string;
   prioridad_triaje:string; fundamento_prioridad:string; snapshot_sha256:string;
-  eventos_evaluados:number; origen?:string; generado_en:string;
+  eventos?:string[]; eventos_evaluados:number; origen?:string; generado_en:string;
   criterios:{criterio:string; descripcion:string; cumplido:boolean; eventos:string[]}[];
   limitaciones:string[];
   revisiones:{decision:string; severidad:string; justificacion:string; criterio_incidente:string;
@@ -22,6 +22,17 @@ export function IncidentAssessment({id,session,initial}:{id:string;session:strin
   const [assessment,setAssessment]=useState(initial)
   const [error,setError]=useState(''),[busy,setBusy]=useState(false)
   const admin=auth?.usuario.rol==='administrador'
+  const previous=assessment?.revisiones[assessment.revisiones.length-1]
+  const cited=assessment?.criterios.flatMap(item=>item.eventos.slice(0,1)) ?? []
+  const draft:Record<string,string>={
+    alcance:previous?.alcance ?? 'Telemetría de la sesión Cowrie '+session,
+    responsable:previous?.responsable ?? auth?.usuario.nombre_usuario ?? '',
+    eventos:(previous?.eventos ?? (cited.length ? cited : assessment?.eventos?.slice(0,1)) ?? []).join(', '),
+    impacto:previous?.impacto ?? 'Impacto sobre activos reales pendiente de corroboración.',
+    criterio_incidente:previous?.criterio_incidente ?? '',
+    medidas:previous?.medidas ?? '',
+  }
+  const fields:Record<string,string>={justificacion:'Fundamento de esta decisión',criterio_incidente:'Criterio de clasificación',impacto:'Impacto corroborado',alcance:'Alcance',responsable:'Responsable',medidas:'Medidas acordadas',eventos:'Eventos de respaldo'}
   async function prepare(){
     setBusy(true);setError('')
     try{setAssessment(await mutate<Assessment>(`/analisis/${id}/preparar-evaluacion`))}
@@ -60,16 +71,17 @@ export function IncidentAssessment({id,session,initial}:{id:string;session:strin
         <ul className="text-xs muted">{assessment.limitaciones.map(item=><li key={item}>{item}</li>)}</ul>
       </details>
       {assessment.revisiones.map((review,index)=><details key={index} open={index===assessment.revisiones.length-1}>
-        <summary className="cursor-pointer font-semibold">Revisión {index+1} · {label(review.decision)} · {new Date(review.revisado_en).toLocaleString('es-EC')}</summary>
+        <summary className="cursor-pointer font-semibold">Revisión {index+1} · {label(review.decision)} · {new Date(review.revisado_en).toLocaleString('es-EC',{timeZone:'America/Guayaquil'})}</summary>
         <dl className="text-sm space-y-2 mt-2">{(['justificacion','criterio_incidente','impacto','alcance','responsable','medidas','criterio_cierre'] as const).map(key=>review[key]&&<div key={key}><dt className="muted">{label(key)}</dt><dd className="whitespace-pre-wrap">{review[key]}</dd></div>)}</dl>
       </details>)}
-      {admin&&<details><summary className="cursor-pointer font-semibold">Registrar decisión del analista</summary>
-        <form onSubmit={save} className="grid sm:grid-cols-2 gap-3 mt-3">
-          <label>Decisión<select className="input w-full" name="decision"><option value="evidencia_insuficiente">Evidencia insuficiente</option><option value="actividad_sospechosa">Actividad sospechosa</option><option value="actividad_autorizada">Actividad autorizada</option><option value="incidente_confirmado">Incidente confirmado</option></select></label>
-          <label>Severidad<select className="input w-full" name="severidad">{['por_determinar','baja','media','alta','critica'].map(value=><option key={value} value={value}>{label(value)}</option>)}</select></label>
-          {['justificacion','criterio_incidente','impacto','alcance','responsable','medidas','eventos'].map(name=><label key={name}>{label(name)}{name==='eventos'?' (IDs separados por coma)':''}<textarea className="input w-full" required name={name} minLength={name==='justificacion'?30:undefined}/></label>)}
-          <label>Estado<select className="input w-full" name="estado">{['en_investigacion','en_respuesta','cerrado'].map(value=><option key={value} value={value}>{label(value)}</option>)}</select></label>
-          <label>Criterio y verificación de cierre<textarea className="input w-full" name="criterio_cierre"/></label>
+      {admin&&<details><summary className="cursor-pointer font-semibold">Validar la evaluación y registrar una decisión</summary>
+        <p className="muted text-xs mt-2">El triaje y las propuestas se generan con el análisis. Revise el borrador cuando disponga de contexto sobre autorización e impacto. Puede consultar y exportar el informe antes de registrar su decisión.</p>
+        <form key={assessment.revisiones.length} onSubmit={save} className="grid sm:grid-cols-2 gap-3 mt-3">
+          <label>Decisión<select className="input w-full" name="decision" defaultValue={previous?.decision ?? ""} required><option value="" disabled>Seleccione la decisión</option><option value="evidencia_insuficiente">Evidencia insuficiente</option><option value="actividad_sospechosa">Actividad sospechosa</option><option value="actividad_autorizada">Actividad autorizada</option><option value="incidente_confirmado">Incidente confirmado</option></select></label>
+          <label>Severidad<select className="input w-full" name="severidad" defaultValue={previous?.severidad}>{['por_determinar','baja','media','alta','critica'].map(value=><option key={value} value={value}>{label(value)}</option>)}</select></label>
+          {['justificacion','criterio_incidente','impacto','alcance','responsable','medidas','eventos'].map(name=><label key={name}>{fields[name]}{name==='eventos'?' (IDs separados por coma)':''}<textarea className="input w-full" required defaultValue={draft[name]} name={name} minLength={name==='justificacion'?30:undefined}/></label>)}
+          <label>Estado<select className="input w-full" name="estado" defaultValue={previous?.estado}>{['en_investigacion','en_respuesta','cerrado'].map(value=><option key={value} value={value}>{label(value)}</option>)}</select></label>
+          <label>Criterio y verificación de cierre<textarea className="input w-full" name="criterio_cierre" defaultValue={previous?.criterio_cierre}/></label>
           <button className="btn" disabled={busy}>Guardar revisión</button>
         </form>
       </details>}

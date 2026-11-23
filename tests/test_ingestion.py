@@ -30,6 +30,32 @@ class IngestionTests(fixtures.AuthFixture):
         self.assertEqual(response.status_code,status,response.text)
         return response.json()
 
+    def test_instance_receipts_and_session_filters(self):
+        self.enroll(95, admin=True)
+        mapping = {name: uuid4() for name in ("cowrie_shell", "cowrie_proxy", "cowrie_llm")}
+        for name, sensor in mapping.items():
+            self.connection.execute(app.state.tables["honeypot"].insert().values(id_honeypot=sensor,nombre=name,host="loopback"))
+        raw = event("sqlite:fixture:legacy", session="shared-test-id", sensor="tacticlens")
+        batch = [raw, *[{**raw, "_collector": {"source_id": "sqlite:fixture:" + name, "instance_id": name}} for name in mapping]]
+        with patch.object(app.state, "instances", mapping):
+            self.assertEqual(self.ingest(batch)["insertados"], 4)
+            self.assertEqual(self.ingest(batch)["duplicados"], 4)
+            ids = set()
+            for name in ("desconocido", *mapping):
+                response = self.client.get("/api/sesiones", params={"q":"shared-test-id", "modalidad":name})
+                self.assertEqual(response.status_code, 200)
+                rows = response.json()
+                self.assertEqual([(r["modalidad"],r["eventos"]) for r in rows], [(name,1)])
+                ids.add(rows[0]["id_sesion"])
+                report = self.client.get(f'/api/sesiones/{rows[0]["id_sesion"]}/informe')
+                self.assertEqual(report.status_code, 409, report.text)
+            self.assertEqual(len(ids),4)
+            groups = self.client.get("/api/dashboard/resumen").json()["por_modalidad"]
+            for name in mapping:
+                self.assertEqual(groups[name], {"sesiones": 1, "eventos": 1})
+            invalid = {**raw, "_collector":{"source_id":"invalid", "instance_id":"unknown"}}
+            self.assertEqual(self.ingest([invalid],422)["rechazados"],1)
+
     def test_retries_and_identical_distinct_occurrences_have_durable_receipts(self):
         result=self.ingest([event('occurrence:1'),event('occurrence:2')])
         self.assertEqual(result['insertados'],2)

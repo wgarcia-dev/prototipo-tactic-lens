@@ -30,7 +30,7 @@ HOST_OPTION_VALUES = {
     "ping6": {"-c", "-i", "-s", "-W", "-w", "-I", "-t"},
     "ssh": {"-p", "-l", "-i", "-o", "-F", "-J", "-L", "-R", "-D", "-b", "-W"},
     "nc": {"-p", "-s", "-w", "-q"}, "netcat": {"-p", "-s", "-w", "-q"},
-    "dig": {"-p", "-b", "-c", "-f", "-k", "-q", "-t"}, "host": {"-c", "-N", "-R", "-t", "-W"},
+    "dig": {"-p", "-b", "-c", "-f", "-k", "-t", "-y"}, "host": {"-c", "-N", "-R", "-t", "-W"},
     "traceroute": {"-m", "-p", "-q", "-s", "-w"},
 }
 DOWNLOAD_FLAGS = {
@@ -230,7 +230,11 @@ def host_positions(tool, args):
             options = False
         elif options and value.startswith("-"):
             skip = value in valued
-        elif tool == "dig" and value.startswith("@"):
+        elif tool == "dig" and value.startswith("+"):
+            continue
+        elif tool == "dig":
+            # dig accepts both the query name and @resolver in either order.
+            # The caller validates each candidate as a complete host literal.
             positions.add(index)
         else:
             positions.add(index)

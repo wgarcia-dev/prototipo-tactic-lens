@@ -504,7 +504,7 @@ function IocsPage() {
   const {rows,hasNext,loading,error}=usePagedData<IocRow>(path,linkedIoc?0:page)
   const selected=rows.find(row=>row.id_ioc===selectedId)
   return <>
-    <Header title="Observables de Cowrie" description="Seleccione un valor para revisar su relevancia en cada evento de Cowrie."
+    <Header title="Observables de Cowrie" description="IP, dominios, URL y hashes SHA-256 extraídos de eventos. Abra una observación para verificar el campo de origen y distinguir una referencia, un intento y un resultado registrado."
       action={linkedIoc?<Link className="btn-secondary" to="/iocs">Ver todos los observables</Link>:undefined}/>
     {error&&<ErrorBox error={error}/>}
     <div className="space-y-5">

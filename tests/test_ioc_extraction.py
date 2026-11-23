@@ -9,6 +9,17 @@ def command(value, **raw):
 
 
 class CowrieObservableTests(TestCase):
+    def test_dns_query_and_resolver_are_references_in_either_order(self):
+        for line, expected in (
+            ("dig +short -q Mail.Corp.Local @10.0.0.2", ["mail.corp.local", "10.0.0.2"]),
+            ("dig @10.0.0.2 -t AAAA mail.corp.local", ["10.0.0.2", "mail.corp.local"]),
+            ("dig -f input.local -k key.local +short", []),
+        ):
+            with self.subTest(line=line):
+                items = command(line)
+                self.assertEqual([item.valor for item in items], expected)
+                self.assertTrue(all(item.grado_evidencia == "referencia" for item in items))
+
     def test_ipv4_ipv6_and_connection_context(self):
         for original, canonical, scope in (
             ("192.168.56.1", "192.168.56.1", "privada"),

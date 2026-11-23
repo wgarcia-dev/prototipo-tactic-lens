@@ -8,7 +8,12 @@ $stateFile=Join-Path $stateDir 'procesos.json'
 function Get-TaskProcess($item) {
     $process=Get-CimInstance Win32_Process -Filter "ProcessId=$($item.Pid)" -ErrorAction SilentlyContinue
     if (-not $process) {return $null}
-    $sameDate=([datetime]$process.CreationDate).ToUniversalTime().ToString('o') -eq [string]$item.Created
+    # PowerShell 7 can parse ISO timestamps from JSON into DateTime values.
+    $recordedDate=$item.Created
+    if ($recordedDate -is [datetime] -or $recordedDate -is [datetimeoffset]) {
+        $recordedDate=$recordedDate.ToUniversalTime().ToString('o')
+    }
+    $sameDate=([datetime]$process.CreationDate).ToUniversalTime().ToString('o') -eq [string]$recordedDate
     if ($sameDate -and $process.CommandLine.Contains([string]$item.Marker)) {return $process}
     return $null
 }
@@ -30,6 +35,8 @@ if ($Detener) {
             $children=@(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($process.ProcessId)" -ErrorAction SilentlyContinue)
             foreach ($child in $children) {Stop-Process -Id $child.ProcessId -ErrorAction Stop}
             Stop-Process -Id $process.ProcessId -ErrorAction SilentlyContinue
+            Wait-Process -Id $process.ProcessId -Timeout 10 -ErrorAction SilentlyContinue
+            if (Get-TaskProcess $item) {throw 'El frontend sigue cerrándose. Reintente.'}
         }
     }
     Remove-Item -LiteralPath $stateFile

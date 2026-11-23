@@ -99,7 +99,7 @@ def save_event(conn, tables, sensor, raw, prepared):
     return event_id,state
 
 
-def persist(engine, tables, sensor, events, *, partial=False):
+def persist(engine, tables, sensor, events, *, partial=False, instances=None):
     receipts=[]
     try:
         with engine.begin() as conn:
@@ -111,8 +111,17 @@ def persist(engine, tables, sensor, events, *, partial=False):
                 receipt={"indice":index,"source_id":source if isinstance(source,str) and len(source)<=512 else None}
                 try:
                     prepared=prepare(raw)
+                    collector = raw["_collector"]
+                    instance = sensor
+                    if "instance_id" in collector:
+                        name = collector["instance_id"]
+                        if not isinstance(name, str) or name not in ("cowrie_shell", "cowrie_proxy", "cowrie_llm"):
+                            raise ValueError("instancia_invalida")
+                        if not instances or name not in instances:
+                            raise HTTPException(503, "Instancia pendiente de registro")
+                        instance = instances[name]
                     with conn.begin_nested():
-                        event_id,state=save_event(conn,tables,sensor,raw,prepared)
+                        event_id,state=save_event(conn,tables,instance,raw,prepared)
                     receipt.update(estado=state,id_evento=event_id)
                 except (ValueError, TypeError, OverflowError, IntegrityError, DataError):
                     if not partial:

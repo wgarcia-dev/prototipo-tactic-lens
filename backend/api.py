@@ -66,6 +66,14 @@ async def lifespan(app: FastAPI):
     if missing:
         raise RuntimeError("Variables faltantes: " + ", ".join(missing))
     app.state.honeypot_id = UUID(os.environ["HONEYPOT_ID"])
+    app.state.instances = {}
+    for modality in ("cowrie_shell", "cowrie_proxy", "cowrie_llm"):
+        value = os.getenv("HONEYPOT_ID_" + modality.upper())
+        if value:
+            instance = UUID(value)
+            if instance == app.state.honeypot_id or instance in app.state.instances.values():
+                raise RuntimeError("Cada modalidad requiere un honeypot exclusivo")
+            app.state.instances[modality] = instance
     app.state.api_key = os.environ["INGEST_API_KEY"]
     app.state.auth_settings = Settings.load()
     app.state.ioc_transfer_window = transfer_window(os.getenv("IOC_CORRELACION_MAX_SEGUNDOS"))
@@ -82,7 +90,7 @@ async def lifespan(app: FastAPI):
         if not columns <= set(tables[name].columns.keys()):
             raise RuntimeError(f"Esquema {name} incompatible")
     with engine.connect() as conn:
-        if conn.execute(select(tables["honeypot"].c.id_honeypot).where(tables["honeypot"].c.id_honeypot == app.state.honeypot_id)).scalar_one_or_none() is None:
+        if set(conn.scalars(select(tables["honeypot"].c.id_honeypot).where(tables["honeypot"].c.id_honeypot.in_(sensor_ids())))) != set(sensor_ids()):
             raise RuntimeError("HONEYPOT_ID no existe")
     app.state.engine, app.state.tables = engine, tables
     from .monitoring import SnapshotCache
@@ -98,21 +106,25 @@ from .ingest_transport import IngestTransportMiddleware
 app.add_middleware(IngestTransportMiddleware)
 
 
+def sensor_ids():
+    return (app.state.honeypot_id, *app.state.instances.values())
+
+
 @app.post("/api/ingesta/eventos")
 def ingest(batch: Batch, x_api_key: str | None = Header(default=None)):
     if not x_api_key or not hmac.compare_digest(x_api_key, app.state.api_key):
         raise HTTPException(401, "Clave inválida")
-    result = persist_events(batch.eventos, partial=True)
+    result = persist_events(batch.eventos, partial=True, instances=app.state.instances)
     if result["rechazados"] == result["recibidos"]:
         from fastapi.responses import JSONResponse
         return JSONResponse(result, status_code=422)
     return result
 
 
-def persist_events(events, *, partial=False):
+def persist_events(events, *, partial=False, instances=None):
     from .ingestion import persist
     received_at = datetime.now(timezone.utc).isoformat()
-    result = persist(app.state.engine, app.state.tables, app.state.honeypot_id, events, partial=partial)
+    result = persist(app.state.engine, app.state.tables, app.state.honeypot_id, events, partial=partial, instances=instances)
     if result['insertados'] and getattr(app.state, 'dashboard_cache', None):
         app.state.dashboard_cache.invalidate()
     if result['insertados'] and getattr(app.state, 'monitor_hub', None):
@@ -121,20 +133,26 @@ def persist_events(events, *, partial=False):
 
 
 @app.get("/api/sesiones")
-def sessions(request: Request, limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0), q: str = Query('', max_length=100)):
+def sessions(request: Request, limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0), q: str = Query('', max_length=100), modalidad: str | None = None):
     local_only(request)
     table = app.state.tables["sesion"]
     events_table = app.state.tables["evento"]
     analysis_table = app.state.tables["analisis_llm"]
     count_events = select(func.count()).where(events_table.c.id_sesion == table.c.id_sesion).scalar_subquery().label("eventos")
-    statement = select(table.c.id_sesion, table.c.cowrie_session_id, table.c.ip_origen, table.c.protocolo, table.c.fecha_inicio, table.c.fecha_fin, count_events).where(table.c.id_honeypot == app.state.honeypot_id)
+    statement = select(table.c.id_sesion, table.c.id_honeypot, table.c.cowrie_session_id, table.c.ip_origen, table.c.protocolo, table.c.fecha_inicio, table.c.fecha_fin, count_events).where(table.c.id_honeypot.in_(sensor_ids()))
+    labels = {value: name for name, value in app.state.instances.items()}
+    if modalidad is not None:
+        if modalidad not in {"desconocido", "cowrie_shell", "cowrie_proxy", "cowrie_llm"}:
+            raise HTTPException(422, "Modalidad no válida")
+        target = app.state.honeypot_id if modalidad == "desconocido" else app.state.instances.get(modalidad)
+        statement = statement.where(table.c.id_honeypot == target)
     if q.strip():
         term = f'%{q.strip()}%'
         statement = statement.where(or_(table.c.cowrie_session_id.ilike(term), cast(table.c.ip_origen, String).ilike(term)))
     with app.state.engine.connect() as conn:
         rows = conn.execute(statement.order_by(table.c.fecha_inicio.desc(), table.c.id_sesion).limit(limit).offset(offset)).mappings().all()
         states = states_for_sessions(conn, analysis_table, {row.id_sesion: row.eventos for row in rows})
-    return [{**{k: str(v) if isinstance(v, UUID) else v for k, v in row.items()}, **public_state(states[row.id_sesion])} for row in rows]
+    return [{**{k: str(v) if isinstance(v, UUID) else v for k, v in row.items()}, "modalidad": labels.get(row.id_honeypot, "desconocido"), **public_state(states[row.id_sesion])} for row in rows]
 
 
 @app.get("/api/sesiones/{id}/eventos")

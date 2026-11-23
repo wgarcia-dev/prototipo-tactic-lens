@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy import case, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 
-from .api import app, local_only, persist_events, safe
+from .api import sensor_ids, app, local_only, persist_events, safe
 from .analysis_state import public_state, states_for_sessions
 from .correlation import (action_link, action_observable_query, event_columns, mapping_evidence,
                           mapping_query, mitre_link, observed_correlations)
@@ -45,7 +45,7 @@ def table(name):
 
 def sensor_sessions():
     sessions = table("sesion")
-    return select(sessions.c.id_sesion).where(sessions.c.id_honeypot == app.state.honeypot_id)
+    return select(sessions.c.id_sesion).where(sessions.c.id_honeypot.in_(sensor_ids()))
 
 
 def sensor_events():
@@ -69,7 +69,7 @@ def health():
         conn.execute(select(1))
         e,s=table("evento"),table("sesion")
         stats=conn.execute(select(func.count().label("eventos"),func.max(e.c.ingresado_en).label("ultima_ingesta"))
-            .select_from(e.join(s,e.c.id_sesion==s.c.id_sesion)).where(s.c.id_honeypot==app.state.honeypot_id)).mappings().one()
+            .select_from(e.join(s,e.c.id_sesion==s.c.id_sesion)).where(s.c.id_honeypot.in_(sensor_ids()))).mappings().one()
     return {"status": "ok", "database": "connected", "llm_mode": "real", "collector_last_seen": getattr(app.state, "collector_last_seen", None),
             "contrato_ingesta":"tacticlens.ingesta.v2","ingestion":dict(stats)}
 
@@ -125,11 +125,11 @@ def parse_jsonl(content):
 def session_detail(id_sesion: UUID):
     s, e, a = table("sesion"), table("evento"), table("analisis_llm")
     with app.state.engine.connect() as conn:
-        row = conn.execute(select(s, select(func.count()).where(e.c.id_sesion == s.c.id_sesion).scalar_subquery().label("eventos")).where(s.c.id_sesion == id_sesion, s.c.id_honeypot == app.state.honeypot_id)).mappings().first()
+        row = conn.execute(select(s, select(func.count()).where(e.c.id_sesion == s.c.id_sesion).scalar_subquery().label("eventos")).where(s.c.id_sesion == id_sesion, s.c.id_honeypot.in_(sensor_ids()))).mappings().first()
         state = states_for_sessions(conn, a, {id_sesion: row.eventos})[id_sesion] if row else None
     if not row:
         raise HTTPException(404, "Sesion no encontrada")
-    return {**plain(row), **public_state(state)}
+    return {**plain(row), "modalidad": next((k for k,v in app.state.instances.items() if v == row.id_honeypot), "desconocido"), **public_state(state)}
 
 
 def dashboard_snapshot():
@@ -138,13 +138,19 @@ def dashboard_snapshot():
     technique = table("tecnica_tactica")
     with app.state.engine.connect() as conn:
         counts = dict(conn.execute(select(
-            select(func.count()).select_from(s).where(s.c.id_honeypot == app.state.honeypot_id).scalar_subquery().label('sesiones'),
+            select(func.count()).select_from(s).where(s.c.id_honeypot.in_(sensor_ids())).scalar_subquery().label('sesiones'),
             select(func.count()).select_from(e).where(e.c.id_sesion.in_(sessions)).scalar_subquery().label('eventos'),
             select(func.count(func.distinct(a.c.id_sesion))).where(a.c.estado == 'completado', a.c.id_sesion.in_(sessions)).scalar_subquery().label('sesiones_analizadas'),
             select(func.count(func.distinct(obs.c.id_ioc))).where(
                 func.jsonb_array_length(obs.c.detalles) > 0, obs.c.id_evento.in_(sensor_events())).scalar_subquery().label('iocs'),
             select(func.count(func.distinct(technique.c.codigo_tecnica))).select_from(m).join(technique, technique.c.id_vinculo == m.c.id_vinculo).where(m.c.id_accion.in_(sensor_actions())).scalar_subquery().label('tecnicas_mitre'),
         )).mappings().one())
+        totals = conn.execute(select(s.c.id_honeypot, func.count(func.distinct(s.c.id_sesion)), func.count(e.c.id_evento))
+            .select_from(s.outerjoin(e, e.c.id_sesion == s.c.id_sesion)).where(s.c.id_honeypot.in_(sensor_ids()))
+            .group_by(s.c.id_honeypot)).all()
+        groups = {sensor: (sessions_count, events_count) for sensor, sessions_count, events_count in totals}
+        counts["por_modalidad"] = {label: dict(zip(("sesiones", "eventos"), groups.get(sensor, (0, 0))))
+            for label, sensor in {"desconocido": app.state.honeypot_id, **app.state.instances}.items()}
         by_day = conn.execute(select(func.date(e.c.fecha_hora).label("dia"), func.count().label("total")).where(e.c.id_sesion.in_(sessions)).group_by(func.date(e.c.fecha_hora)).order_by(func.date(e.c.fecha_hora).desc()).limit(7)).mappings().all()
         by_type = conn.execute(select(e.c.tipo_evento, func.count().label("total")).where(e.c.id_sesion.in_(sessions)).group_by(e.c.tipo_evento).order_by(func.count().desc()).limit(8)).mappings().all()
         latest_event = conn.scalar(select(func.max(e.c.fecha_hora)).where(e.c.id_sesion.in_(sessions)))
@@ -160,10 +166,14 @@ def dashboard_snapshot():
 
 @app.get("/api/sesiones/{id_sesion}/informe", dependencies=[Depends(local_only)])
 def session_report(id_sesion: UUID, formato: Literal["json", "pdf", "docx"] = "json", id_analisis: UUID | None = None):
+    s = table("sesion")
     with app.state.engine.connect() as conn:
         if not conn.in_transaction():
             conn.execution_options(isolation_level="REPEATABLE READ")
-        report = report_snapshot(conn, app.state.tables, app.state.honeypot_id, id_sesion, analysis_id=id_analisis)
+        sensor = conn.scalar(select(s.c.id_honeypot).where(s.c.id_sesion == id_sesion, s.c.id_honeypot.in_(sensor_ids())))
+        if sensor is None:
+            raise HTTPException(404, "Sesión no encontrada")
+        report = report_snapshot(conn, app.state.tables, sensor, id_sesion, analysis_id=id_analisis)
     if formato == "json":
         from fastapi.responses import JSONResponse
         return JSONResponse(report, headers={"Cache-Control": "no-store, private"})
@@ -339,7 +349,7 @@ def analyze(id_sesion: UUID, actualizar_informe: bool = False, actualizar_rag: b
     with app.state.engine.begin() as conn:
         session_id = conn.scalar(
             select(s.c.id_sesion)
-            .where(s.c.id_sesion == id_sesion, s.c.id_honeypot == app.state.honeypot_id)
+            .where(s.c.id_sesion == id_sesion, s.c.id_honeypot.in_(sensor_ids()))
             .with_for_update()
         )
         if not session_id:
@@ -715,7 +725,7 @@ def session_candidates(id_sesion:UUID,request:Request):
         rate(conn,request,'rag_busqueda',account=request.state.user['id_usuario'],account_limit=60,ip_limit=120)
     s,e=table('sesion'),table('evento')
     with app.state.engine.connect() as conn:
-        if not conn.scalar(select(s.c.id_sesion).where(s.c.id_sesion==id_sesion,s.c.id_honeypot==app.state.honeypot_id)):
+        if not conn.scalar(select(s.c.id_sesion).where(s.c.id_sesion==id_sesion,s.c.id_honeypot.in_(sensor_ids()))):
             raise HTTPException(404,'Sesion no encontrada')
         events=conn.execute(select(e.c.id_evento,e.c.tipo_evento,e.c.fecha_hora,e.c.datos_originales).where(e.c.id_sesion==id_sesion).order_by(e.c.fecha_hora,e.c.id_evento)).all()
     if not events:raise HTTPException(422,'La sesion no tiene eventos')

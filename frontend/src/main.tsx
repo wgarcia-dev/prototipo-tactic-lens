@@ -34,7 +34,7 @@ type Analysis = {id_analisis:string,id_sesion:string,estado:string,resumen:strin
 
 const isRag=(analysis:Analysis)=>analysis.resultado_estructurado?.rag?.metodo==='deepseek_rag_mitre_v1'
 const originBadge=(analysis:Analysis)=><span className="badge mb-3">{isRag(analysis)?'DeepSeek + RAG · ATT&CK '+analysis.resultado_estructurado?.rag?.catalogo.version:'DeepSeek anterior · resultado conservado'}</span>
-const date=(v?:string|null)=>v?new Date(v).toLocaleString('es-EC',{dateStyle:'short',timeStyle:'short'}):'—'
+const date=(v?:string|null)=>v?new Date(v).toLocaleString('es-EC',{dateStyle:'short',timeStyle:'short',timeZone:'America/Guayaquil'}):'—'
 const badge=(status?:string|null)=><span className={'badge '+(['fallido','error'].includes(status||'')?'error':['pendiente','en_proceso'].includes(status||'')?'warn':'')}>{status==='analizada'||status==='completado'?'Analizada':status==='en_proceso'?'En proceso':status==='error'||status==='fallido'?'Error':'Pendiente'}</span>
 const analysisActionLabel=(session:Session)=>session.estado_analisis==='error'?'Reintentar':session.analisis_desactualizado?'Actualizar análisis':'Analizar'
 
@@ -174,7 +174,7 @@ function SessionRoute(){
   const {id}=useParams()
   const [params]=useSearchParams()
   const event=params.get('evento')
-  return id && event!==null ? <EventDetail key={id+':'+event} session={id} event={event}/> : <SessionDetail/>
+  return id && event!==null ? <EventDetail key={id+':'+event} session={id} event={event}/> : <SessionDetail key={id+':'+(params.get('analisis')??'')}/>
 }
 
 function EventDetail({session,event}:{session:string,event:string}){
@@ -276,7 +276,7 @@ function SessionDetail(){
       <p className="font-semibold">Análisis en curso</p>
       <p className="muted mt-1">TacticLens está procesando los eventos de esta sesión. El resultado y su informe estarán disponibles al finalizar. Puede esperar aquí o volver al historial para consultar el estado.</p>
     </div>}
-    {!analysisInProgress&&session&&analysis?.estado==='completado'&&analysis.id_analisis===reportAnalysisId&&
+    {!analysisInProgress&&session&&session.id_sesion===id&&analysis?.id_sesion===id&&analysis?.estado==='completado'&&analysis.id_analisis===reportAnalysisId&&
       <SessionReport key={analysis.id_analisis+':'+session.eventos} id={session.id_sesion} analysisId={analysis.id_analisis}/>}
     <div className="grid gap-5 min-w-0">
       <section className="panel p-5"><h2 className="font-semibold mb-4">Datos de la sesión</h2><dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 xl:grid-cols-4">{[['ID',session?.id_sesion],['IP de origen',session?.ip_origen],['Inicio',date(session?.fecha_inicio)],['Cierre',date(session?.fecha_fin)]].map(([k,v])=><div className="min-w-0" key={k}><dt className="muted">{k}</dt><dd className="mt-1 break-words">{v||'—'}</dd></div>)}</dl></section>

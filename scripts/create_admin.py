@@ -4,7 +4,7 @@ from getpass import getpass
 
 from fastapi import Request
 from pydantic import ValidationError
-from sqlalchemy import func, select, text
+from sqlalchemy import MetaData, func, select, text
 
 from backend.api import app, lifespan
 from backend.auth.schemas import Registration, email
@@ -45,7 +45,39 @@ def promote_registered_account(conn, request, correo, password):
     return identity(conn, request, user_id)
 
 
-async def main(existing=False):
+def delete_previous_accounts(conn):
+    """Reset account ownership inside the same transaction as the new signup."""
+    metadata = MetaData()
+    metadata.reflect(bind=conn, schema="honeypot")
+    users = metadata.tables["honeypot.usuario"]
+    user_ids = list(conn.scalars(select(users.c.id_usuario)))
+    if not user_ids:
+        return 0
+    # A complete account reset also clears the append-only authentication log.
+    conn.execute(text("TRUNCATE TABLE honeypot.auth_notificacion, honeypot.auth_auditoria"))
+    # Remove dependent login state and signed review rows. Keep Cowrie evidence.
+    for name in ("auth_solicitud_password", "auth_recuperacion", "auth_sesion",
+                 "auth_factor", "auth_token", "revision_analisis"):
+        table = metadata.tables.get("honeypot." + name)
+        if table is not None:
+            conn.execute(table.delete().where(table.c.id_usuario.in_(user_ids)))
+    for table in metadata.tables.values():
+        if table.name == "auth_auditoria":
+            continue
+        for column in table.columns:
+            references_user = any(fk.column.table.fullname == users.fullname for fk in column.foreign_keys)
+            if references_user:
+                if not column.nullable:
+                    remaining = conn.scalar(select(func.count()).select_from(table).where(column.in_(user_ids)))
+                    if remaining:
+                        raise RuntimeError("Dependencia obligatoria pendiente: " + table.name + "." + column.name)
+                else:
+                    conn.execute(table.update().where(column.in_(user_ids)).values({column.name: None}))
+    conn.execute(users.delete().where(users.c.id_usuario.in_(user_ids)))
+    return len(user_ids)
+
+
+async def main(existing=False, replace_accounts=False):
     data = None
     if existing:
         try:
@@ -69,6 +101,10 @@ async def main(existing=False):
         request = Request({"type": "http", "app": app, "client": ("127.0.0.1", 0), "headers": [], "path": "/cli/create-admin", "scheme": "http", "server": ("localhost", 0), "query_string": b""})
         with app.state.engine.begin() as conn:
             try:
+                if replace_accounts:
+                    conn.execute(text("SELECT pg_advisory_xact_lock(724610902)"))
+                    removed = delete_previous_accounts(conn)
+                    print(f"Cuentas anteriores eliminadas: {removed}")
                 if existing:
                     user = promote_registered_account(conn, request, correo, password)
                     message = (user.correo, "Cuenta habilitada como primer administrador",
@@ -91,5 +127,8 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Configurar el primer administrador localmente, sin omitir correo verificado ni MFA.")
     parser.add_argument("--existente", action="store_true", help="Usar una cuenta ya registrada y con correo verificado; exige su contraseña actual y que no exista otro administrador.")
+    parser.add_argument("--reemplazar-cuentas", action="store_true", help="Eliminar todas las cuentas y sus accesos antes de crear el administrador nuevo.")
     args = parser.parse_args()
-    asyncio.run(main(existing=args.existente))
+    if args.existente and args.reemplazar_cuentas:
+        parser.error("--existente y --reemplazar-cuentas son excluyentes")
+    asyncio.run(main(existing=args.existente, replace_accounts=args.reemplazar_cuentas))

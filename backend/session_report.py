@@ -262,9 +262,9 @@ def assemble_report(record, total, counts, events, saved, covered, status, obser
         "metadata": [
             ("Sesión Cowrie", record.cowrie_session_id),
             ("Origen observado", str(record.ip_origen or "Sin registro")),
-            ("Inicio Ecuador", ecuador_time(record.fecha_inicio)),
-            ("Cierre Ecuador", ecuador_time(record.fecha_fin)),
-            ("Generado Ecuador", ecuador_time(datetime.now(timezone.utc))),
+            ("Inicio de la sesión (Ecuador)", ecuador_time(record.fecha_inicio)),
+            ("Cierre de la sesión (Ecuador)", ecuador_time(record.fecha_fin)),
+            ("ID de sesión", str(record.id_sesion)),
             ("Análisis", str(saved.id_analisis) if saved else "Sin registro"),
         ],
         "event_counts": counts,

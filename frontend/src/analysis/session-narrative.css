@@ -25,11 +25,11 @@
 .session-workspace .panel h2 { font-size:1.1rem; letter-spacing:-.015em; }
 .session-workspace .panel h2, .session-workspace .session-actions h4 { color:#e1edf5; }
 .session-workspace .session-narrative > section:last-child,
-.session-workspace [aria-label="Buscador RAG MITRE"] { background:#101f31; border:1px solid #304459; border-left:3px solid #48beba; border-radius:.6rem; }
+.session-workspace .rag-candidates { background:#101f31; border:1px solid #304459; border-left:3px solid #48beba; border-radius:.6rem; }
 .session-workspace .session-narrative > section:last-child > dl { gap:1rem; padding:1rem; background:#15273a; border-radius:.45rem; }
 .session-workspace .session-narrative > section:last-child > ul { display:grid; gap:.5rem; }
 .session-workspace .session-narrative > section:last-child > ul > li,
-.session-workspace [aria-label="Buscador RAG MITRE"] li,
+.session-workspace .rag-candidates li,
 .session-workspace .session-actions article { margin:0; padding:1rem; min-width:0; border:1px solid #304459; border-radius:.5rem; background:#102033; }
 .session-workspace .session-narrative > section:last-child > details,
 .session-workspace .session-actions article > details { border-top:1px solid #304459; padding-top:.65rem; }
@@ -37,11 +37,11 @@
 .session-actions:empty { display:none; }
 .session-workspace .session-actions article > div:has(> .badge) { border-left:2px solid #427279; padding-left:.75rem; }
 .session-workspace .session-actions article a, .session-workspace .timeline-events { overflow-wrap:anywhere; }
-.session-workspace [aria-label="Buscador RAG MITRE"] ul { display:grid; gap:.75rem; align-items:start; }
+.session-workspace .rag-candidates ul { display:grid; gap:.75rem; align-items:start; }
 .session-workspace .timeline-events > div { padding-bottom:.6rem; }
 .session-workspace :is(summary,button,a):focus-visible { outline:2px solid #6ed9d6; outline-offset:2px; }
 @container (min-width:45rem) {
-  .session-actions, .session-workspace [aria-label="Buscador RAG MITRE"] ul,
+  .session-actions, .session-workspace .rag-candidates ul,
   .session-workspace .session-narrative > section:last-child > ul { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .session-workspace .session-narrative > section:last-child > dl { grid-template-columns:repeat(4,minmax(0,1fr)); }
 }

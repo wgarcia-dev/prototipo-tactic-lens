@@ -38,10 +38,6 @@ class LiveTests(unittest.TestCase):
                 t = app.state.tables
                 for number, name in ((1, "IP"), (2, "Dominio"), (3, "URL"), (4, "Hash")):
                     connection.execute(insert(t["tipo_ioc"]).values(id_tipo_ioc=number,nombre=name).on_conflict_do_nothing())
-                connection.execute(insert(t["tactica_mitre"]).values(codigo_tactica="TA0002",nombre="Execution").on_conflict_do_nothing())
-                connection.execute(insert(t["tecnica_mitre"]).values(codigo_tecnica="T1059",nombre="Command and Scripting Interpreter").on_conflict_do_nothing())
-                connection.execute(insert(t["tecnica_mitre"]).values(codigo_tecnica="T1059.004",tecnica_padre_id="T1059",nombre="Unix Shell").on_conflict_do_nothing())
-                connection.execute(insert(t["tecnica_tactica"]).values(codigo_tecnica="T1059.004",codigo_tactica="TA0002").on_conflict_do_nothing())
 
                 class TransactionEngine:
                     @contextmanager
@@ -70,7 +66,16 @@ class LiveTests(unittest.TestCase):
                     session_id = connection.scalar(select(session.c.id_sesion).where(session.c.cowrie_session_id == raw["session"]))
                     self.assertIsNotNone(session_id)
                     self.assertEqual(connection.scalar(select(func.count()).where(event.c.id_sesion == session_id)), 1)
-                    result = AnalysisResult(resumen="Comando de descarga observado", acciones=[Finding(tipo="comando", descripcion="Descarga mediante shell", confianza=0.9, eventos=[connection.scalar(select(event.c.id_evento).where(event.c.id_sesion == session_id))], iocs=[IocProposal(tipo="URL", valor="http://files.corp.local/a.sh", evento=connection.scalar(select(event.c.id_evento).where(event.c.id_sesion == session_id)))], mitre=[MitreProposal(codigo="T1059.004", codigo_tactica="TA0002", justificacion="Orden de descarga escrita en la shell emulada de Cowrie", limitaciones=["No demuestra ejecucion en el Ubuntu anfitrion"], confianza=0.7)])])
+                    event_id = connection.scalar(select(event.c.id_evento).where(event.c.id_sesion == session_id))
+                    result = AnalysisResult(resumen="Comando de descarga observado", acciones=[Finding(
+                        tipo="comando", descripcion="Descarga mediante shell", confianza=0.9, eventos=[event_id],
+                        iocs=[IocProposal(tipo="URL", valor="http://files.corp.local/a.sh", evento=event_id)],
+                        mitre=[MitreProposal(codigo="T1105", codigo_tactica="TA0011", eventos=[event_id],
+                            comportamiento_observado="Orden de descarga introducida",
+                            justificacion="Orden de descarga registrada en Cowrie con una URL entrante",
+                            limitaciones=["No demuestra ejecución en el sistema anfitrión"], confianza=0.7)],
+                    )])
+                    model_configuration = {"LLM_MODEL":"test-provider-model", "LLM_PROVIDER":"test"}
                     with patch.dict("os.environ", {"LLM_MODEL": "test-provider-model", "LLM_PROVIDER": "test"}), patch("backend.routes.real_result", return_value=result):
                         analysis = client.post(f"/api/sesiones/{session_id}/analizar")
                     self.assertEqual(analysis.status_code, 200)
@@ -81,7 +86,7 @@ class LiveTests(unittest.TestCase):
                     self.assertEqual(connection.scalar(select(func.count()).select_from(app.state.tables["deteccion_ioc"]).where(app.state.tables["deteccion_ioc"].c.id_analisis == details["id_analisis"])), 1)
                     current = client.get(f"/api/sesiones/{session_id}").json()
                     self.assertEqual(current["estado_analisis"], "analizada")
-                    with patch("backend.routes.real_result", side_effect=AssertionError("LLM should not be called")):
+                    with patch.dict("os.environ", model_configuration), patch("backend.routes.real_result", side_effect=AssertionError("LLM should not be called")):
                         reused = client.post(f"/api/sesiones/{session_id}/analizar")
                     self.assertEqual(reused.status_code, 200)
                     self.assertTrue(reused.json()["reutilizado"])
@@ -115,7 +120,7 @@ class LiveTests(unittest.TestCase):
                     self.assertEqual(stored["version_informe"], REPORT_VERSION)
                     self.assertEqual(stored["informe"]["fases"][0]["eventos"], [event_id])
                     self.assertEqual(stored["contexto_observado"]["comandos"], 1)
-                    with patch("backend.routes.real_result", side_effect=AssertionError("Do not bill twice for the same report")):
+                    with patch.dict("os.environ", model_configuration), patch("backend.routes.real_result", side_effect=AssertionError("Do not bill twice for the same report")):
                         self.assertTrue(client.post(url).json()["reutilizado"])
                     analysis = upgraded
 

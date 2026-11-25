@@ -7,7 +7,9 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 
 from .analysis_state import analyzed_count
+from .correlation import mapping_evidence
 from .rag.behavior import redact
+from .rag.mitre_evidence import AUTO_CLASSIFICATION
 
 EVENT_LIMIT = 500
 OBSERVABLE_LIMIT = 100
@@ -73,21 +75,7 @@ def report_snapshot(conn, tables, honeypot_id, session_id, analysis_id=None):
         .order_by(typ.c.nombre, ioc.c.valor, obs.c.estado_revision)
         .limit(OBSERVABLE_LIMIT + 1)).all()
 
-    mappings = []
-    if saved:
-        m, a, tt, tech = (tables[name] for name in
-            ("mapeo_mitre", "accion_identificada", "tecnica_tactica", "tecnica_mitre"))
-        mapping_rows = conn.execute(select(tech.c.codigo_tecnica, tech.c.nombre, m.c.estado_revision, m.c.id_mapeo)
-            .select_from(m).join(a, m.c.id_accion == a.c.id_accion)
-            .join(tt, m.c.id_vinculo == tt.c.id_vinculo)
-            .join(tech, tt.c.codigo_tecnica == tech.c.codigo_tecnica)
-            .where(a.c.id_analisis == saved.id_analisis)
-            .order_by(tech.c.codigo_tecnica, m.c.id_mapeo).limit(FINDING_LIMIT + 1)).all()
-        citation = tables.get("mapeo_mitre_evento")
-        for code, name, state, mapping_id in mapping_rows:
-            refs = [] if citation is None else list(conn.scalars(select(citation.c.id_evento)
-                .where(citation.c.id_mapeo == mapping_id).order_by(citation.c.id_evento)))
-            mappings.append((code, name, state, refs))
+    mappings = list(mapping_evidence(conn,tables,analysis_id=saved.id_analisis,limit=FINDING_LIMIT+1))
 
     commands = conn.execute(select(event.c.id_evento, event.c.fecha_hora,
         event.c.datos_originales["input"].as_string()).where(event.c.id_sesion == session_id,
@@ -208,9 +196,30 @@ def assemble_report(record, total, counts, events, saved, covered, status, obser
     for kind, value, state, _, eid in observations[:OBSERVABLE_LIMIT]:
         if state == "pendiente":
             safeguards.append(("Validar el observable", f"Contrastar {kind} {observable_value(kind, value)} con su evento en Observables e IoCs.", reference(eid)))
-    for code, name, state, eid in mappings[:FINDING_LIMIT]:
-        if state == "pendiente":
-            safeguards.append((f"Revisar {code}", f"Verificar la propuesta «{name}» en MITRE ATT&CK y registrar el motivo de la decisión.", reference(eid)))
+    mapping_rows = []
+    mitre_outcome = ((saved.resultado_estructurado or {}).get('clasificacion_mitre') or {}) if saved else {}
+    no_mapping = ('No determinada: ' + mitre_outcome['motivo'] if mitre_outcome.get('motivo') else
+                  'El análisis guardado no contiene mapeos registrados.')
+    degrees = {'intento':'Intento','resultado_en_honeypot':'Resultado observado en el honeypot'}
+    for mapping in mappings[:FINDING_LIMIT]:
+        provenance = mapping['rag_procedencia'] or {}
+        code, name, state = (mapping[key] for key in ('codigo_tecnica','tecnica','estado_revision'))
+        references = ', '.join(reference(event['id_evento']) for event in mapping['eventos']) or 'Sin citas verificables'
+        automatic = provenance.get('clasificacion') == AUTO_CLASSIFICATION
+        if automatic:
+            classification = {'descartado':'Descartada por revisión',
+                              'confirmado':'Identificada automáticamente · Confirmada en revisión'}.get(state,'Identificada automáticamente')
+        else:
+            classification = {'pendiente':'Histórico · pendiente de revisión','confirmado':'Histórico · confirmado',
+                              'descartado':'Histórico · descartado'}.get(state,'Mapeo histórico')
+        limitations = provenance.get('limitaciones')
+        limits = ' '.join(item for item in limitations if isinstance(item,str)) if isinstance(limitations,list) else ''
+        mapping_rows.append((f'{code} · {name}', f"{mapping['codigo_tactica']} · {mapping['tactica']}",
+                             '\n'.join((classification, degrees.get(mapping['grado_evidencia'],'Sin grado registrado'),
+                                        provenance.get('modalidad') or 'Modalidad no registrada')),
+                             references, '\n'.join(filter(None,(mapping['justificacion'],limits))) or 'Sin detalle registrado'))
+        if state == 'pendiente' and not automatic:
+            safeguards.append((f'Revisar {code}', f'Verificar la propuesta histórica «{name}» en MITRE ATT&CK.', references))
     summary = [
         f"Eventos registrados: {total}. Comandos: {counts.get('cowrie.command.input', 0)}. "
         f"Autenticaciones aceptadas por el señuelo: {counts.get('cowrie.login.success', 0)}.",
@@ -237,12 +246,11 @@ def assemble_report(record, total, counts, events, saved, covered, status, obser
                 [(kind, observable_value(kind, value), review.get(state, state), str(count), reference(event_id))
                  for kind, value, state, count, event_id in observations[:OBSERVABLE_LIMIT]]),
         section("Mapeos MITRE ATT&CK",
-                ["Las referencias corresponden a citas específicas de cada mapeo. Los registros sin cita específica requieren revisión."] +
+                ["Las referencias son las citas conservadas para cada técnica. Los mapeos históricos sin citas verificables requieren revisión. La identificación automática no confirma el éxito del ataque."] +
                 (["Se muestran los primeros 100 mapeos."] if len(mappings) > FINDING_LIMIT else []) +
-                ([] if mappings else ["No hay mapeos registrados para el análisis de la sesión."]),
-                ("Técnica", "Revisión", "Referencia"),
-                [(f"{code} · {name}", review.get(state, state), reference(event_id))
-                 for code, name, state, event_id in mappings[:FINDING_LIMIT]]),
+                ([] if mappings else [no_mapping]),
+                ("Técnica", "Táctica", "Estado, grado y modalidad", "Eventos", "Justificación y limitaciones"),
+                mapping_rows),
         section("Comprobaciones automáticas de la captura",
                 ["Lista calculada por reglas según los tipos de evento y revisiones pendientes. La referencia identifica su evidencia. Las salvaguardas específicas del análisis se presentan en sus fichas."]
                 if safeguards else ["La evidencia disponible no activa una recomendación específica."],

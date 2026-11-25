@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -11,11 +12,27 @@ from sqlalchemy.exc import IntegrityError
 import test_auth as fixtures
 from backend.api import app
 from backend.correlation import transfer_correlations, transfer_window
+from backend.ioc_views import public_payload, technical_profile
 from backend.rag.behavior import represent
 from backend.routes import AnalysisResult, Finding, IocProposal, MitreProposal
 
 
 class TemporalEvidenceTests(TestCase):
+    def test_observable_profile_address_classes_and_safe_context(self):
+        for address, version, scope in (
+            ("192.168.1.120",4,"privada"), ("8.8.8.8",4,"global"),
+            ("2001:4860:4860::8888",6,"global"), ("::1",6,"loopback"), ("fe80::1",6,"enlace_local"),
+            ("::ffff:192.168.1.110",6,"privada"), ("240.0.0.1",4,"reservada"), ("ff02::1",6,"multicast"),
+        ):
+            self.assertEqual(technical_profile("IP",address),{"version_ip":version,"alcance":scope})
+        actual = public_payload({"input":"wget https://user:fixture@public.test/download?opaque=fixture",
+                                 "password":"fixture", "output":"fixture",
+                                 "note":"-----BEGIN OPENSSH PRIVATE KEY-----\nfixture"})
+        self.assertNotIn("fixture",str(actual))
+        self.assertEqual(actual["input"],"wget https://public.test/download")
+        self.assertNotIn("fixture",public_payload("curl -H 'Cookie: session=fixture' --data 'secret=fixture' https://public.test"))
+        self.assertEqual(technical_profile("Hash","a"*64),{"algoritmo":"SHA-256"})
+
     def row(self, event_id, seconds, *, command=False, session="one"):
         return {
             "id_evento": event_id, "id_sesion": session, "numero_secuencia": event_id,
@@ -85,26 +102,27 @@ class CorrelationApiTests(fixtures.AuthFixture):
         self.assertEqual(correlation["estado"], expected)
         return correlation
 
-    def local_rag(self, events):
+    def local_rag(self, events, modality, sample=None):
         tables = app.state.tables
         catalog, tech = tables["catalogo_mitre"], tables["tecnica_mitre"]
-        current = self.connection.execute(select(catalog.c.id_catalogo, catalog.c.version).where(catalog.c.activo)).one()
+        current = self.connection.execute(select(catalog.c.id_catalogo, catalog.c.version,catalog.c.sha256).where(catalog.c.activo)).one()
         tactics = {"T1105": "TA0011", "T1082": "TA0007", "T1059.004": "TA0002"}
         candidates = [
             {"codigo_tecnica": row.codigo_tecnica, "nombre": row.nombre,
              "objeto_sha256": row.objeto_sha256, "observabilidad": "intento_evaluable",
-             "stix_id": row.stix_id, "tacticas": [{"codigo_tactica": tactics[row.codigo_tecnica]}],
+             "stix_id": row.stix_id, "tacticas": [{"codigo_tactica": tactics[row.codigo_tecnica]}],"plataformas":["Linux"],
              "puntuacion_hibrida": 0.03, "similitud_vectorial": 0.8}
             for row in self.connection.execute(select(tech.c.codigo_tecnica, tech.c.nombre, tech.c.objeto_sha256,
                 tech.c.stix_id).where(tech.c.codigo_tecnica.in_(tactics)))
         ]
-        return {"catalogo": {"id_catalogo": str(current.id_catalogo), "version": current.version},
+        return {"catalogo": {"id_catalogo": str(current.id_catalogo), "version": current.version,"sha256":current.sha256},
                 "metodo": "deepseek_rag_mitre_v1", "modelo_embeddings": {"nombre": "fixture local"},
                 "candidatos": candidates, "representacion": represent(events)}
 
     @staticmethod
     def proposal(code, tactic, events):
         return MitreProposal(codigo=code, codigo_tactica=tactic, eventos=events,
+            comportamiento_observado="Orden registrada por Cowrie",
             justificacion="El comportamiento registrado en Cowrie respalda la propuesta de técnica.",
             limitaciones=["El entorno emulado limita el alcance de la evidencia."])
 
@@ -113,6 +131,181 @@ class CorrelationApiTests(fixtures.AuthFixture):
             response = self.client.post(f"/api/sesiones/{session}/analizar")
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()["id_analisis"]
+
+    def test_mitre_browser_groups_distinct_sessions_and_preserves_historical_details(self):
+        self.enroll(826)
+        sensor = uuid4()
+        self.connection.execute(app.state.tables['honeypot'].insert().values(id_honeypot=sensor,nombre='Shell browser',host='loopback'))
+        namespace = uuid4().hex
+        created = []
+        with patch.object(app.state,'instances',{'cowrie_shell':sensor}):
+            for suffix,action_count in (('alpha',2),('beta',1)):
+                raw = self.event(f'{namespace}-{suffix}',1,input=f"wget '{self.URL_A}'")
+                raw['_collector']['instance_id']='cowrie_shell'
+                eid = self.ingest([raw])['confirmaciones'][0]['id_evento']
+                sid = self.session_id(eid)
+                result = AnalysisResult(resumen='Intención de descarga registrada',acciones=[
+                    Finding(tipo=f'Comando {index}',descripcion='Acción de Cowrie',confianza=0.8,eventos=[eid],
+                            iocs=[IocProposal(tipo='URL',valor=self.URL_A,evento=eid)],
+                            mitre=[self.proposal('T1105','TA0011',[eid])]) for index in range(action_count)
+                ])
+                aid = self.analyze_fixture(sid,result)
+                created.append((sid,aid,eid))
+
+            first_sid,first_aid,first_eid = created[0]
+            stored = self.client.get(f'/api/analisis/{first_aid}').json()
+            current,legacy = [row['mitre'][0] for row in stored['acciones']]
+            mapping = app.state.tables['mapeo_mitre']
+            provenance = {key:value for key,value in legacy['rag_procedencia'].items() if key!='clasificacion'}
+            self.connection.execute(mapping.update().where(mapping.c.id_mapeo==UUID(legacy['id_mapeo'])).values(rag_procedencia=provenance))
+
+            filters = {'sesion':namespace,'tactica':'TA0011','modalidad':'cowrie_shell','q':'Ingress Tool Transfer'}
+            groups = self.client.get('/api/mitre/tecnicas',params=filters)
+            self.assertEqual(groups.status_code,200,groups.text)
+            technique, = groups.json()
+            self.assertEqual((technique['codigo_tecnica'],technique['sesiones']),('T1105',2))
+            self.assertEqual(set(technique['estados']),{'automatica','historica_pendiente'})
+            summary = self.client.get('/api/mitre/resumen', params=filters)
+            self.assertEqual(summary.status_code, 200, summary.text)
+            body = summary.json()
+            self.assertEqual(body['version_catalogo'], '20.1')
+            self.assertEqual({key: body['totales'][key] for key in ('tecnicas','tacticas','sesiones','mapeos','eventos_citados','con_citas','pendientes')},
+                             {'tecnicas':1,'tacticas':1,'sesiones':2,'mapeos':3,'eventos_citados':2,'con_citas':3,'pendientes':1})
+            self.assertEqual([(row['codigo_tactica'],row['mapeos']) for row in body['tacticas']], [('TA0011',3)])
+            self.assertEqual([(row['modalidad'],row['mapeos']) for row in body['modalidades']], [('cowrie_shell',3)])
+            self.assertTrue(all(row['origen_fecha']=='evento_citado' for row in body['evolucion']))
+            supported = self.client.get('/api/mitre/resumen',
+                                        params={**filters,'plataforma':'Linux','ip':self.IP,'citas':'con','grado':'intento'})
+            self.assertEqual(supported.json()['totales']['mapeos'],3)
+            empty = self.client.get('/api/mitre/resumen', params={**filters,'hasta':'2000-01-01'})
+            self.assertEqual(empty.json()['totales']['mapeos'],0)
+            local_day = (self.clock + timedelta(seconds=1)).astimezone(ZoneInfo('America/Guayaquil')).date().isoformat()
+            day = self.client.get('/api/mitre/resumen', params={**filters,'desde':local_day,'hasta':local_day})
+            self.assertEqual(day.json()['totales']['mapeos'],3)
+            self.assertEqual(self.client.get('/api/mitre/resumen', params={'desde':'2010-01-01','hasta':'2000-01-01'}).status_code,422)
+            cell, = self.client.get('/api/mitre/matriz', params=filters).json()
+            self.assertEqual((cell['codigo_tecnica'],cell['codigo_tactica'],cell['mapeos']),('T1105','TA0011',3))
+            catalog = self.client.get('/api/mitre/matriz', params={**filters,'catalogo':True}).json()
+            self.assertTrue(any(row['mapeos']==0 and row['relacion_vigente'] for row in catalog))
+            detail = self.client.get('/api/mitre/tecnicas/T1105', params=filters)
+            self.assertEqual(detail.status_code,200,detail.text)
+            self.assertEqual(detail.json()['totales']['observables'],1)
+            self.assertIn('Linux', detail.json()['catalogo']['plataformas'])
+            official_child = self.client.get('/api/mitre/tecnicas/T1059.004').json()['catalogo']
+            self.assertEqual((official_child['nombre'],official_child['tecnica_padre_id']),('Unix Shell','T1059'))
+            group_path = '/api/mitre/tecnicas/T1105/sesiones'
+            grouped = self.client.get(group_path,params=filters).json()
+            self.assertEqual({row['id_sesion']:row['mapeos'] for row in grouped},
+                             {str(first_sid):2,str(created[1][0]):1})
+            self.assertTrue(all(row['modalidades']==['cowrie_shell'] for row in grouped))
+            historical, = self.client.get(group_path,params={**filters,'estado':'historica_pendiente'}).json()
+            self.assertEqual((historical['id_sesion'],historical['mapeos']),(str(first_sid),1))
+            self.assertEqual(self.client.get(group_path,params={**filters,'modalidad':'cowrie_proxy'}).json(),[])
+            self.assertEqual(self.client.get(group_path,params={**filters,'estado':'invalid'}).status_code,422)
+            page_one, = self.client.get(group_path,params={**filters,'limit':1}).json()
+            page_two, = self.client.get(group_path,params={**filters,'limit':1,'offset':1}).json()
+            self.assertNotEqual(page_one['id_sesion'],page_two['id_sesion'])
+
+            listed = self.client.get('/api/mitre/mapeos',params={**filters,'codigo':'T1105','id_sesion':str(first_sid)}).json()
+            self.assertEqual({row['id_mapeo'] for row in listed},{current['id_mapeo'],legacy['id_mapeo']})
+            self.assertEqual({row['estado_identificacion'] for row in listed},{'automatica','historica_pendiente'})
+            reloaded = self.client.get(f'/api/mitre/mapeos/{current["id_mapeo"]}/observables').json()['mapeo']
+            for field in ('codigo_tecnica','justificacion','grado_evidencia','estado_revision','eventos'):
+                self.assertEqual(reloaded[field],current[field])
+            self.assertEqual(reloaded['eventos'][0]['id_evento'],str(first_eid))
+            self.assertEqual(reloaded['eventos'][0]['id_sesion'],str(first_sid))
+            self.assertEqual(reloaded['estado_revision'],'pendiente')
+            expanded = self.client.get(f'/api/mitre/mapeos/{current["id_mapeo"]}/observables',params={'detallar_citas':True}).json()
+            self.assertIn('wget',expanded['mapeo']['eventos'][0]['comando'])
+            self.assertNotIn('?a=1',str(expanded))
+            quotes = app.state.tables['mapeo_mitre_evento']
+            self.connection.execute(quotes.delete().where(quotes.c.id_mapeo==UUID(legacy['id_mapeo'])))
+            historical = self.client.get('/api/mitre/resumen',params={**filters,'citas':'sin'}).json()
+            self.assertEqual(historical['totales']['sin_citas'],1)
+            self.assertEqual(historical['evolucion'][0]['origen_fecha'],'inicio_sesion')
+        self.assertEqual(self.client.get('/api/mitre/tecnicas',params={'sesion':namespace}).json(),[])
+
+    def test_observable_explorer_counts_priority_and_linked_sessions(self):
+        self.assertEqual(self.client.get('/api/iocs/resumen').status_code,401)
+        self.enroll(828)
+        name = uuid4().hex
+        records = [
+            self.event(name,1,"cowrie.login.success",password="fixture-opaque",username="usuario-fixture"),
+            self.event(name,2,input=f"wget '{self.URL_A}'"),
+            self.event(name,3,input="dig @10.2.3.4 files.corp.local"),
+            self.event(name,4,"cowrie.session.closed"),
+            self.event(name+"-other",5,"cowrie.session.closed",src_ip="8.8.8.8"),
+        ]
+        accepted = self.ingest(records)['confirmaciones']
+        ids = [row['id_evento'] for row in accepted]
+        sid = self.session_id(ids[1])
+        self.analyze_fixture(sid,AnalysisResult(resumen="Orden registrada en el señuelo",acciones=[
+            Finding(tipo="descarga",descripcion="Intento registrado",confianza=0.8,eventos=[ids[1]],
+                iocs=[IocProposal(tipo="URL",valor=self.URL_A,evento=ids[1])],
+                mitre=[self.proposal("T1105","TA0011",[ids[1]])])]))
+        ip, url = self.ioc_id(self.IP), self.ioc_id(self.URL_A)
+        filters = {"sesion":name,"tipo":"IP","alcance":"privada","estado":"pendiente","evidencia":"verificable"}
+        response = self.client.get('/api/iocs/resumen',params={**filters,"q":self.IP})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json()["totales"],{"observables":1,"observaciones":4,"eventos":4,
+                                                     "sesiones":1,"verificables":1,"con_mitre":0})
+        ranked = self.client.get('/api/iocs/explorar',params={"sesion":name,"tipo":"IP","orden":"observaciones","limit":1})
+        self.assertEqual(ranked.status_code,200,ranked.text)
+        top, = ranked.json()
+        self.assertEqual((top["id_ioc"],top["sesiones"],top["observaciones"]),(str(ip),1,4))
+        self.assertNotEqual(self.client.get('/api/iocs/explorar',params={
+            "sesion":name, "tipo":"IP","orden":"observaciones","limit":1,"offset":1}).json()[0]["id_ioc"],str(ip))
+        self.assertEqual(self.client.get('/api/iocs/resumen',params={"sesion":name,"hasta":"2001-01-01"}).json()["totales"]["observaciones"],0)
+        self.assertEqual(self.client.get('/api/iocs/resumen',params={"desde":"2026-02-01","hasta":"2026-01-01"}).status_code,422)
+        ip_profile = self.client.get(f'/api/iocs/{ip}/perfil')
+        self.assertEqual(ip_profile.status_code,200,ip_profile.text)
+        profile = ip_profile.json()
+        self.assertEqual(profile["clasificacion"],{"version_ip":4,"alcance":"privada"})
+        self.assertEqual(profile["comportamiento"]["autenticaciones_aceptadas"],1)
+        self.assertEqual(profile["comportamiento"]["usuarios_objetivo"],1)
+        self.assertEqual(profile["comportamiento"]["ordenes_dns"],1)
+        self.assertEqual(profile["enriquecimiento"]["resultados"],[])
+        public_ip = self.client.get(f"/api/iocs/{self.ioc_id('8.8.8.8')}/perfil").json()
+        self.assertEqual((public_ip["estado_revision"],public_ip["comportamiento"]["desconexiones"]),("pendiente",1))
+        start = f'/api/iocs/{ip}/observaciones'
+        priority = self.client.get(start,params={"vista_segura":True,"categoria":"prioritarias","orden_evidencia":"relevancia"}).json()
+        self.assertNotIn(str(ids[3]),{row["id_evento"] for row in priority})
+        exact, = self.client.get(start,params={"vista_segura":True,"categoria":"prioritarias","id_evento":ids[3]}).json()
+        self.assertEqual(exact["estado_revision"],"pendiente")
+        self.assertNotIn("fixture-opaque",str(priority))
+        matched, = self.client.get('/api/iocs/explorar',params={"sesion":name,"tecnica":"T1105","tactica":"TA0011"}).json()
+        self.assertEqual((matched["id_ioc"],matched["tecnicas"]),(str(url),1))
+        self.assertNotIn("?a=",matched["valor"])
+        sessions = self.client.get(f'/api/iocs/{url}/sesiones')
+        self.assertEqual(sessions.status_code,200,sessions.text)
+        related, = sessions.json()
+        self.assertEqual((related["id_sesion"],related["eventos"],related["observaciones"],related["tecnicas"]),
+                         (str(sid),4,1,["T1105"]))
+        self.assertEqual(self.client.patch(f"/api/inteligencia/observacion_ioc/{exact['id_observacion']}/revision",
+                         json={"estado":"confirmado","motivo":"Un analista no puede confirmar evidencia"}).status_code,403)
+
+    def test_matrix_counts_each_historical_pair_only_once(self):
+        self.enroll(827)
+        name = uuid4().hex
+        eid = self.ingest([self.event(name,1,input='uname -a')])['confirmaciones'][0]['id_evento']
+        aid = self.analyze_fixture(self.session_id(eid), AnalysisResult(resumen='Consulta del entorno',acciones=[
+            Finding(tipo='consulta',descripcion='Entrada registrada',confianza=0.8,eventos=[eid],
+                    mitre=[self.proposal('T1082','TA0007',[eid])])]))
+        tables = app.state.tables
+        actions, links, mappings = (tables[key] for key in ('accion_identificada','tecnica_tactica','mapeo_mitre'))
+        action = self.connection.scalar(select(actions.c.id_accion).where(actions.c.id_analisis==UUID(aid)))
+        pairs = list(self.connection.scalars(select(links.c.id_vinculo).where(
+            links.c.codigo_tecnica=='T1053.003', links.c.codigo_tactica.in_(('TA0003','TA0004')))))
+        self.assertEqual(len(pairs),2)
+        self.connection.execute(mappings.insert(),[
+            {'id_accion':action,'id_vinculo':pair,'evidencia':'Registro histórico sin cita',
+             'justificacion':'Dato de prueba histórico'} for pair in pairs])
+        params = {'sesion':name,'codigo':'T1053.003'}
+        rows = self.client.get('/api/mitre/matriz',params=params).json()
+        self.assertEqual({row['codigo_tactica']:row['mapeos'] for row in rows},{'TA0003':1,'TA0004':1})
+        summary = self.client.get('/api/mitre/resumen',params=params).json()['totales']
+        self.assertEqual((summary['tecnicas'],summary['tacticas'],summary['sesiones'],summary['mapeos']),(1,2,1,2))
+        self.assertEqual(summary['pendientes'],2)
 
     def test_cowrie_order_url_equality_cross_session_file_and_replay(self):
         self.enroll(811)
@@ -184,7 +377,7 @@ class CorrelationApiTests(fixtures.AuthFixture):
             Finding(tipo="comandos registrados", descripcion="Secuencia registrada por Cowrie", confianza=0.8,
                 eventos=[a, b, uname], iocs=[IocProposal(tipo="URL", valor=self.URL_A, evento=a),
                     IocProposal(tipo="URL", valor=self.URL_B, evento=b), IocProposal(tipo="IP", valor=self.IP, evento=a)],
-                mitre=[self.proposal("T1105", "TA0011", [a]), self.proposal("T1082", "TA0007", [b, uname])]),
+                mitre=[self.proposal("T1105", "TA0011", [a]), self.proposal("T1082", "TA0007", [uname])]),
             Finding(tipo="shell", descripcion="Mapeo con evidencia heredada de la acción", confianza=0.8,
                 eventos=[a], iocs=[IocProposal(tipo="URL", valor=self.URL_A, evento=a)],
                 mitre=[self.proposal("T1059.004", "TA0002", [])]),
@@ -195,16 +388,15 @@ class CorrelationApiTests(fixtures.AuthFixture):
         all_maps = {m["codigo_tecnica"]: m for entry in analysis["acciones"] for m in entry["mitre"]}
         transfer = all_maps["T1105"]
         self.assertEqual([(x["id_evento"],x["metodo"]) for x in transfer["eventos"]], [(str(a),"rag_validado_v1")])
-        self.assertEqual(all_maps["T1059.004"]["eventos"], [])
+        self.assertNotIn("T1059.004", all_maps)
         b_link, = self.observations(self.URL_B)[b]["acciones"]
         self.assertEqual((b_link["estado"], b_link["tecnicas"]), ("directa", []))
         ip_link, = self.observations(self.IP)[a]["acciones"]
         self.assertEqual(ip_link["tecnicas"], [])
         action = next(entry for entry in analysis["acciones"] if entry["tipo_accion"] == "comandos registrados")
         self.assertEqual({item["valor"] for item in action["observables"]}, {self.URL_A, self.URL_B, self.IP})
-        for removed in ("T1082", "T1059.004"):
-            endpoint = f"/api/mitre/mapeos/{all_maps[removed]['id_mapeo']}/observables"
-            self.assertEqual(self.client.get(endpoint).json()["observables"], [])
+        endpoint = f"/api/mitre/mapeos/{all_maps['T1082']['id_mapeo']}/observables"
+        self.assertEqual(self.client.get(endpoint).json()["observables"], [])
         mid = transfer["id_mapeo"]
         endpoint = f"/api/mitre/mapeos/{mid}/observables"
 
@@ -220,7 +412,7 @@ class CorrelationApiTests(fixtures.AuthFixture):
                 observable, = reverse["observables"]
                 self.assertEqual((observable["valor"],observable["estado"]), (self.URL_A,state))
 
-        assert_relation("pendiente","candidata")
+        assert_relation("pendiente","contextual")
         for review,state in (("confirmado","contextual"),("descartado","insuficiente")):
             response = self.client.patch(f"/api/inteligencia/mitre/{mid}/revision", json={
                 "estado": review, "motivo": "Decisión documentada de la revisión"})
@@ -231,9 +423,10 @@ class CorrelationApiTests(fixtures.AuthFixture):
             self.assertTrue(self.client.post(f"/api/sesiones/{session_id}/analizar").json()["reutilizado"])
         link = app.state.tables["mapeo_mitre_evento"]
         self.assertEqual(self.connection.scalar(select(func.count()).where(link.c.id_mapeo == UUID(mid))), 1)
+        different_action = next(entry['id_accion'] for entry in analysis['acciones'] if entry['tipo_accion']=='shell')
         with self.assertRaises(IntegrityError), self.connection.begin_nested():
-            self.connection.execute(link.insert().values(id_mapeo=all_maps["T1059.004"]["id_mapeo"],
-                id_accion=transfer["id_accion"], id_evento=a, metodo="rag_validado_v1"))
+            self.connection.execute(link.insert().values(id_mapeo=all_maps["T1082"]["id_mapeo"],
+                id_accion=different_action, id_evento=a, metodo="rag_validado_v1"))
 
     def test_migration_recovers_only_complete_historical_citations_and_preserves_original_rows(self):
         self.enroll(814, admin=True)
@@ -253,10 +446,13 @@ class CorrelationApiTests(fixtures.AuthFixture):
             mid = UUID(mapping["id_mapeo"])
             ids[action["tipo_accion"]] = mid
             self.connection.execute(citations.delete().where(citations.c.id_mapeo == mid))
-            data = {key: value for key, value in mapping["rag_procedencia"].items() if key != "citas_explicitas"}
+            data = {key: value for key, value in mapping["rag_procedencia"].items() if key not in {"citas_explicitas","clasificacion"}}
             if action["tipo_accion"] == "cita ajena":
                 data["eventos"] = [a, foreign]
             self.connection.execute(mappings.update().where(mappings.c.id_mapeo == mid).values(rag_procedencia=data))
+        report=self.client.get(f'/api/sesiones/{self.session_id(a)}/informe?id_analisis={aid}').json()
+        historical=next(section for section in report['sections'] if section['title']=='Mapeos MITRE ATT&CK')
+        self.assertEqual([row[3] for row in historical['rows']],['Sin citas verificables']*2)
         snapshot = lambda: self.connection.execute(select(mappings).where(
             mappings.c.id_mapeo.in_(ids.values())).order_by(mappings.c.id_mapeo)).all()
         original = snapshot()
@@ -272,7 +468,15 @@ class CorrelationApiTests(fixtures.AuthFixture):
         anonymous = self.client.get(f"/api/mitre/mapeos/{uuid4()}/observables")
         self.assertEqual(anonymous.status_code, 401)
         self.assertEqual(self.client.get(f"/api/iocs/{uuid4()}/observaciones").status_code, 401)
+        self.assertEqual(self.client.get("/api/mitre/resumen").status_code, 401)
+        self.assertEqual(self.client.get("/api/mitre/matriz").status_code, 401)
+        self.assertEqual(self.client.get("/api/mitre/tecnicas/T1105").status_code, 401)
         self.enroll(815)
+        eid = self.ingest([self.event(uuid4().hex,1,input=f"wget '{self.URL_A}'")])['confirmaciones'][0]['id_evento']
+        self.analyze_fixture(self.session_id(eid), AnalysisResult(resumen='Intento observado en Cowrie',acciones=[
+            Finding(tipo='descarga',descripcion='Comando de descarga observado',confianza=0.8,eventos=[eid],
+                    mitre=[self.proposal('T1105','TA0011',[eid])])]))
+        self.assertEqual(self.client.get("/api/mitre/resumen").status_code, 200)
         mapping = self.client.get("/api/mitre/mapeos").json()[0]
         endpoint = f"/api/mitre/mapeos/{mapping['id_mapeo']}/observables"
         self.assertEqual(self.client.get(endpoint).status_code, 200)

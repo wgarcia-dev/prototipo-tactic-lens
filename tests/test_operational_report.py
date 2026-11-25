@@ -27,3 +27,14 @@ class OperationalReportTests(TestCase):
         result = analyst_sections({'id_sesion':'legacy','metadata':[],'status':'Cobertura sin verificar','sections':[]},{},[])
         self.assertIn('Reconstrucción técnica pendiente',str(result))
         self.assertFalse(any(s.get('kind')=='finding' for s in result['sections']))
+
+    def test_report_uses_persisted_mapping_citations_instead_of_payload_proposals(self):
+        mitre = {'title': 'Mapeos MITRE ATT&CK', 'paragraphs': [], 'columns': ['Técnica', 'Eventos'],
+                 'rows': [['T1033', 'Sin citas verificables']]}
+        report = {'id_sesion': 'case-a', 'metadata': [], 'status': 'Análisis vigente', 'sections': [mitre]}
+        payload = {'acciones': [{'eventos': [123], 'mitre': [{'codigo': 'T1033'}]}]}
+
+        sections = analyst_sections(report, payload, [])['sections']
+        matrices = [item for item in sections if 'MITRE ATT&CK' in item['title']]
+        self.assertEqual(matrices, [mitre])
+        self.assertNotIn('#123', str(sections))

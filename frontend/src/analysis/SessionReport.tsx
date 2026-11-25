@@ -1,6 +1,6 @@
 import {useEffect, useState} from 'react'
 import {Link} from 'react-router-dom'
-import {eventEvidencePath} from './iocEvidence'
+import {eventEvidencePath, reportEventIds} from './iocEvidence'
 import {Download, FileText} from 'lucide-react'
 import {api, apiBlob} from '../auth/client'
 
@@ -107,8 +107,11 @@ export function SessionReport({id,analysisId}: {id: string;analysisId:string}) {
                     {section.columns.map(col => <th scope="col" key={col} className="px-3 py-2">{col}</th>)}
                   </tr></thead>
                   <tbody>{section.rows.map((row, i) => <tr key={i} className="even:bg-slate-100">
-                    {row.map((cell, j) => <td className="px-3 py-2 align-top max-w-sm break-all" key={j}>{['Evento','Referencia','Evento de referencia'].includes(section.columns[j]) && /^#\d+$/.test(cell)
-                      ? <Link className="underline text-[#175663]" to={eventEvidencePath(id,cell.slice(1))}>Evento {cell}</Link> : cell}</td>)}
+                    {row.map((cell, j) => {
+                      const refs = ['Evento','Eventos','Referencia','Evento de referencia'].includes(section.columns[j]) ? reportEventIds(cell) : []
+                      return <td className="px-3 py-2 align-top max-w-sm break-words whitespace-pre-line" key={j}>{refs.length
+                        ? refs.map(ref=><Link key={ref} className="block underline text-[#175663]" to={eventEvidencePath(id,ref)}>Evento #{ref}</Link>) : cell}</td>
+                    })}
                   </tr>)}</tbody>
                 </table>
               </div>

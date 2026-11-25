@@ -14,12 +14,19 @@ INK = "#172A40"
 MUTED = "#485C70"
 RULE = "#D9D9D9"
 STRIPE = "#F1F5F8"
-WIDTHS = {2: (0.29, 0.71), 3: (0.23, 0.51, 0.26), 5: (0.10, 0.36, 0.16, 0.12, 0.26)}
+WIDTHS = {
+    2: (0.29, 0.71),
+    3: (0.23, 0.51, 0.26),
+    4: (0.17, 0.23, 0.34, 0.26),
+    5: (0.10, 0.36, 0.16, 0.12, 0.26),
+}
 PDF_TYPE = "application/pdf"
 WORD_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 def column_widths(columns):
+    if columns[0] == "Técnica" and len(columns) == 5:
+        return (0.15, 0.12, 0.21, 0.14, 0.38)
     if columns[0] == "Técnica":
         return (0.56, 0.18, 0.26)
     return WIDTHS[len(columns)]

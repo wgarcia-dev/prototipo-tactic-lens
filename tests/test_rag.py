@@ -1,6 +1,7 @@
 from copy import deepcopy
 from datetime import datetime,timedelta,timezone
 import hashlib,json
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -9,6 +10,7 @@ from uuid import uuid4
 
 import numpy as np
 from sqlalchemy import select,text
+from docx import Document
 import test_auth as fixtures
 from test_analysis import report_data
 from backend.api import app
@@ -18,6 +20,7 @@ from backend.rag.catalog import parse,import_catalog
 from backend.rag.embeddings import encoder
 from backend.rag.retrieval import context,search
 from backend.rag.validation import validate
+from backend.rag.mitre_evidence import AUTO_CLASSIFICATION, command_technique
 
 
 def event(identifier=1,command='pwd',kind='cowrie.command.input',**data):
@@ -25,13 +28,15 @@ def event(identifier=1,command='pwd',kind='cowrie.command.input',**data):
 
 
 def proposal(code='T1105',tactic='TA0011',**extra):
+    extra.setdefault('eventos',[1])
+    extra.setdefault('comportamiento_observado','Orden introducida en Cowrie')
     return MitreProposal(codigo=code,codigo_tactica=tactic,justificacion='Los eventos muestran un intento especifico de transferencia mediante el comando registrado.',limitaciones=['Cowrie emula el sistema; no confirma compromiso de Ubuntu real.'],**extra)
 
 
 def local_context(events,code='T1105',name='Ingress Tool Transfer',tactic='TA0011'):
-    return {'metodo':'deepseek_rag_mitre_v1','catalogo':{'id_catalogo':str(uuid4()),'version':'fixture'},'modelo_embeddings':{'nombre':'fixture'},'representacion':represent(events),
+    return {'metodo':'deepseek_rag_mitre_v1','catalogo':{'id_catalogo':str(uuid4()),'version':'fixture'},'modelo_embeddings':{'nombre':'fixture'},'representacion':represent(events),'modalidad':'cowrie_shell',
         'candidatos':[{'codigo_tecnica':code,'nombre':name,'observabilidad':'intento_evaluable','tacticas':[{'codigo_tactica':tactic}],
-            'stix_id':'attack-pattern--fixture','objeto_sha256':'a'*64,'puntuacion_hibrida':0.03,'similitud_vectorial':0.8}]}
+            'stix_id':'attack-pattern--fixture','objeto_sha256':'a'*64,'puntuacion_hibrida':0.03,'similitud_vectorial':0.8,'plataformas':['Linux']}]}
 
 
 def result(events,proposals):
@@ -66,13 +71,14 @@ class BehaviorTests(unittest.TestCase):
             self.assertNotIn(secret,json.dumps(r));self.assertNotIn(secret,json.dumps(safe))
 
     def test_repeated_authentication_requires_a_pattern(self):
-        values=[event(i,kind='cowrie.login.failed') for i in range(1,4)]
+        values=[event(i,kind='cowrie.login.failed',src_ip='10.0.0.2',username='fixture',password=str(i)) for i in range(1,4)]
         self.assertNotIn('auth_repeated',represent(values[:1])['acciones'])
         self.assertIn('auth_repeated',represent(values)['acciones'])
 
     def test_confirmation_requires_transfer_metadata(self):
         self.assertFalse(represent([event(kind='cowrie.session.file_download')])['resultados_confirmados'])
-        self.assertEqual(represent([event(kind='cowrie.session.file_download',shasum='a'*64)])['resultados_confirmados'],[1])
+        self.assertEqual(represent([event(kind='cowrie.session.file_download',url='https://example.org/a',shasum='a'*64)],
+                                   'cowrie_shell')['resultados_confirmados'],[1])
 
     def test_reading_cron_is_not_installing_a_job(self):
         self.assertNotIn('cron',command_features('crontab -l'))
@@ -115,11 +121,12 @@ class ValidationTests(unittest.TestCase):
         discarded,_=validate(r,values,local_context(values))
         self.assertEqual(len(discarded),1);self.assertFalse(r.acciones[0].mitre)
 
-    def test_transfer_attempt_is_pending_and_duplicate_does_not_fail_analysis(self):
+    def test_transfer_attempt_is_identified_and_duplicate_does_not_fail_analysis(self):
         values=[event(command='wget https://example.org/a')];r=result(values,[proposal(),proposal()])
         discarded,provenance=validate(r,values,local_context(values))
         self.assertEqual(len(r.acciones[0].mitre),1);self.assertIn('duplicada',discarded[0]['motivo'])
         self.assertEqual(provenance[(0,'T1105','TA0011')]['eventos'],[1])
+        self.assertEqual(provenance[(0,'T1105','TA0011')]['clasificacion'],AUTO_CLASSIFICATION)
 
     def test_nonexistent_wrong_tactic_generic_reason_and_false_confirmation(self):
         values=[event(command='wget https://example.org/a')]
@@ -129,15 +136,83 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(len(discarded),4);self.assertFalse(r.acciones[0].mitre)
 
     def test_confirmed_transfer_and_foreign_event_checks(self):
-        values=[event(kind='cowrie.session.file_download',shasum='b'*64)]
+        values=[event(kind='cowrie.session.file_download',url='https://example.org/a',shasum='b'*64)]
         r=result(values,[proposal(grado_evidencia='resultado_en_honeypot')]);validate(r,values,local_context(values))
         self.assertEqual(len(r.acciones[0].mitre),1)
         r.acciones[0].eventos=[999]
         with self.assertRaises(ValueError):validate(r,values,local_context(values))
+        mixed=[*values,event(2,'wget https://example.org/unrelated')]
+        r=result(mixed,[proposal(eventos=[1,2],grado_evidencia='resultado_en_honeypot')])
+        self.assertTrue(validate(r,mixed,local_context(mixed))[0])
 
     def test_unknown_command_abstains(self):
         values=[event(command='strange_custom_command')];r=result(values,[proposal()])
         validate(r,values,local_context(values));self.assertFalse(r.acciones[0].mitre)
+
+    def test_direction_and_literal_file_destination_are_required(self):
+        for command in ('curl -I https://example.org/a','curl -T file.txt https://example.org/a',
+                        'curl https://example.org/a','curl -o /dev/null https://example.org/a',
+                        'echo wget https://example.org/a','wget https://example.org/a; pwd',
+                        'wget -O - https://example.org/a','curl -O -X POST https://example.org/a'):
+            with self.subTest(command=command):
+                values=[event(command=command)];r=result(values,[proposal()])
+                discarded,_=validate(r,values,local_context(values))
+                self.assertEqual(len(discarded),1)
+                self.assertEqual(r.acciones[0].mitre,[])
+        self.assertEqual(command_technique('curl -sLO https://example.org/a'),'T1105')
+        self.assertEqual(command_technique('curl --url https://example.org/a --output fixture.txt'),'T1105')
+
+    def test_codes_platform_and_citations_are_specific(self):
+        values=[event(command='uname -a'),event(2,'pwd')]
+        for flags, refs in (({},[]),({},[999]),({},[1,2]),({'revocada':True},[1]),
+                            ({'deprecada':True},[1]),({'plataformas':['Windows']},[1])):
+            with self.subTest(flags=flags,refs=refs):
+                context=local_context(values,'T1082','System Information Discovery','TA0007')
+                context['candidatos'][0].update(flags)
+                r=result(values,[proposal('T1082','TA0007',eventos=refs)])
+                discarded,_=validate(r,values,context)
+                self.assertEqual(len(discarded),1)
+        context=local_context(values,'T1082','System Information Discovery','TA0007')
+        r=result(values,[proposal('T1082','TA0007',eventos=[1],confianza=0)])
+        self.assertFalse(validate(r,values,context)[0])
+        self.assertEqual(r.acciones[0].mitre[0].grado_evidencia,'intento')
+        context['eventos_entregados']=[2]
+        with self.assertRaises(ValueError):validate(r,values,context)
+
+    def test_modality_and_generated_output_cannot_prove_execution(self):
+        values=[event(kind='cowrie.command.success',command='wget https://example.org/a')]
+        r=result(values,[proposal()]);self.assertTrue(validate(r,values,local_context(values))[0])
+        for modality in ('cowrie_proxy','cowrie_llm'):
+            values=[event(command='wget https://example.org/a'),
+                    event(2,kind='cowrie.session.file_download',url='https://example.org/a',size=2)]
+            context=local_context(values);context['modalidad']=modality
+            r=result(values,[proposal(eventos=[1,2])])
+            self.assertTrue(validate(r,values,context)[0])
+        context=local_context(values);context['modalidad']='desconocido'
+        r=result(values,[proposal(eventos=[2],grado_evidencia='resultado_en_honeypot')])
+        self.assertTrue(validate(r,values,context)[0])
+
+    def test_authentication_requires_distinct_guesses_and_one_source_account(self):
+        values=[event(i,kind='cowrie.login.failed',src_ip='10.0.0.2',username='fixture',password=str(i)) for i in (1,2,3)]
+        context=local_context(values,'T1110','Brute Force','TA0006')
+        r=result(values,[proposal('T1110','TA0006',eventos=[1,2,3])])
+        self.assertFalse(validate(r,values,context)[0])
+        r=result(values,[proposal('T1110','TA0006',eventos=[1])])
+        self.assertTrue(validate(r,values,context)[0])
+        child=local_context(values,'T1110.001','Password Guessing','TA0006')
+        r=result(values,[proposal('T1110.001','TA0006',eventos=[1,2,3])])
+        self.assertTrue(validate(r,values,child)[0])
+        for change in ({'password':'1'},{'username':'another'}):
+            split=[*values[:2],event(3,kind='cowrie.login.failed',**({'src_ip':'10.0.0.2','username':'fixture','password':'3'}|change))]
+            r=result(split,[proposal('T1110','TA0006',eventos=[1,2,3])])
+            self.assertTrue(validate(r,split,context)[0])
+
+    def test_conservative_system_account_and_persistence_rules(self):
+        for command,code in {'whoami':'T1033','ls -la /tmp':'T1083','ip route show':'T1016','ps aux':'T1057',
+                             'sh -c "pwd"':'T1059.004','crontab /tmp/jobs':'T1053.003','useradd demo':'T1136.001',
+                             'history -c':'T1070.003','crontab -l':None,'crontab -e':None,'id someone':None,
+                             'rm /tmp/log':None,'cat ~/.ssh/authorized_keys':None}.items():
+            with self.subTest(command=command):self.assertEqual(command_technique(command),code)
 
 
 class RealEmbeddingTests(unittest.TestCase):
@@ -181,8 +256,7 @@ class RagIntegrationTests(fixtures.AuthFixture):
     def test_report_uses_specific_mapping_citations_instead_of_first_action_event(self):
         self.enroll(709,admin=True)
         sid,ids=self.session_with(['uname -a','whoami'])
-        candidate=proposal(code='T1033',tactic='TA0007',eventos=[ids[1]],
-            ).model_dump()
+        candidate=proposal(code='T1033',tactic='TA0007',eventos=[ids[1]]).model_dump()
         candidate['justificacion']='El comando whoami solicita la identidad del usuario actual en el entorno observado.'
         with self.llm(ids,[candidate]):
             response=self.client.post('/api/sesiones/'+str(sid)+'/analizar')
@@ -192,12 +266,16 @@ class RagIntegrationTests(fixtures.AuthFixture):
         self.assertEqual(report.status_code,200,report.text)
         mappings=next(item for item in report.json()['sections'] if item['title']=='Mapeos MITRE ATT&CK')
         row=next(row for row in mappings['rows'] if row[0].startswith('T1033'))
-        self.assertEqual(row[2],f'#{ids[1]}')
-        self.assertNotEqual(row[2],f'#{ids[0]}')
+        evidence = mappings['columns'].index('Eventos')
+        self.assertEqual(row[evidence],f'#{ids[1]}')
+        self.assertNotEqual(row[evidence],f'#{ids[0]}')
 
-    def session_with(self,commands):
+    def session_with(self,commands,instance=None):
         sid='rag-test-'+uuid4().hex
         raw=[{'session':sid,'eventid':'cowrie.command.input','timestamp':(self.clock+timedelta(seconds=i)).isoformat(),'input':command,'_collector':{'source_id':sid+':'+str(i)}} for i,command in enumerate(commands)]
+        if instance:
+            for row in raw:
+                row['_collector']['instance_id']=instance
         receipt=self.client.post('/api/ingesta/eventos',headers={'X-API-Key':app.state.api_key},json={'eventos':raw}).json()
         ids=[r['id_evento'] for r in receipt['confirmaciones']]
         e=app.state.tables['evento'];session_id=self.connection.scalar(select(e.c.id_sesion).where(e.c.id_evento==ids[0]))
@@ -226,17 +304,47 @@ class RagIntegrationTests(fixtures.AuthFixture):
         reviewed=self.client.patch('/api/inteligencia/mitre/'+maps[0]['id_mapeo']+'/revision',json={'estado':'descartado','motivo':'Revision humana de un caso sintetico de laboratorio'})
         self.assertEqual(reviewed.status_code,200,reviewed.text)
         self.assertEqual(self.client.get('/api/analisis/'+aid).json()['acciones'][0]['mitre'][0]['estado_revision'],'descartado')
-        with patch('backend.routes.httpx.post',side_effect=AssertionError('must reuse stored analysis')):
+        with patch.dict('os.environ',{'LLM_MODEL':'deepseek-fixture','LLM_PROVIDER':'deepseek'}),patch('backend.routes.httpx.post',side_effect=AssertionError('must reuse stored analysis')):
             reused=self.client.post('/api/sesiones/'+str(sid)+'/analizar')
         self.assertTrue(reused.json()['reutilizado'])
 
     def test_retrieval_outside_old_ten_and_multiple_techniques(self):
-        self.enroll(702);sid,ids=self.session_with(['uname -a','whoami','echo key >> ~/.ssh/authorized_keys'])
+        self.enroll(702);sid,ids=self.session_with(['uname -a','whoami','history -c','echo key >> ~/.ssh/authorized_keys'])
         response=self.client.post('/api/sesiones/'+str(sid)+'/mitre/candidatos')
         self.assertEqual(response.status_code,200,response.text)
-        codes={c['codigo_tecnica'] for c in response.json()['candidatos']}
-        self.assertTrue({'T1082','T1033','T1098.004'}<=codes,codes)
+        candidates=response.json()['candidatos']
+        codes={c['codigo_tecnica'] for c in candidates if c['observabilidad']=='intento_evaluable'}
+        self.assertEqual({'T1082','T1033','T1070.003'},codes)
+        self.assertTrue(any(c['observabilidad']=='sin_contrato' for c in candidates))
         self.assertGreater(self.client.get('/api/mitre/catalogo').json()['conteos']['tecnicas_y_subtecnicas'],800)
+
+    def test_open_retrieval_and_new_contracts_persist_only_validated_mappings(self):
+        from test_mitre_contracts import KEY_WRITE
+        self.enroll(708)
+        sensor=uuid4()
+        self.connection.execute(app.state.tables['honeypot'].insert().values(id_honeypot=sensor,nombre='Shell fixture',host='loopback'))
+        with patch.object(app.state,'instances',{'cowrie_shell':sensor}):
+            sid,ids=self.session_with(['ip neigh show','nmap -sV -p 80 192.0.2.5',KEY_WRITE],'cowrie_shell')
+            supported=self.client.post(f'/api/sesiones/{sid}/mitre/candidatos').json()['candidatos']
+            self.assertTrue({'T1018','T1046','T1098.004'} <= {c['codigo_tecnica'] for c in supported if c['observabilidad']=='intento_evaluable'})
+            diagnostic=next(c for c in supported if c['observabilidad']=='sin_contrato'
+                            and c['tacticas'] and 'Linux' in c['plataformas'])
+            candidates=[proposal('T1018','TA0007',eventos=[ids[0]]).model_dump(),
+                        proposal('T1046','TA0007',eventos=[ids[1]]).model_dump(),
+                        proposal('T1098.004','TA0003',eventos=[ids[2]]).model_dump(),
+                        proposal(diagnostic['codigo_tecnica'],diagnostic['tacticas'][0]['codigo_tactica'],eventos=[ids[0]]).model_dump()]
+            with self.llm(ids,candidates) as provider:
+                response=self.client.post(f'/api/sesiones/{sid}/analizar')
+            self.assertEqual(response.status_code,200,response.text)
+            prompt=json.loads(provider.call_args.kwargs['json']['messages'][1]['content'])
+            self.assertIn(diagnostic['codigo_tecnica'],{c['codigo_tecnica'] for c in prompt['tecnicas_mitre_permitidas']})
+            detail=self.client.get('/api/analisis/'+response.json()['id_analisis']).json()
+            results={m['codigo_tecnica']:m for m in detail['acciones'][0]['mitre']}
+            self.assertEqual(set(results),{'T1018','T1046','T1098.004'})
+            self.assertEqual(results['T1018']['eventos'][0]['id_evento'],str(ids[0]))
+            self.assertEqual(results['T1046']['eventos'][0]['id_evento'],str(ids[1]))
+            self.assertEqual(results['T1098.004']['eventos'][0]['id_evento'],str(ids[2]))
+            self.assertEqual(detail['resultado_estructurado']['candidatas_mitre_no_validadas'][0]['causa'],'sin_contrato')
 
     def test_pwd_false_transfer_is_discarded_and_unknown_id_never_maps(self):
         self.enroll(703);sid,ids=self.session_with(['pwd'])
@@ -257,6 +365,90 @@ class RagIntegrationTests(fixtures.AuthFixture):
         self.assertEqual(second.status_code,200,second.text);self.assertNotEqual(second.json()['id_analisis'],aid)
         after=self.connection.scalar(text('SELECT md5(row_to_json(a)::text) FROM honeypot.analisis_llm a WHERE id_analisis=CAST(:id AS uuid)'),{'id':aid})
         self.assertEqual(before,after)
+
+    def test_automatic_mapping_api_exact_report_and_reanalysis(self):
+        self.enroll(706)
+        sid, ids = self.session_with(['pwd','wget https://example.org/a','wget https://example.org/b'])
+        citations = ids[1:]
+        uri = f'/api/sesiones/{sid}/analizar'
+        candidate = proposal(eventos=citations).model_dump()
+        with self.llm(ids,[candidate]):
+            response = self.client.post(uri)
+        self.assertEqual(response.status_code,200,response.text)
+        first=response.json()
+        self.assertEqual(first['clasificacion_mitre']['estado'],AUTO_CLASSIFICATION)
+        detail_path=f"/api/analisis/{first['id_analisis']}"
+        detail=self.client.get(detail_path).json()
+        mapping,=detail['acciones'][0]['mitre']
+        self.assertEqual(mapping['estado_revision'],'pendiente')
+        self.assertEqual(mapping['rag_procedencia']['clasificacion'],AUTO_CLASSIFICATION)
+        self.assertEqual([row['id_evento'] for row in mapping['eventos']], list(map(str,citations)))
+        self.assertEqual(self.client.get('/api/mitre/mapeos',params={'id_mapeo':mapping['id_mapeo']}).json()[0]['codigo_tactica'],'TA0011')
+        report=f"/api/sesiones/{sid}/informe?id_analisis={first['id_analisis']}"
+        body=self.client.get(report).json()
+        table=next(section for section in body['sections'] if section['title']=='Mapeos MITRE ATT&CK')
+        refs=', '.join(f'#{eid}' for eid in citations)
+        self.assertEqual(table['rows'][0][3],refs)
+        self.assertNotIn(f'#{ids[0]}',table['rows'][0])
+        docx=self.client.get(report+'&formato=docx')
+        self.assertEqual(docx.status_code,200,docx.text if docx.status_code != 200 else '')
+        self.assertIn(refs,[cell.text for grid in Document(BytesIO(docx.content)).tables for row in grid.rows for cell in row.cells])
+        with patch('backend.report_export.render_pdf',return_value=b'%PDF-fixture') as renderer:
+            self.assertEqual(self.client.get(report+'&formato=pdf').content,b'%PDF-fixture')
+        pdf_table=next(section for section in renderer.call_args.args[0]['sections'] if section['title']=='Mapeos MITRE ATT&CK')
+        self.assertEqual(pdf_table,table)
+        with patch('backend.routes.httpx.post',side_effect=AssertionError('Should reuse matching evidence')):
+            reused=self.client.post(uri).json()
+        self.assertEqual(reused['id_analisis'],first['id_analisis'])
+        self.assertTrue(reused['reutilizado'])
+        with patch.dict('os.environ',{'LLM_MODEL':'another-fixture'}),self.llm(ids,[]):
+            changed_model=self.client.post(uri).json()
+        self.assertNotEqual(changed_model['id_analisis'],first['id_analisis'])
+        self.assertEqual(changed_model['clasificacion_mitre']['estado'],'no_determinada')
+        e=app.state.tables['evento']
+        raw=self.connection.scalar(select(e.c.datos_originales).where(e.c.id_evento==ids[0]))
+        self.connection.execute(e.update().where(e.c.id_evento==ids[0]).values(datos_originales={**raw,'input':'whoami'}))
+        with self.llm(ids,[]):
+            changed_content=self.client.post(uri).json()
+        self.assertFalse(changed_content['reutilizado'])
+        catalog=app.state.tables['catalogo_mitre']
+        self.connection.execute(catalog.update().where(catalog.c.activo).values(sha256='a'*64))
+        with self.llm(ids,[]):
+            changed_catalog=self.client.post(uri).json()
+        self.assertFalse(changed_catalog['reutilizado'])
+        self.assertEqual(self.client.get(detail_path).json(),detail)
+
+    def test_registered_modality_reaches_prompt_and_controls_classification(self):
+        self.enroll(707)
+        modes={name:uuid4() for name in ('cowrie_shell','cowrie_proxy','cowrie_llm')}
+        sensors=app.state.tables['honeypot']
+        self.connection.execute(sensors.insert(),[{'id_honeypot':identifier,'nombre':name,'host':'loopback'}
+                                                 for name,identifier in modes.items()])
+        sessions=app.state.tables['sesion']
+        events=app.state.tables['evento']
+        with patch.object(app.state,'instances',modes):
+            for modality in modes:
+                raw={'session':modality,'eventid':'cowrie.session.file_download','timestamp':self.clock.isoformat(),
+                     'url':'https://example.org/a','size':30,'modalidad':'cowrie_proxy' if modality=='cowrie_shell' else 'cowrie_shell',
+                     '_collector':{'source_id':modality,'instance_id':modality}}
+                receipt=self.client.post('/api/ingesta/eventos',headers={'X-API-Key':app.state.api_key},json={'eventos':[raw]})
+                self.assertEqual(receipt.status_code,200,receipt.text)
+                eid=receipt.json()['confirmaciones'][0]['id_evento']
+                sid=self.connection.scalar(select(sessions.c.id_sesion).join(events,events.c.id_sesion==sessions.c.id_sesion).where(events.c.id_evento==eid))
+                with self.llm([eid],[proposal(eventos=[eid]).model_dump()]) as provider:
+                    response=self.client.post(f'/api/sesiones/{sid}/analizar')
+                self.assertEqual(response.status_code,200,response.text)
+                prompt=json.loads(provider.call_args.kwargs['json']['messages'][1]['content'])
+                self.assertEqual(prompt['modalidad_sensor'],modality)
+                detail=self.client.get('/api/analisis/'+response.json()['id_analisis']).json()
+                if modality=='cowrie_shell':
+                    mapping,=detail['acciones'][0]['mitre']
+                    self.assertEqual(mapping['grado_evidencia'],'resultado_en_honeypot')
+                else:
+                    self.assertEqual(response.json()['clasificacion_mitre']['estado'],'no_determinada')
+                    self.assertTrue(prompt['tecnicas_mitre_permitidas'])
+                    self.assertFalse(any(c['observabilidad']=='intento_evaluable' for c in prompt['tecnicas_mitre_permitidas']))
+                    self.assertFalse(detail['acciones'][0]['mitre'])
 
     def test_official_import_is_idempotent_and_preserves_vectors_and_history(self):
         from backend.rag import catalog

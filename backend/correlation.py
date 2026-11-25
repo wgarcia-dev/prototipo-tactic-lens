@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from .intelligence import DOWNLOAD, FAILED_DOWNLOAD
 from .rag.behavior import technique_profiles
+from .rag.mitre_evidence import AUTO_CLASSIFICATION, CONTRACTS
 
 
 TRANSFER_METHOD = "url_sesion_orden_cowrie_v1"
@@ -193,26 +194,35 @@ def action_link(row):
 def mapping_query(tables):
     m, tt, tech, tac = (tables[name] for name in ("mapeo_mitre", "tecnica_tactica", "tecnica_mitre", "tactica_mitre"))
     return (select(m.c.id_mapeo, m.c.id_accion, tech.c.codigo_tecnica, tech.c.nombre.label("tecnica"),
-            tac.c.nombre.label("tactica"), m.c.evidencia, m.c.justificacion, m.c.confianza, m.c.estado_revision,
+            tac.c.codigo_tactica, tac.c.nombre.label("tactica"), m.c.evidencia, m.c.justificacion, m.c.confianza, m.c.estado_revision,
             m.c.motivo_revision, m.c.grado_evidencia, m.c.rag_procedencia, m.c.revisado_por, m.c.revisado_en)
             .select_from(m.join(tt, m.c.id_vinculo == tt.c.id_vinculo)
                 .join(tech, tt.c.codigo_tecnica == tech.c.codigo_tecnica)
                 .join(tac, tt.c.codigo_tactica == tac.c.codigo_tactica)))
 
 
-def mapping_evidence(conn, tables, *, action_ids=None, mapping_id=None):
+def mapping_evidence(conn, tables, *, action_ids=None, mapping_id=None, analysis_id=None, limit=None):
     m, citation, event = (tables[name] for name in ("mapeo_mitre", "mapeo_mitre_evento", "evento"))
     query = mapping_query(tables)
     if mapping_id is not None:
         query = query.where(m.c.id_mapeo == mapping_id)
+    elif analysis_id is not None:
+        action=tables['accion_identificada']
+        query=query.join(action,m.c.id_accion==action.c.id_accion).where(action.c.id_analisis==analysis_id)
     else:
         query = query.where(m.c.id_accion.in_(action_ids))
-    mappings = {row.id_mapeo: {**row, "eventos": []} for row in conn.execute(
-        query.order_by(m.c.id_accion, m.c.id_mapeo)).mappings()}
+    query=query.order_by(tables['tecnica_mitre'].c.codigo_tecnica,m.c.id_mapeo)
+    if limit is not None:
+        query=query.limit(limit)
+    mappings = {row.id_mapeo: {**row, "eventos": []} for row in conn.execute(query).mappings()}
     if mappings:
+        action, analysis = (tables[name] for name in ("accion_identificada", "analisis_llm"))
         refs = conn.execute(select(citation.c.id_mapeo, citation.c.metodo, *event_columns(event))
-            .select_from(citation.join(event, event.c.id_evento == citation.c.id_evento))
-            .where(citation.c.id_mapeo.in_(mappings))
+            .select_from(citation.join(event, event.c.id_evento == citation.c.id_evento)
+                         .join(m, m.c.id_mapeo == citation.c.id_mapeo)
+                         .join(action, m.c.id_accion == action.c.id_accion)
+                         .join(analysis, action.c.id_analisis == analysis.c.id_analisis))
+            .where(citation.c.id_mapeo.in_(mappings), event.c.id_sesion == analysis.c.id_sesion)
             .order_by(event.c.fecha_hora, event.c.numero_secuencia, event.c.id_evento)).mappings()
         for row in refs:
             mappings[row.id_mapeo]["eventos"].append({**event_ref(row), "metodo": row.metodo})
@@ -227,7 +237,11 @@ def mitre_link(row, link, mapping):
     provenance = mapping["rag_procedencia"]
     tags = {tag for tag in row.rasgos if isinstance(tag, str)} if isinstance(row.rasgos, list) else set()
     name = provenance.get("nombre_oficial")
-    active = tags & technique_profiles(name if isinstance(name, str) else mapping["tecnica"])
+    automatic = provenance.get('clasificacion') == AUTO_CLASSIFICATION
+    contract = CONTRACTS.get(mapping['codigo_tecnica'])
+    validated_tag = provenance.get('rasgo_validado') or (contract.tag if contract else None)
+    active = ({validated_tag} if automatic and validated_tag else
+              tags & technique_profiles(name if isinstance(name, str) else mapping["tecnica"]))
     observed_roles = roles(row)
     compatible = (
         ("transfer" in active and bool(observed_roles & {ATTEMPT, "descarga_registrada", "archivo_capturado"}))
@@ -237,6 +251,8 @@ def mitre_link(row, link, mapping):
     if not compatible:
         return None
     status = {"pendiente": "candidata", "confirmado": "contextual", "descartado": "insuficiente"}[mapping["estado_revision"]]
+    if automatic and status == 'candidata':
+        status = 'contextual'
     rationale = "La técnica y la detección de la acción citan el mismo evento con un comportamiento compatible."
     if mapping["estado_revision"] == "descartado":
         rationale += " La revisión descartó el mapeo."

@@ -1,6 +1,9 @@
 """Derive a session analysis state from stored results and its current event count."""
 from collections import defaultdict
 from datetime import datetime
+import hashlib
+from itertools import chain
+import json
 import os
 
 from sqlalchemy import func, select
@@ -25,7 +28,19 @@ def is_expired(row):
     return (datetime.now(started.tzinfo) - started).total_seconds() > timeout
 
 
-def states_for_sessions(conn, analysis_table, counts):
+def classification_fingerprint(events, configuration):
+    digest = hashlib.sha256()
+    event_data = (
+        (event.id_evento, event.tipo_evento, event.fecha_hora.isoformat(), event.datos_originales)
+        for event in events
+    )
+    for entry in chain((configuration,), event_data):
+        digest.update(json.dumps(entry, sort_keys=True, separators=(',', ':'), ensure_ascii=False, default=str).encode())
+        digest.update(b'\n')
+    return digest.hexdigest()
+
+
+def states_for_sessions(conn, analysis_table, counts, *, fingerprint=None):
     if not counts:
         return {}
     rows = conn.execute(
@@ -49,7 +64,8 @@ def states_for_sessions(conn, analysis_table, counts):
         history = grouped[session_id]
         latest = history[0] if history else None
         completed = next((item for item in history if item.estado == "completado"), None)
-        valid = next((item for item in history if item.estado == "completado" and analyzed_count(item) == event_count), None)
+        valid = next((item for item in history if item.estado == "completado" and analyzed_count(item) == event_count
+                      and (fingerprint is None or item.resultado_estructurado.get('huella_clasificacion') == fingerprint)), None)
         expired = bool(latest and is_expired(latest))
         if latest and latest.estado == "en_proceso" and not expired:
             status = "en_proceso"

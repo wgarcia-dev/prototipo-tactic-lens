@@ -5,8 +5,9 @@ import {eventEvidencePath} from './iocEvidence'
 import {IncidentAssessment, type Assessment} from './IncidentAssessment'
 
 export type AnalysisPayload = {
+  clasificacion_mitre?: {estado:'identificada_automaticamente'|'no_determinada'; modalidad:string; motivo?:string|null; candidatas_no_validadas?:number};
   evaluacion_incidente?: Assessment;
-  rag?:{metodo:string,catalogo:{version:string}}
+  rag?:{metodo:string,catalogo?:{version:string},modelo_llm?:{proveedor:string;modelo:string}}
   eventos_analizados?: number;
   version_informe?: number;
   enriquecimiento?: {generado_en:string; fuentes:Record<string,boolean>; observables:{tipo:string; valor:string; alcance_ip?:string|null; eventos:number[]; proveedores:Record<string,{estado:string; consultado_en?:string; url?:string; id?:string; resultado?:string}|{id:string; nombre:string; version?:number; categoria:string; url:string; consultado_en:string}[]>}[]};

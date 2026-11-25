@@ -1,8 +1,9 @@
 """Deterministic, bounded behavioral representation. Never embeds raw secrets."""
-from collections import Counter
+from collections import Counter, defaultdict
 import re
 import shlex
 from urllib.parse import urlsplit,urlunsplit
+from .mitre_evidence import CONTRACTS, inbound_download, technique_evidence
 
 LABELS={
  'system_discovery':'system information discovery operating system hostname hardware uname',
@@ -11,6 +12,7 @@ LABELS={
  'file_discovery':'file and directory discovery enumeration listing filesystem',
  'network_discovery':'system network configuration discovery interfaces route IP address',
  'network_scan':'network service discovery port scanning nmap',
+ 'remote_discovery':'remote system discovery network peers neighbor table arp cache',
  'process_discovery':'process discovery process list running processes',
  'transfer':'ingress tool transfer download remote files using wget curl scp',
  'collection':'data from local system read collect local file content',
@@ -21,6 +23,8 @@ LABELS={
  'ssh_keys':'account manipulation SSH authorized keys write persistence attempt',
  'cron':'scheduled task job cron crontab persistence attempt',
  'archive':'archive collected data compression tar zip',
+ 'permissions':'file and directory permissions ownership access control chmod chown',
+ 'file_movement':'local file copy move data staging',
  'history':'command history clearing disable shell history',
  'unknown':'unknown command; insufficient behavioral evidence; emulated honeypot only',
 }
@@ -83,7 +87,7 @@ def command_features(command,depth=0):
         elif name in {'ip','ifconfig','route','netstat','ss'}:features.add('network_discovery')
         elif name in {'nmap','masscan'}:features.add('network_scan')
         elif name in {'ps','top','pgrep','pstree'}:features.add('process_discovery')
-        elif name in {'wget','curl','scp','sftp','tftp','ftp','rsync'} and any(a.startswith(('http://','https://','ftp://')) or ':' in a for a in args[1:]):features.add('transfer')
+        elif name in {'wget','curl'} and inbound_download(name, args[1:]):features.add('transfer')
         elif name=='cat':
             if any(a in {'/etc/os-release','/proc/version','/proc/cpuinfo'} for a in args[1:]):features.add('system_discovery')
             elif any(a.startswith('/') or a.startswith('./') for a in args[1:] if not a.startswith('-')):features.add('collection')
@@ -92,6 +96,8 @@ def command_features(command,depth=0):
         elif name=='crontab':
             features.add('cron' if '-e' in args or any(not a.startswith('-') for a in args[1:]) else 'unknown')
         elif name in {'tar','zip','gzip','7z'}:features.add('archive')
+        elif name in {'chmod','chown','setfacl'} and len(args)>2:features.add('permissions')
+        elif name in {'cp','mv'} and len(args)>2:features.add('file_movement')
         elif name=='history' and '-c' in args:features.add('history')
         elif name in {'echo','printf','tee'}:
             features.add('shell')
@@ -105,30 +111,45 @@ def command_features(command,depth=0):
     return features or {'unknown'}
 
 
-def represent(events):
+def represent(events, modality='desconocido'):
     ordered=sorted(events,key=lambda e:(e.fecha_hora,e.id_evento))
     counts=Counter(e.tipo_evento for e in ordered)
-    repeated=counts['cowrie.login.failed']>=3
+    eligible=technique_evidence(ordered,modality)
+    transfers=eligible.get('T1105',{})
+    guesses=eligible.get('T1110',{})
+    supported_tags=defaultdict(set)
+    for code, grades in eligible.items():
+        for eid in grades:
+            supported_tags[eid].add(CONTRACTS[code].tag)
     sequence=[];features={};confirmed=[]
     for event in ordered:
         data=event.datos_originales
-        if event.tipo_evento=='cowrie.command.input':tags=command_features(data.get('input',''))
-        elif event.tipo_evento=='cowrie.login.failed':tags={'auth_repeated'} if repeated else {'unknown'}
+        if event.tipo_evento=='cowrie.command.input':
+            tags=command_features(data.get('input',''))-{'transfer'}
+            if event.id_evento in transfers:tags.add('transfer')
+        elif event.tipo_evento=='cowrie.login.failed':tags={'auth_repeated'} if event.id_evento in guesses else {'unknown'}
         elif event.tipo_evento=='cowrie.session.file_download':
-            tags={'transfer'}
-            if re.fullmatch(r'[a-fA-F0-9]{64}',str(data.get('shasum',''))) or (isinstance(data.get('size'),int) and data['size']>0):confirmed.append(event.id_evento)
+            tags={'transfer'} if event.id_evento in transfers else set()
+            if tags:confirmed.append(event.id_evento)
         else:tags=set()
+        tags.update(supported_tags[event.id_evento])
         features[event.id_evento]=sorted(tags)
         meaningful=sorted(tags-{'shell','unknown'})
         if meaningful and len(sequence)<48:sequence.append({'evento':event.id_evento,'segundos_desde_inicio':(event.fecha_hora-ordered[0].fecha_hora).total_seconds(),'acciones':meaningful,'resultado':'transferencia registrada por Cowrie' if event.id_evento in confirmed else 'intento registrado; resultado no confirmado'})
     actions=sorted({tag for values in features.values() for tag in values}-{'shell','unknown'})
     # This is the ONLY event-derived text that can reach the embedding model.
     has_shell=any('shell' in values for values in features.values())
-    query='; '.join(LABELS[tag] for tag in actions) or (LABELS['shell'] if has_shell else LABELS['unknown'])
-    query+='; SSH Cowrie emulated environment; commands indicate attempts, not host compromise.'
+    query='; '.join(behavior_label(tag) for tag in actions) or (LABELS['shell'] if has_shell else LABELS['unknown'])
+    query+='; Cowrie SSH telemetry; assess only recorded evidence.'
     return {'version':1,'acciones':actions,'secuencia':sequence,'conteos':dict(counts),
             'consulta_segura':query,'rasgos_por_evento':features,'resultados_confirmados':confirmed,
-            'limites':['Entorno emulado; no demuestra ejecucion en Ubuntu real','No se incluyen contrasenas, salidas ni textos arbitrarios en embeddings']}
+            'modalidad':modality,
+            'limites':['Las entradas son intentos; una respuesta del señuelo no demuestra ejecución en el sistema real.',
+                       'No se incluyen contrasenas, salidas ni textos arbitrarios en embeddings']}
+
+
+def behavior_label(tag):
+    return LABELS.get(tag,tag.replace('_',' '))
 
 
 def technique_profiles(name):

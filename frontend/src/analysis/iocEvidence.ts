@@ -58,6 +58,36 @@ export const mappingReviewLabels: Record<string, string> = {
   descartado: 'Mapeo descartado',
 }
 
+export const mitreGradeLabels: Record<string, string> = {
+  intento: 'Intento',
+  resultado_en_honeypot: 'Resultado observado en el honeypot',
+}
+
+export const mitreBrowseStates = {
+  automatica:'Identificada automáticamente',
+  confirmada:'Confirmada administrativamente',
+  historica_pendiente:'Histórico · pendiente de revisión',
+  historica_confirmada:'Histórico · confirmado',
+  descartada:'Descartada en revisión',
+} as const
+
+export type MitreBrowseState=keyof typeof mitreBrowseStates
+
+export function isAutomaticMapping(mapping:{rag_procedencia?:{clasificacion?:string}}) {
+  return mapping.rag_procedencia?.clasificacion === 'identificada_automaticamente'
+}
+
+export function mappingClassificationLabel(mapping: {estado_revision:string; rag_procedencia?:{clasificacion?:string}}) {
+  if (!isAutomaticMapping(mapping)) return ({pendiente:'Histórico · pendiente de revisión',
+    confirmado:'Histórico · confirmado',descartado:'Histórico · descartado'} as Record<string,string>)[mapping.estado_revision]??'Mapeo histórico'
+  if (mapping.estado_revision === 'descartado') return 'Descartada por revisión'
+  return 'Identificada automáticamente'
+}
+
+export function reportEventIds(value:string) {
+  return /^#\d+(, #\d+)*$/.test(value) ? value.split(', ').map(ref=>ref.slice(1)) : []
+}
+
 export function eventEvidencePath(sessionId: string, eventId: string) {
   return sessionEvidencePath(sessionId) + '?' + new URLSearchParams({evento: eventId})
 }
@@ -70,6 +100,11 @@ export function actionEvidencePath(sessionId: string, analysisId: string, action
   return sessionEvidencePath(sessionId) + '?' + new URLSearchParams({analisis: analysisId, accion: actionId})
 }
 
-export function mappingEvidencePath(id: string) {
-  return '/mitre?' + new URLSearchParams({mapeo: id})
+export function mappingEvidencePath(id: string, context?:{technique:string;session:string}) {
+  const query=new URLSearchParams({mapeo:id})
+  if(context){
+    query.set('tecnica',context.technique)
+    query.set('sesion_id',context.session)
+  }
+  return '/mitre?' + query
 }

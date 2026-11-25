@@ -56,11 +56,15 @@ def delete_previous_accounts(conn):
     # A complete account reset also clears the append-only authentication log.
     conn.execute(text("TRUNCATE TABLE honeypot.auth_notificacion, honeypot.auth_auditoria"))
     # Remove dependent login state and signed review rows. Keep Cowrie evidence.
-    for name in ("auth_solicitud_password", "auth_recuperacion", "auth_sesion",
-                 "auth_factor", "auth_token", "revision_analisis"):
+    for name in ("auth_token", "auth_solicitud_password", "auth_recuperacion",
+                 "auth_sesion", "auth_factor", "revision_analisis"):
         table = metadata.tables.get("honeypot." + name)
         if table is not None:
             conn.execute(table.delete().where(table.c.id_usuario.in_(user_ids)))
+    support = metadata.tables.get("honeypot.auth_soporte")
+    if support is not None:
+        conn.execute(support.update().where(support.c.id_usuario.in_(user_ids))
+                     .values(id_usuario=None, correo_verificado=False))
     for table in metadata.tables.values():
         if table.name == "auth_auditoria":
             continue
@@ -99,12 +103,11 @@ async def main(existing=False, replace_accounts=False):
             return
     async with lifespan(app):
         request = Request({"type": "http", "app": app, "client": ("127.0.0.1", 0), "headers": [], "path": "/cli/create-admin", "scheme": "http", "server": ("localhost", 0), "query_string": b""})
-        with app.state.engine.begin() as conn:
-            try:
+        try:
+            with app.state.engine.begin() as conn:
                 if replace_accounts:
                     conn.execute(text("SELECT pg_advisory_xact_lock(724610902)"))
                     removed = delete_previous_accounts(conn)
-                    print(f"Cuentas anteriores eliminadas: {removed}")
                 if existing:
                     user = promote_registered_account(conn, request, correo, password)
                     message = (user.correo, "Cuenta habilitada como primer administrador",
@@ -113,9 +116,13 @@ async def main(existing=False, replace_accounts=False):
                     ensure_first_admin(conn, request)
                     user = create_account(conn, request, data, admin=True)
                     message = issue_email_code(conn, request, user)
-            except AuthError as exc:
-                print(exc.detail)
-                return
+        except AuthError as exc:
+            print(exc.detail)
+            if replace_accounts:
+                raise SystemExit(1) from None
+            return
+        if replace_accounts:
+            print(f"Cuentas anteriores eliminadas: {removed}")
         notify(request, user.id_usuario, message)
         if existing:
             print("Cuenta existente autorizada como primer administrador. Recargue la interfaz, inicie sesión y complete Google Authenticator.")

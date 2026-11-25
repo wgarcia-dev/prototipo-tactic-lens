@@ -4,8 +4,11 @@ from unittest.mock import patch
 import json
 from types import SimpleNamespace
 from datetime import datetime, timezone
+from io import BytesIO
 
-from backend.report_export import render_pdf
+from docx import Document
+
+from backend.report_export import render_docx, render_pdf
 from backend.session_report import ecuador_time, stored_time
 
 
@@ -36,3 +39,13 @@ class ReportExportTests(TestCase):
         self.assertTrue(second.startswith(b'%PDF-'))
         self.assertGreater(len(first), 1000)
         self.assertNotEqual(first, second)
+
+    def test_docx_keeps_all_four_columns_of_external_observations(self):
+        report = self.report('SESION-ALFA')
+        labels = ['Proveedor', 'Observable', 'Evaluación', 'Referencia']
+        values = ['URLhaus', 'IP de laboratorio', 'Omitido', 'Evaluación local']
+        report['sections'].append({'title': 'Evaluación por fuente externa', 'paragraphs': [],
+                                   'columns': labels, 'rows': [values]})
+
+        table = Document(BytesIO(render_docx(report))).tables[-1]
+        self.assertEqual([[cell.text for cell in row.cells] for row in table.rows], [labels, values])

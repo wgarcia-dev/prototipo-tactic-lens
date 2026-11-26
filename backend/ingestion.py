@@ -113,8 +113,12 @@ def persist(engine, tables, sensor, events, *, partial=False, instances=None):
                     prepared=prepare(raw)
                     collector = raw["_collector"]
                     instance = sensor
-                    if "instance_id" in collector:
-                        name = collector["instance_id"]
+                    name = collector.get("instance_id")
+                    if name is None and instances:
+                        port = raw.get("dst_port")
+                        if isinstance(port, (int, str)) and not isinstance(port, bool) and str(port).isdigit():
+                            name = {2222: "cowrie_shell", 2223: "cowrie_proxy", 2224: "cowrie_llm"}.get(int(port))
+                    if name is not None:
                         if not isinstance(name, str) or name not in ("cowrie_shell", "cowrie_proxy", "cowrie_llm"):
                             raise ValueError("instancia_invalida")
                         if not instances or name not in instances:

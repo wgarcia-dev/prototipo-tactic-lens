@@ -25,6 +25,19 @@ def event(source='fixture:1',**changes):
 
 
 class IngestionTests(fixtures.AuthFixture):
+    def test_destination_port_routes_shell_without_collector_instance(self):
+        self.enroll(96, admin=True)
+        shell_id = uuid4()
+        self.connection.execute(app.state.tables['honeypot'].insert().values(
+            id_honeypot=shell_id, nombre='shell-test', host='loopback'))
+        with patch.object(app.state, 'instances', {'cowrie_shell': shell_id}):
+            result = self.ingest([event('port-routing-1', session='port-routing-test')])
+            self.assertEqual(result['insertados'], 1)
+            rows = self.client.get('/api/sesiones', params={'q': 'port-routing-test',
+                'modalidad': 'cowrie_shell'}).json()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]['modalidad'], 'cowrie_shell')
+
     def ingest(self,events,status=200):
         response=self.client.post('/api/ingesta/eventos',headers={'X-API-Key':app.state.api_key},json={'eventos':events})
         self.assertEqual(response.status_code,status,response.text)
@@ -35,7 +48,7 @@ class IngestionTests(fixtures.AuthFixture):
         mapping = {name: uuid4() for name in ("cowrie_shell", "cowrie_proxy", "cowrie_llm")}
         for name, sensor in mapping.items():
             self.connection.execute(app.state.tables["honeypot"].insert().values(id_honeypot=sensor,nombre=name,host="loopback"))
-        raw = event("sqlite:fixture:legacy", session="shared-test-id", sensor="tacticlens")
+        raw = event("sqlite:fixture:legacy", session="shared-test-id", sensor="tacticlens", dst_port=None)
         batch = [raw, *[{**raw, "_collector": {"source_id": "sqlite:fixture:" + name, "instance_id": name}} for name in mapping]]
         with patch.object(app.state, "instances", mapping):
             self.assertEqual(self.ingest(batch)["insertados"], 4)

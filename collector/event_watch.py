@@ -64,16 +64,24 @@ def run():
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     log = exporter.log_path(config)
+    extra_logs = [exporter.Path(value.strip()) for value in config.get('TACTICLENS_EXTRA_LOGS', '').split(',') if value.strip()]
+    logs = [log, *extra_logs]
+    if len({str(path) for path in logs}) != len(logs):
+        raise ValueError('Rutas de Cowrie duplicadas')
     # Watch BEFORE the initial scan, eliminating the scan/subscribe race.
-    with exporter.delivery.sender_lock(exporter.DB), closing(LogWatch(log.parent)) as watch, closing(exporter.delivery.connect(exporter.DB)) as conn:
+    from contextlib import ExitStack
+    with exporter.delivery.sender_lock(exporter.DB), ExitStack() as stack, closing(exporter.delivery.connect(exporter.DB)) as conn:
+        watches = [stack.enter_context(closing(LogWatch(path.parent))) for path in logs]
         mapping = exporter.mapping(conn)
         if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='tacticlens_captura_origen'").fetchone():
             raise RuntimeError('La cola debe estar previamente preparada; no se migra automaticamente')
         dirty, heartbeat_at = True, 0
         while not stopping:
             if dirty:
-                result = exporter.ingest(conn, log=log, max_pending=int(config.get('TACTICLENS_MAX_PENDING', '50000')))
-                dirty = result['limite_pendientes']
+                dirty = False
+                for source_log in logs:
+                    result = exporter.ingest(conn, log=source_log, max_pending=int(config.get('TACTICLENS_MAX_PENDING', '50000')))
+                    dirty |= result['limite_pendientes']
             size = max(1, min(200, int(config.get('TACTICLENS_BATCH_SIZE', '50'))))
             # Drain backlog fairly; kernel changes remain queued while HTTP is running.
             sent = 0
@@ -93,7 +101,15 @@ def run():
                 timeout = min(timeout, max(0.1, retry - time.time()))
             if (dirty and sent > 0) or sent == size:
                 timeout = 0.1
-            dirty = watch.wait(timeout) or dirty
+            if len(watches) == 1:
+                dirty = watches[0].wait(timeout) or dirty
+            else:
+                ready, _, _ = select.select([watch.fd for watch in watches], [], [], timeout)
+                changed = False
+                for watch in watches:
+                    if watch.fd in ready:
+                        changed = watch.wait(0) or changed
+                dirty = changed or dirty
 
 
 if __name__ == '__main__':

@@ -16,6 +16,35 @@ KEY = 'fixture-key-in-standalone-tests'
 
 
 class PermanentExporterTests(unittest.TestCase):
+    def test_live_preflight_accepts_only_expected_running_cowrie_watcher(self):
+        from unittest.mock import Mock
+        import stat
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            for name in ('event_watch.py', 'exportar_eventos.py', 'sqlite_sender.py'):
+                (root / name).touch()
+            config = root / 'exportador.env'
+            config.touch()
+            metadata = Mock(st_mode=stat.S_IFREG | 0o640, st_uid=0)
+            values = {
+                ('tacticlens-cowrie-live.service', 'Type'): 'simple',
+                ('tacticlens-cowrie-live.service', 'SubState'): 'running',
+                ('tacticlens-cowrie-live.service', 'User'): 'cowrie',
+                ('tacticlens-cowrie-live.service', 'MainPID'): '123',
+                ('tacticlens-cowrie-live.service', 'ExecStart'): "event_watch LOG=/home/cowrie/my-honeypot/var/log/cowrie/cowrie.json",
+            }
+            def property_of(unit, field):
+                return values.get((unit, field), 'inactive')
+            with patch.multiple(sync, UNIT='tacticlens-cowrie-live.service', EXPORTER=root, CONFIG=config), \
+                    patch.object(sync, 'property_of', side_effect=property_of), \
+                    patch.object(config.__class__, 'lstat', return_value=metadata), \
+                    patch.object(config.__class__, 'read_bytes', return_value=b'event_watch'), \
+                    patch.object(sync, 'verify_installed_exporter'):
+                self.assertEqual(sync.preflight(live=True), metadata)
+                values[('tacticlens-exportador.service', 'ActiveState')] = 'active'
+                with self.assertRaisesRegex(RuntimeError, 'emisores alternativos'):
+                    sync.preflight(live=True)
+
     def test_configuration_keeps_sensor_content_and_its_original_line_endings(self):
         original = (b'# Configuracion privada\r\nTACTICLENS_SENSOR_ID=sensor-a\r\n'
                     b'TACTICLENS_URL=http://192.168.0.108:8000/api/ingesta/eventos\r\n'

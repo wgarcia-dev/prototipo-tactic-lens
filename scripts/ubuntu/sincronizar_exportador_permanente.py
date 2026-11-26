@@ -25,6 +25,7 @@ CONFIG = Path('/etc/tacticlens-cowrie/exportador.env')
 QUEUE = Path('/var/lib/tacticlens-cowrie/cola.sqlite3')
 EXPORTER = Path('/opt/tacticlens-cowrie')
 UNIT = 'tacticlens-exportador.service'
+LIVE_UNIT = 'tacticlens-cowrie-live.service'
 TIMER = 'tacticlens-exportador.timer'
 COWRIE = 'cowrie-tacticlens.service'
 EGRESS = 'tacticlens-egress-guard.service'
@@ -136,8 +137,18 @@ def verify_installed_exporter():
             raise RuntimeError(f'Contrato de instalacion distinto en {filename}: {", ".join(missing)}')
 
 
-def preflight():
-    if (property_of(UNIT, 'Type') != 'simple' or property_of(UNIT, 'SubState') != 'running'
+def preflight(live=False):
+    if live:
+        if (property_of(UNIT, 'Type') != 'simple' or property_of(UNIT, 'SubState') != 'running'
+                or property_of(UNIT, 'User') != 'cowrie'
+                or property_of('cowrie-ingest.service', 'ActiveState') != 'inactive'
+                or any(property_of(unit, 'ActiveState') in {'active', 'activating'}
+                       for unit in (TIMER, 'tacticlens-exportador.service', 'tacticlens-eventos.service'))):
+            raise RuntimeError('La unidad live o sus emisores alternativos requieren revision')
+        command = property_of(UNIT, 'ExecStart')
+        if ('event_watch' not in command or '/home/cowrie/my-honeypot/var/log/cowrie/cowrie.json' not in command):
+            raise RuntimeError('La unidad live no corresponde a esta instalacion')
+    elif (property_of(UNIT, 'Type') != 'simple' or property_of(UNIT, 'SubState') != 'running'
             or property_of(TIMER, 'ActiveState') != 'inactive'
             or any(property_of(unit, 'ActiveState') != 'active' for unit in (COWRIE, EGRESS))):
         raise RuntimeError('La unidad permanente o sus dependencias no tienen el estado comprobado')
@@ -147,7 +158,10 @@ def preflight():
     pid = int(property_of(UNIT, 'MainPID'))
     if not pid or b'event_watch' not in (Path('/proc') / str(pid) / 'cmdline').read_bytes():
         raise RuntimeError('El PID de systemd no corresponde al vigilante continuo esperado')
-    verify_installed_exporter()
+    if not live:
+        verify_installed_exporter()
+    elif not all((EXPORTER / name).is_file() for name in ('event_watch.py', 'exportar_eventos.py', 'sqlite_sender.py')):
+        raise RuntimeError('Faltan archivos del exportador live')
     metadata = CONFIG.lstat()
     mode = stat.S_IMODE(metadata.st_mode)
     if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0 or mode not in (0o600, 0o640):
@@ -208,13 +222,25 @@ def start_exporter():
     raise RuntimeError('El exportador permanente no volvio a active/running')
 
 
-def transition(url, key):
-    metadata = preflight()
+def transition(url, key, live=False, kit=None):
+    metadata = preflight(live)
     original = CONFIG.read_bytes()
     updated = update_config(original, url, key)
+    if live:
+        extra_logs = [Path('/home/cowrie/llm-honeypot/var/log/cowrie/cowrie.json'),
+                      Path('/home/cowrie/proxy-honeypot/var/log/cowrie/cowrie.json')]
+        available = [str(path) for path in extra_logs if path.is_file()]
+        if available:
+            setting = b'TACTICLENS_EXTRA_LOGS=' + ','.join(available).encode()
+            pattern = rb'(?m)^TACTICLENS_EXTRA_LOGS=[^\r\n]*'
+            updated = re.sub(pattern, setting, updated) if re.search(pattern, updated) else updated + setting + b'\n'
     auth = authentication_probe(url, key)
     print('TACTICLENS_AUTH=' + json.dumps(auth), flush=True)
-    if updated == original:
+    live_files = ('sqlite_sender.py', 'event_watch.py', 'exportar_eventos.py')
+    code_changed = live and kit is not None and any(
+        (kit / 'collector' / name).is_file() and (kit / 'collector' / name).read_bytes() != (EXPORTER / name).read_bytes()
+        for name in live_files)
+    if updated == original and not code_changed:
         print('TACTICLENS_TRANSITION=' + json.dumps({'sin_cambios': True}), flush=True)
         return
     backup = Path(tempfile.mkdtemp(prefix='tacticlens-demo-http-', dir=BACKUPS))
@@ -222,6 +248,11 @@ def transition(url, key):
     if (backup / 'exportador.env').read_bytes() != original:
         raise RuntimeError('El respaldo de la configuracion no coincide')
     saved_queue = backup / 'cola.sqlite3'
+    if live:
+        if kit is None or any(not (kit / 'collector' / name).is_file() for name in live_files):
+            raise RuntimeError('Faltan archivos actualizados del kit privado')
+        for name in live_files:
+            shutil.copy2(EXPORTER / name, backup / name)
     initial = backup_queue(QUEUE, saved_queue)
     print('TACTICLENS_BACKUP=' + json.dumps({'directorio': str(backup), 'sqlite_integridad': 'ok', 'cola': initial}), flush=True)
     missing, same_uuid, missing_origins, _ = preserved_rows(QUEUE, saved_queue)
@@ -233,16 +264,26 @@ def transition(url, key):
         system('stop', UNIT)
         if property_of(UNIT, 'ActiveState') != 'inactive':
             raise RuntimeError('No se confirmo la detencion del unico exportador')
-        with closing(open_queue(QUEUE)) as live:
-            live.execute('BEGIN')
-            before = counters(live)
+        with closing(open_queue(QUEUE)) as queue_conn:
+            queue_conn.execute('BEGIN')
+            before = counters(queue_conn)
         atomic_config(updated, metadata)
+        if code_changed:
+            for name in live_files:
+                target = EXPORTER / name
+                shutil.copyfile(kit / 'collector' / name, target)
+                os.chmod(target, 0o644)
         start_exporter()
     except (Exception, KeyboardInterrupt):
         try:
             if CONFIG.read_bytes() != original:
                 system('stop', UNIT)
                 atomic_config(original, metadata)
+            if live:
+                for name in live_files:
+                    target = EXPORTER / name
+                    shutil.copyfile(backup / name, target)
+                    os.chmod(target, 0o644)
             start_exporter()
             print('TACTICLENS_ROLLBACK=configuracion anterior restaurada y exportador activo', flush=True)
         except (Exception, KeyboardInterrupt):
@@ -251,15 +292,14 @@ def transition(url, key):
     missing, same_uuid, missing_origins, after = preserved_rows(QUEUE, saved_queue)
     result = {'cola_al_detener': before, 'cola_al_reiniciar': after, 'registros_originales_ausentes_o_modificados': missing,
               'origenes_ausentes_o_modificados': missing_origins, 'misma_identidad_cola': same_uuid, 'tipo': property_of(UNIT, 'Type'),
-              'exportador': property_of(UNIT, 'SubState'), 'timer': property_of(TIMER, 'ActiveState'),
-              'cowrie': property_of(COWRIE, 'ActiveState'), 'egress': property_of(EGRESS, 'ActiveState'),
+              'exportador': property_of(UNIT, 'SubState'), 'unidad': UNIT,
               'fecha_utc': datetime.now(timezone.utc).isoformat()}
     print('TACTICLENS_TRANSITION=' + json.dumps(result), flush=True)
     if missing or missing_origins or not same_uuid:
         raise RuntimeError('La comprobacion de los registros originales requiere revision')
 
 
-def main(path, url):
+def main(path, url, live=False, kit=None):
     import fcntl
     import pwd
 
@@ -293,7 +333,7 @@ def main(path, url):
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         # An SSH disconnect must not interrupt the stop/change/start sequence.
         signal.signal(signal.SIGHUP, signal.SIG_IGN)
-        transition(url, key.decode('ascii'))
+        transition(url, key.decode('ascii'), live, kit)
 
 
 if __name__ == '__main__':
@@ -301,9 +341,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--key-file', type=Path, required=True)
     parser.add_argument('--url', required=True)
+    parser.add_argument('--live', action='store_true')
+    parser.add_argument('--kit', type=Path)
     args = parser.parse_args()
+    if args.live:
+        UNIT = LIVE_UNIT
     try:
-        main(args.key_file, args.url)
+        main(args.key_file, args.url, args.live, args.kit)
     except RuntimeError as exc:
         raise SystemExit(str(exc)) from None
     except Exception as exc:

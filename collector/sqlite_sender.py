@@ -187,6 +187,12 @@ def deliver_pending(conn,mapping,url,key,batch_size=50,transport='ssh-loopback')
                 if len(source)>512:
                     raise ValueError('identidad_demasiado_larga')
                 event['_collector']={'source_id':source}
+                port = event.get('dst_port')
+                modes = {2222: 'cowrie_shell', 2223: 'cowrie_proxy', 2224: 'cowrie_llm'}
+                if isinstance(port, (int, str)) and not isinstance(port, bool) and str(port).isdigit():
+                    mode = modes.get(int(port))
+                    if mode:
+                        event['_collector']['instance_id'] = mode
                 # Validate finite JSON before constructing the network batch.
                 event_size=len(json.dumps(event,allow_nan=False,ensure_ascii=False,separators=(',',':')).encode())+1
                 if size_used+event_size>1_900_000:

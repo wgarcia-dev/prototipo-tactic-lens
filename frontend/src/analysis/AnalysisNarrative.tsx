@@ -149,6 +149,7 @@ export function AnalysisNarrative({analysis}: {analysis: Narrative}) {
         <dl className="mt-3">{card.rows.map(([label,value])=><div key={label} className="grid sm:grid-cols-[12rem_1fr] gap-x-3 border-t line py-1">
           <dt className="font-semibold">{label}</dt><dd>{value}</dd></div>)}</dl>
       </details>)}
+      {cards.length>0&&<Link className="accent underline text-xs inline-block mt-3" to={'/salvaguardas?analisis='+analysis.id_analisis}>Ver seguimiento e historial de estas propuestas</Link>}
       {!cards.length && <p className="muted">Este análisis no contiene propuestas de salvaguarda.</p>}
     </section>
     <IncidentAssessment key={analysis.id_analisis} id={analysis.id_analisis} session={analysis.id_sesion} initial={analysis.resultado_estructurado?.evaluacion_incidente}/>

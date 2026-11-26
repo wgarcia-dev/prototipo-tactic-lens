@@ -31,7 +31,7 @@ class SafeguardProposal(BaseModel):
     validacion: str
 
 
-def safeguard_cards(recommendations):
+def safeguard_cards(recommendations, tracking=None):
     cards = []
     for index, item in enumerate(recommendations, 1):
         proposal = item if isinstance(item, dict) else {"salvaguarda": item}
@@ -48,6 +48,12 @@ def safeguard_cards(recommendations):
             ("Validación", proposal.get("validacion") or "Por definir con el analista"),
             ("Estado", "Propuesta, pendiente de aprobación"),
         ]
+        reviews = (tracking or {}).get(f"SG-{index:03d}") or []
+        if reviews:
+            latest = reviews[-1]
+            fields = [(label, latest["responsable"] if label == "Responsable" else
+                       latest["estado"].replace("_", " ") if label == "Estado" else value)
+                      for label, value in fields]
         cards.append(dict(title=proposal["salvaguarda"], rows=fields))
     return cards
 

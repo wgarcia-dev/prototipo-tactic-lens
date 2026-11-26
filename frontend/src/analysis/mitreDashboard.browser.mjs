@@ -48,6 +48,7 @@ try {
     calls.push([path,url.search])
     const data={
       '/api/auth/me':auth,'/api/auth/csrf':auth,'/api/health':{},
+      '/api/mitre/clasificadores':{version:'fixture',clasificadores:[]},
       '/api/mitre/resumen':overview,'/api/mitre/matriz':url.searchParams.get('catalogo')==='true'?cells:cells.slice(0,1),
       '/api/mitre/tecnicas':[technique],'/api/mitre/tecnicas/T1033':{...overview,catalogo},
       '/api/mitre/tecnicas/T1033/sesiones':[session],'/api/mitre/mapeos':[mapping],

@@ -54,12 +54,24 @@ def analyst_sections(report, payload, commands):
     actions = [
         section(f"{card['rows'][0][1]} · {card['title']}", [], ["Campo", "Detalle"],
                 card["rows"], kind="response")
-        for card in safeguard_cards(detail.get("recomendaciones") or [])
+        for card in safeguard_cards(detail.get("recomendaciones") or [], payload.get("seguimiento_salvaguardas"))
     ]
     sections.append(section("Plan de investigación y respuesta", [
         "Las intervenciones siguientes proceden del análisis seleccionado y requieren aprobación del responsable. Conserve los registros originales antes de introducir cambios en el entorno."
     ]))
     sections += actions
+    tracking = payload.get("seguimiento_salvaguardas") or {}
+    for card in safeguard_cards(detail.get("recomendaciones") or [], payload.get("seguimiento_salvaguardas")):
+        code = card["rows"][0][1]
+        revisions = tracking.get(code) or []
+        if revisions:
+            from .session_report import stored_time
+            sections.append(section("Historial de " + code, [], [
+                "Fecha Ecuador / revisor", "Estado / responsable", "Motivo y verificación"
+            ], [[stored_time(review.get("revisado_en")) + "\n" + review.get("revisado_por", ""),
+                 review["estado"] + "\n" + review["responsable"],
+                 review["motivo"] + "\n" + review.get("verificacion", "")]
+                for review in revisions]))
     if not actions:
         sections.append(section("Acciones por concretar", ["El análisis histórico carece de medidas estructuradas. El analista debe definir intervención, responsable y criterio de eficacia a partir de los hallazgos documentados."]))
     # These tasks are explicitly investigative and conditioned on observed events.

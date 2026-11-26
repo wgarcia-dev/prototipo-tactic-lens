@@ -24,6 +24,7 @@ from .correlation import (action_link, action_observable_query, event_columns, m
 from .mitre_views import (MitreFilters, analytics, citation_query, mapping_rows, matrix,
                           observable_total, session_groups, technique_groups, technique_record)
 from . import ioc_views
+from . import safeguards
 from .analysis_report import (BehaviorReport, REPORT_VERSION, analysis_instruction,
                               needs_report_upgrade, observation_context, validate_report_evidence)
 from .intelligence import extract_observables, normalized_value, observables, persist_observables
@@ -568,7 +569,7 @@ def get_analysis(id_analisis: UUID):
     for item in (report.get("fases") or []) + (report.get("hipotesis") or []):
         item["eventos_texto"] = [str(eid) for eid in item.get("eventos", [])]
     return {**plain(row), "resultado_estructurado": payload, "acciones": output,
-            "salvaguardas": safeguard_cards(report.get("recomendaciones") or [])}
+            "salvaguardas": safeguard_cards(report.get("recomendaciones") or [], (payload or {}).get("seguimiento_salvaguardas"))}
 
 
 @app.post("/api/analisis/{id_analisis}/evaluacion-incidente", dependencies=[Depends(local_only)])
@@ -880,6 +881,52 @@ def mapping_observables(id_mapeo: UUID, limit: int = Query(50, ge=1, le=200), of
     if detallar_citas:
         return {**result, "mapeo": public_mitre_record(mapping), "observables": redact(result["observables"])}
     return result
+
+
+@app.get("/api/salvaguardas", dependencies=[Depends(local_only)])
+def list_safeguards(id_analisis: UUID | None = None, id_sesion: UUID | None = None,
+                    estado: Literal["propuesta", "aprobada", "en_curso", "verificada", "descartada"] | None = None,
+                    limit: int = Query(25, ge=1, le=100), offset: int = Query(0, ge=0)):
+    with app.state.engine.connect() as conn:
+        return safeguards.browse(conn, sensor_ids(), analysis_id=id_analisis, session_id=id_sesion,
+                                 state=estado, limit=limit, offset=offset)
+
+
+@app.post("/api/analisis/{id_analisis}/salvaguardas/{codigo}/revision", dependencies=[Depends(local_only)])
+def review_safeguard(id_analisis: UUID, codigo: str, decision: safeguards.SafeguardReview, request: Request):
+    analysis = table("analisis_llm")
+    with app.state.engine.begin() as conn:
+        _, actor = require_admin(conn, request)
+        row = conn.execute(select(analysis).where(
+            analysis.c.id_analisis == id_analisis, analysis.c.id_sesion.in_(sensor_sessions())
+        ).with_for_update()).mappings().first()
+        if row is None:
+            raise HTTPException(404, "Análisis no encontrado")
+        if row.estado != "completado":
+            raise HTTPException(409, "Se requiere un análisis completado")
+        updated = safeguards.append_review(row.resultado_estructurado or {}, codigo, decision, actor.id_usuario)
+        conn.execute(analysis.update().where(analysis.c.id_analisis == id_analisis).values(
+            resultado_estructurado=updated, actualizado_en=func.clock_timestamp()))
+        audit(conn, request, "salvaguarda_revisada", actor=actor.id_usuario,
+              reason=f"{id_analisis}:{codigo}:{decision.estado}")
+    return {"historial": redact(updated["seguimiento_salvaguardas"][codigo])}
+
+
+@app.get("/api/mitre/clasificadores", dependencies=[Depends(local_only)])
+def mitre_classifiers():
+    technique, catalog = table("tecnica_mitre"), table("catalogo_mitre")
+    with app.state.engine.connect() as conn:
+        names = dict(conn.execute(select(technique.c.codigo_tecnica, technique.c.nombre)
+                                  .join(catalog, catalog.c.id_catalogo == technique.c.id_catalogo)
+                                  .where(catalog.c.activo, ~technique.c.revocada, ~technique.c.deprecada,
+                                         technique.c.codigo_tecnica.in_(CONTRACTS))).all())
+    return {"version": VALIDATOR_VERSION, "clasificadores": [
+        {"codigo": code, "nombre": names.get(code, code), "version": contract.version,
+         "modalidades": sorted(contract.modes), "tacticas": sorted(contract.tactics),
+         "minimo_evidencias_distintas": contract.minimum_distinct,
+         "limitacion": contract.limitation, "presente_en_catalogo": code in names}
+        for code, contract in sorted(CONTRACTS.items())
+    ]}
 
 
 @app.get('/api/mitre/catalogo',dependencies=[Depends(local_only)])

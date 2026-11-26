@@ -31,7 +31,9 @@ def search(engine,query,k=12,encode=None,priority=()):
         model_id=conn.scalar(text("SELECT id_modelo_embedding FROM honeypot.modelo_embedding WHERE proveedor='local-onnx-cpu' AND nombre_modelo=:model AND dimension=384"),params)
         if model_id is None:raise RuntimeError('Genere primero los embeddings del catalogo')
         params['model_id']=str(model_id)
-        availability=conn.execute(text('SELECT count(*) total,count(*) FILTER(WHERE id_modelo_rag=CAST(:model_id AS uuid) AND embedding_rag IS NOT NULL) listos FROM honeypot.tecnica_mitre WHERE id_catalogo=CAST(:catalog AS uuid) AND NOT revocada AND NOT deprecada'),params).mappings().one()
+        availability=conn.execute(text("""
+            SELECT count(*) total,count(*) 
+            FILTER(WHERE id_modelo_rag=CAST(:model_id AS uuid) AND embedding_rag IS NOT NULL) listos FROM honeypot.tecnica_mitre WHERE id_catalogo=CAST(:catalog AS uuid) AND NOT revocada AND NOT deprecada"""),params).mappings().one()
         if availability.total!=availability.listos:raise RuntimeError('Embeddings incompletos; finalice su generacion antes de analizar')
         base="FROM honeypot.tecnica_mitre WHERE id_catalogo=CAST(:catalog AS uuid) AND NOT revocada AND NOT deprecada"
         dense=conn.execute(text('SELECT codigo_tecnica,1-(embedding_rag <=> CAST(:vector AS vector)) similitud '+base+
@@ -73,10 +75,13 @@ def search(engine,query,k=12,encode=None,priority=()):
                     'similitud_vectorial':float(row.similitud),'rangos':{},
                 }))
         selection={'codes':[r['codigo_tecnica'] for r in selected],'catalog':catalog['id_catalogo']}
-        rows=conn.execute(text('SELECT codigo_tecnica,stix_id,nombre,descripcion,plataformas,version_attack,version_objeto,objeto_sha256,revocada,deprecada,es_subtecnica,tecnica_padre_id '+base+' AND codigo_tecnica=ANY(:codes)'),selection).mappings().all()
+        rows=conn.execute(text("""SELECT codigo_tecnica,stix_id,nombre,descripcion,plataformas,version_attack,version_objeto,objeto_sha256,revocada,deprecada,
+        es_subtecnica,tecnica_padre_id '+base+' AND codigo_tecnica=ANY(:codes)"""),selection).mappings().all()
         definitions={r.codigo_tecnica:dict(r) for r in rows}
         tactics=defaultdict(list)
-        for row in conn.execute(text('SELECT tt.codigo_tecnica,tt.codigo_tactica,ta.nombre FROM honeypot.tecnica_tactica tt JOIN honeypot.tactica_mitre ta USING(codigo_tactica) WHERE tt.codigo_tecnica=ANY(:codes) AND tt.activa_en_catalogo AND tt.id_catalogo=CAST(:catalog AS uuid) AND ta.id_catalogo=tt.id_catalogo AND NOT ta.revocada AND NOT ta.deprecada ORDER BY tt.codigo_tactica'),selection).mappings():
+        for row in conn.execute(text("""SELECT tt.codigo_tecnica,tt.codigo_tactica,ta.nombre FROM honeypot.tecnica_tactica tt 
+        JOIN honeypot.tactica_mitre ta USING(codigo_tactica) WHERE tt.codigo_tecnica=ANY(:codes) AND tt.activa_en_catalogo AND tt.id_catalogo=CAST(:catalog AS uuid) 
+        AND ta.id_catalogo=tt.id_catalogo AND NOT ta.revocada AND NOT ta.deprecada ORDER BY tt.codigo_tactica"""),selection).mappings():
             tactics[row.codigo_tecnica].append({'codigo_tactica':row.codigo_tactica,'nombre':row.nombre})
         for item in selected:
             item.update(definitions[item['codigo_tecnica']]);item['definicion']=item.pop('descripcion')[:7000]

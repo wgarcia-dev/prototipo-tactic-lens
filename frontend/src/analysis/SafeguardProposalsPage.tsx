@@ -4,6 +4,7 @@ import {ArrowUpRight, ChevronDown, FileText, History, ListFilter, NotebookPen, S
 import './safeguards.css'
 import {api, mutate} from '../auth/client'
 import {useAuth} from '../auth/context'
+import {useLegacySafeguards} from './legacySafeguards'
 import {useMonitorQuery} from '../monitoring/Realtime'
 import {mitreDate} from './MitreDashboard'
 
@@ -51,6 +52,7 @@ function ReviewForm({proposal,onSaved}:{proposal:Proposal;onSaved:()=>void}) {
 }
 
 export function SafeguardProposalsPage() {
+  const archive=useLegacySafeguards()?.archivo_activo??false
   const [params,setParams]=useSearchParams()
   const [rows,setRows]=useState<Proposal[]>([])
   const [error,setError]=useState(''), [loading,setLoading]=useState(true), [revision,setRevision]=useState(0)
@@ -125,7 +127,8 @@ export function SafeguardProposalsPage() {
           <p className="muted text-xs mt-2">Registrado por {review.revisado_por}</p>
         </li>)}</ol>
       </details>
-      {item.id_salvaguarda?<Link className="accent underline text-sm" to={'/salvaguardas?id='+item.id_salvaguarda}>Gestionar desde el tablero</Link>:<ReviewForm key={item.id_analisis+item.codigo+item.historial.length} proposal={item} onSaved={()=>setRevision(value=>value+1)}/>}
+      {item.id_salvaguarda?<Link className="accent underline text-sm" to={'/salvaguardas?id='+item.id_salvaguarda}>{archive?'Consultar tarea vinculada':'Gestionar desde el tablero'}</Link>:
+        !archive&&<ReviewForm key={item.id_analisis+item.codigo+item.historial.length} proposal={item} onSaved={()=>setRevision(value=>value+1)}/>}
     </article>)}
     {!loading&&!error&&(page>0||rows.length>25)&&<nav className="flex gap-3 justify-end" aria-label="Páginas de salvaguardas">
       <button className="btn-secondary" disabled={page===0} onClick={()=>change({pagina:String(page-1)})}>Anterior</button>

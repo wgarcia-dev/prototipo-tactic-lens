@@ -1,10 +1,12 @@
 from datetime import timedelta
+import json
 import os
 from unittest import TestCase, skipUnless
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
+import httpx
 
 from backend.analysis_state import evidence_snapshot
 from backend.api import app
@@ -13,6 +15,7 @@ from backend.incident_assessment import assess
 from backend.incidents import get_incident_for_response
 from backend.routes import ensure_model
 from test_auth import AuthFixture
+import test_rag as rag_fixtures
 
 ISOLATED = (os.getenv("DATABASE_HOST"), os.getenv("DATABASE_PORT"), os.getenv("DATABASE_NAME")) == (
     "127.0.0.1", "56591", "tacticlens_incidentes_integracion")
@@ -151,3 +154,117 @@ class IncidentsTests(AuthFixture):
         detail=self.client.get("/api/incidentes/"+first["id_incidente"]).json()
         self.assertFalse(detail["evidencia_verificable"])
         self.assertEqual(detail["iocs"],[])
+
+    def test_historical_identity_can_be_derived_without_rewriting_events(self):
+        self.enroll(7936,admin=True)
+        events, sessions = (app.state.tables[key] for key in ("evento","sesion"))
+        for label, storage, mode in (
+            ("ubuntuserver", self.registry["cowrie_proxy"], "desconocido"),
+            ("tacticlens-cowrie-proxy", app.state.honeypot_id, "cowrie_proxy"),
+            ("tacticlens-cowrie-proxy", self.registry["cowrie_llm"], "desconocido"),
+        ):
+            sid=self.connection.scalar(sessions.insert().values(id_honeypot=storage, cowrie_session_id=uuid4().hex,
+                           fecha_inicio=self.clock).returning(sessions.c.id_sesion))
+            raw={"eventid":"cowrie.session.connect","sensor":label,"instance_type":"proxy","dst_port":2223}
+            eid=self.connection.scalar(events.insert().values(id_sesion=sid,numero_secuencia=1,
+                fecha_hora=self.clock,tipo_evento=raw["eventid"],datos_originales=raw).returning(events.c.id_evento))
+            response=self.client.get(f"/api/sesiones/{sid}")
+            self.assertEqual(response.status_code,200,response.text)
+            self.assertEqual(response.json()["modalidad"],mode)
+            stored=self.connection.execute(select(events.c.datos_originales,events.c.procedencia_cowrie)
+                                           .where(events.c.id_evento==eid)).one()
+            self.assertEqual(tuple(stored),(raw,None))
+
+    def test_cowrie_llm_identification_through_response_close_and_reopen(self):
+        if "incidente_respuesta" not in app.state.tables:
+            self.skipTest("requires migration 017")
+        admin,*_=self.enroll(7934,admin=True)
+        sid, event_ids = rag_fixtures.RagIntegrationTests.session_with(self, ["whoami"], "cowrie_shell")
+        candidate=rag_fixtures.proposal(code="T1033",tactic="TA0007",eventos=event_ids).model_dump()
+        candidate["justificacion"]="El comando solicita conocer el usuario del entorno observado."
+        with rag_fixtures.RagIntegrationTests.llm(self,event_ids,[candidate]) as provider:
+            first=self.client.post(f"/api/sesiones/{sid}/analizar")
+            self.assertEqual(first.status_code,200,first.text)
+            replay=self.client.post(f"/api/sesiones/{sid}/analizar")
+            self.assertEqual(replay.status_code,200,replay.text)
+            self.assertTrue(replay.json()["reutilizado"])
+            self.assertEqual(provider.call_count,1)
+            self.assertIn("tacticlens-cowrie-01",json.dumps(provider.call_args.kwargs["json"]))
+        cases=self.client.get("/api/incidentes",params={"id_sesion":str(sid)}).json()["items"]
+        self.assertEqual(len(cases),1)
+        path="/api/incidentes/"+cases[0]["id_incidente"]
+        evaluation=self.client.get(path).json()
+        self.assertEqual(evaluation["mitre"][0]["codigo_tecnica"],"T1033")
+        self.assertEqual(evaluation["eventos"][0]["comando"],"whoami")
+        self.assertEqual(evaluation["decision"],"actividad_sospechosa")
+        confirmed=self.review(evaluation)
+        self.assertTrue(confirmed["evidencia_verificable"])
+        response=path+"/respuesta"
+        revision=confirmed["revision_evaluacion"]
+
+        def post(suffix, data, status=200, **kwargs):
+            reply=self.client.post(response+suffix,json=data,**kwargs)
+            self.assertEqual(reply.status_code,status,reply.text)
+            return reply.json()
+
+        current=post("", {"revision_evaluacion":revision, "objetivo":"Verificar el alcance observado",
+                          "alcance":"Entorno autorizado de prueba", "criterio_cierre":"Contrastar la evidencia obtenida"},201)
+        suggestions={"sugerencias":[{"fase":"verificacion","medida":"Contrastar la bitácora",
+            "objetivo":"Confirmar el alcance de la actividad observada","justificacion":"Eventos del señuelo documentados",
+            "criterio_verificacion":"Cotejar el resultado con evidencia autorizada",
+            "eventos":[str(event_ids[0])]}]}
+        result=httpx.Response(200,request=httpx.Request("POST","https://fixture.invalid/v1/chat/completions"),
+            json={"choices":[{"finish_reason":"stop","message":{"content":json.dumps(suggestions)}}]})
+        with patch("backend.incident_response_recommendations.post_provider",return_value=result) as mock:
+            batch=post("/recomendaciones",{"revision_evaluacion":revision,"revision_esperada":current["revision_respuesta"],
+                       "motivo":REASON},headers={"Idempotency-Key":"incidente-integral-fixture"})
+            self.assertEqual(mock.call_count,1)
+        self.assertEqual(batch["estado"],"completado")
+        action_path="/acciones/"+batch["resultado"]["acciones"][0]
+        item=self.client.get(response+action_path).json()
+        for operation,values in (("aprobar",{}),("asignar",{"id_responsable":str(admin)}),("iniciar",{}),
+                ("ejecutar",{"resultado":REASON,"eventos":[str(event_ids[0])]}),
+                ("verificar",{"resultado":REASON,"referencia":"Registro independiente de prueba"})):
+            item=post(action_path+"/transiciones",{"operacion":operation,"motivo":REASON,"revision_evaluacion":revision,
+                                                  "revision_esperada":item["revision_accion"],**values})
+        self.assertEqual(item["estado"],"verificada")
+        current=self.client.get(response).json()
+        for operation, values in (("resolver",{"resultado":REASON,"referencia":"Registro independiente de prueba",
+                                               "riesgos_pendientes":"El alcance externo sigue pendiente de contraste"}),
+                                  ("cerrar",{"resultado":REASON,"referencia":"Acta sintética de cierre"}),
+                                  ("reabrir",{})):
+            current=post("/transiciones",{"operacion":operation,"motivo":REASON,"revision_evaluacion":revision,
+                                         "revision_esperada":current["revision_respuesta"],**values})
+            self.assertEqual(current["estado"],{"resolver":"resuelto","cerrar":"cerrado","reabrir":"en_respuesta"}[operation])
+        preview=self.client.get(response+"/informe")
+        self.assertEqual(preview.status_code,200,preview.text)
+        self.assertIn("tacticlens-cowrie-01",preview.text)
+        self.assertIn(confirmed["evidencia_sha256"],preview.text)
+        self.assertEqual(self.client.get(path+"/evaluaciones/1").json()["decision"],"actividad_sospechosa")
+
+    def test_archive_opt_in_waits_for_pending_safeguards_without_removing_views(self):
+        if "incidente_respuesta" not in app.state.tables:
+            self.skipTest("requires migration 017")
+        from backend.safeguards import configure_legacy_archive
+        self.enroll(7935,admin=True)
+        sid,_=self.telemetry("cowrie_shell")
+        tasks=app.state.tables["salvaguarda"]
+        task_id=self.connection.scalar(tasks.insert().values(id_sesion=sid,huella="e3"*32,
+            nombre="Medida histórica abierta",nivel_riesgo="medio").returning(tasks.c.id_salvaguarda))
+        with (
+            patch.dict(os.environ, {"INCIDENT_RESPONSE_ARCHIVE_SAFEGUARDS":"true"}),
+            patch.object(app.state, "safeguard_archive_active", False),
+            patch.object(app.state, "safeguard_archive_requested", False),
+        ):
+            configure_legacy_archive(app,self.connection)
+            status=self.client.get("/api/salvaguardas/archivo").json()
+            self.assertEqual(status["tareas_por_conciliar"],1)
+            self.assertFalse(status["archivo_activo"])
+            self.connection.execute(tasks.update().where(tasks.c.id_salvaguarda==task_id).values(
+                estado="realizada",iniciado_en=self.clock,finalizado_en=self.clock,
+                id_responsable=UUID(self.client.get("/api/auth/me").json()["usuario"]["id_usuario"])))
+            configure_legacy_archive(app,self.connection)
+            self.assertTrue(self.client.get("/api/salvaguardas/archivo").json()["archivo_activo"])
+            self.assertEqual(self.client.get(f"/api/salvaguardas/{task_id}").status_code,200)
+            blocked=self.client.post(f"/api/salvaguardas/{task_id}/reapertura",json={"observacion":REASON})
+            self.assertEqual(blocked.status_code,409,blocked.text)

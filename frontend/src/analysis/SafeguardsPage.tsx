@@ -2,6 +2,7 @@ import {useState, type FormEvent} from 'react'
 import {Link, useSearchParams} from 'react-router-dom'
 import {api, mutate} from '../auth/client'
 import {useAuth} from '../auth/context'
+import {useLegacySafeguards} from './legacySafeguards'
 import {useMonitorQuery, useRealtime} from '../monitoring/Realtime'
 import {eventEvidencePath} from './iocEvidence'
 import {BoardDrawer, SafeguardBoard, allowedMoves, columns, risks, states, type Page, type Stage, type Task, type Wip} from './SafeguardBoard'
@@ -26,6 +27,7 @@ const display = (value:unknown) => typeof value==='string' ? value : Array.isArr
 
 export function SafeguardsPage() {
   const {session} = useAuth()
+  const archive = useLegacySafeguards()?.archivo_activo ?? false
   const {connected} = useRealtime()
   const [params,setParams] = useSearchParams()
   const selected = params.get('id')
@@ -44,8 +46,8 @@ export function SafeguardsPage() {
   const [detailError,setDetailError] = useState('')
   const [busy,setBusy] = useState(false)
   const [loading,setLoading] = useState(true)
-  const admin = session?.usuario.rol === 'administrador'
-  const canEdit = admin || !!session?.usuario.id_usuario && detail?.id_responsable === session.usuario.id_usuario
+  const admin = !archive && session?.usuario.rol === 'administrador'
+  const canEdit = !archive && (admin || !!session?.usuario.id_usuario && detail?.id_responsable === session.usuario.id_usuario)
 
   useMonitorQuery(async signal => {
     const query = new URLSearchParams(Object.entries(filters).filter(([,value])=>value.trim()))
@@ -186,7 +188,7 @@ export function SafeguardsPage() {
     {listError&&<p role="alert" className="text-red-300">{listError}</p>}
     {loading&&<p className="muted" role="status">Cargando salvaguardas…</p>}
     <SafeguardBoard pages={pages} wip={wip} loading={loading} selected={selected} admin={admin}
-      userId={session?.usuario.id_usuario} onSelect={select} onMove={move}
+      userId={archive?undefined:session?.usuario.id_usuario} onSelect={select} onMove={move}
       onMore={stage=>setBatches(old=>({...old,[stage]:old[stage]+1}))}/>
     {configuring&&wip&&<BoardDrawer title="Configurar tablero" onClose={()=>{if(!busy)setConfiguring(false)}}>
       <p>En desarrollo: {wip.en_desarrollo} · {wip.wip_activo?`Espacios disponibles: ${wip.disponibles}`:'Sin límite WIP'}</p>

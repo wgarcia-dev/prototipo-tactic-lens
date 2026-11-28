@@ -181,7 +181,7 @@ def _automatic_projection(payload, analysis_id, mode):
     priority = threat.get("prioridad_investigacion") or triage.get("prioridad_triaje")
     return {
         "id_analisis": str(analysis_id), "modalidad_al_analizar": mode,
-        "clasificacion": triage.get("clasificacion") or "actividad_por_evaluar",
+        "clasificacion": payload.get("clasificacion_actividad") or triage.get("clasificacion") or "actividad_por_evaluar",
         "severidad": severity if severity in SEVERITIES else None,
         "prioridad": priority if priority in PRIORITIES else "por_determinar",
         "impacto_tecnico": {key: impact[key] for key in (
@@ -212,7 +212,8 @@ def register_analysis(conn, tables, sensors, modes, analysis_id, *, manual=False
     snapshot = payload.get("vigencia_snapshot") or {}
     assessment = _automatic_projection(payload, analysis_id, source.modalidad)
     if not manual and not (set(assessment["criterios"]) & RELEVANT or assessment["severidad"] in SEVERITIES[2:]):
-        return None
+        if not conn.scalar(select(links.c.id_incidente).where(links.c.id_sesion == source.id_sesion)):
+            return None
     saved_ids = snapshot.get("eventos") or triage.get("eventos") or []
     expected = snapshot.get("eventos_sha256") or triage.get("snapshot_sha256")
     if not expected or not saved_ids:

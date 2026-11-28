@@ -1,5 +1,6 @@
 """Evidence-specific scope, access profile and Linux safeguards for reports."""
 from .intelligence import ip_scope, normalize_ip
+from .cowrie_provenance import SOURCES
 from .operational_report import section
 from .rag.behavior import command_features
 
@@ -28,6 +29,7 @@ def complete_assessment(report, events, session, payload, total, *, modality="de
         ["Sensor declarado en el evento", str(raw.get("sensor", "Sin identificador de sensor en la conexión"))],
         ["Destino y puerto observado", str(raw.get("dst_ip", "Dirección no registrada")) + ":" + str(port or "Sin puerto")],
         ["Modalidad verificable de la sesión", modality],
+        ["Identidad verificada de Cowrie", SOURCES[modality][0] if modality in SOURCES else "Sin atribución verificable"],
         ["Modalidad usada por el análisis guardado", registered or "No disponible"],
         ["Conexión al backend del proxy", references(proxy_events)],
         ["Estado real del guest", "Pendiente de verificación independiente. Una conexión proxy o una salida de shell/LLM carece por sí sola de prueba de integridad, persistencia o compromiso del guest."],
@@ -104,5 +106,5 @@ def complete_assessment(report, events, session, payload, total, *, modality="de
     report["sections"][1:1] = [node, profile]
     index = next(i for i,s in enumerate(report["sections"]) if s["title"] == "Plan de investigación y respuesta")
     report["sections"][index:index] = [coverage, defense]
-    report["metadata"] += [("Puerto de captura", str(port or "Sin registro")), ("Modo declarado del nodo", mode)]
+    report["metadata"] += [("Puerto de captura", str(port or "Sin registro")), ("Modalidad verificable", modality)]
     return report

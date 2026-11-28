@@ -36,6 +36,7 @@ def capture(raw, instances, fallback):
     return instances.get(mode, fallback), {
         "estado": state, "modalidad": mode,
         "sensor": SOURCES[mode][0] if mode != UNKNOWN else None,
+        "instancia_colector": explicit,
         "fuentes": [source for source, present in (("identidad_colector", explicit), ("sensor_json", declared)) if present],
     }
 
@@ -68,8 +69,11 @@ def session_mode(session, event, instances):
 
 
 def public_provenance(mode, stored=None):
+    stored = stored or {}
     if mode in SOURCES:
         return {"modalidad": mode, "sensor": SOURCES[mode][0], "estado": "verificada",
-                "fuentes": (stored or {}).get("fuentes", ["sensor_json_historico"])}
-    return {"modalidad": UNKNOWN, "sensor": None, "estado": (stored or {}).get("estado", "insuficiente")
-            if (stored or {}).get("estado") != "verificada" else "sin_registro"}
+                "fuentes": stored.get("fuentes", ["sensor_json_historico"]),
+                "instancia_colector": stored.get("instancia_colector")}
+    return {"modalidad": UNKNOWN, "sensor": None,
+            "estado": stored.get("estado", "insuficiente") if stored.get("estado") != "verificada" else "sin_registro",
+            "fuentes": stored.get("fuentes", []), "instancia_colector": stored.get("instancia_colector")}

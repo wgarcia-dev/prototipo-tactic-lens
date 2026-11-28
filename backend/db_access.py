@@ -25,13 +25,27 @@ INCIDENT_GRANTS = {
     **dict.fromkeys(("incidente_evaluacion", "incidente_sesion", "incidente_analisis", "incidente_evidencia"),
                     ("SELECT", "INSERT")),
 }
+RESPONSE_GRANTS = {
+    **dict.fromkeys(("incidente_respuesta", "incidente_accion", "incidente_recomendacion_lote"),
+                    ("SELECT", "INSERT", "UPDATE")),
+    **dict.fromkeys(("incidente_accion_evidencia", "incidente_respuesta_historial", "incidente_recomendacion_peticion"),
+                    ("SELECT", "INSERT")),
+    "incidente_respuesta_config": ("SELECT", "UPDATE"),
+}
 
 
 def runtime_grants(existing):
-    incidents = INCIDENT_GRANTS.keys() & set(existing)
-    if incidents and incidents != INCIDENT_GRANTS.keys():
-        raise RuntimeError("El esquema de evaluación de incidentes está incompleto")
-    return {**RUNTIME_GRANTS, **(INCIDENT_GRANTS if incidents else {})}
+    existing = set(existing)
+    grants = dict(RUNTIME_GRANTS)
+    for group, label in ((INCIDENT_GRANTS, "evaluación"), (RESPONSE_GRANTS, "respuesta")):
+        present = existing & group.keys()
+        if present and present != group.keys():
+            raise RuntimeError(f"El esquema de {label} de incidentes está incompleto")
+        if present:
+            grants.update(group)
+    if existing & RESPONSE_GRANTS.keys() and not INCIDENT_GRANTS.keys() <= existing:
+        raise RuntimeError("La respuesta requiere la evaluación de incidentes")
+    return grants
 
 
 def verify_migration_owner(conn):

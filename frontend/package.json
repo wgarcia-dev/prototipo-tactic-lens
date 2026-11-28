@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
-    "test": "node --experimental-strip-types --test src/auth/validators.test.mjs src/monitoring/polling.test.mjs src/monitoring/socket.test.mjs src/monitoring/invalidation.test.mjs src/analysis/iocEvidence.test.mjs src/analysis/mitreResults.test.mjs src/incidents/evaluationModel.test.mjs"
+    "test": "node --experimental-strip-types --test src/auth/validators.test.mjs src/monitoring/polling.test.mjs src/monitoring/socket.test.mjs src/monitoring/invalidation.test.mjs src/analysis/iocEvidence.test.mjs src/analysis/mitreResults.test.mjs src/incidents/evaluationModel.test.mjs src/incidents/response/model.test.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "6.3.1",

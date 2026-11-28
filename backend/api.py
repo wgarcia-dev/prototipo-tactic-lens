@@ -89,9 +89,11 @@ async def lifespan(app: FastAPI):
         if set(conn.scalars(select(tables["honeypot"].c.id_honeypot).where(tables["honeypot"].c.id_honeypot.in_(sensor_ids())))) != set(sensor_ids()):
             raise RuntimeError("HONEYPOT_ID no existe")
     app.state.engine, app.state.tables = engine, tables
-    from .safeguards import backfill
+    from .safeguards import backfill, configure_legacy_archive, legacy_archive
     with engine.begin() as conn:
-        backfill(conn, tables, sensor_ids())
+        configure_legacy_archive(app, conn)
+        if not legacy_archive(app):
+            backfill(conn, tables, sensor_ids())
     from .monitoring import SnapshotCache
     app.state.dashboard_cache = SnapshotCache()
     from .realtime import MonitorHub, PostgresMonitor
@@ -181,8 +183,8 @@ def sessions(request: Request, limit: int = Query(50, ge=1, le=200), offset: int
         states = states_for_sessions(conn, analysis_table, inputs)
         redactors = session_redactors(conn, events_table, states)
     return [redactors[row.id_sesion].payload({**{key:value for key,value in row.items() if key != 'tiene_resultado'},
-            "procedencia": public_provenance(row.modalidad) if row.modalidad == "desconocido" else
-                          {"modalidad": row.modalidad, "estado": "verificada"},
+            "procedencia": public_provenance(row.modalidad,
+                {"fuentes": ["eventos_consistentes"]} if row.modalidad != "desconocido" else None),
             **public_state(states[row.id_sesion])}) for row in rows]
 
 
@@ -216,6 +218,7 @@ def events(id: UUID, request: Request, limit: int = Query(200, ge=1, le=500), of
 from . import routes  # noqa: E402,F401 - registers extended routes
 from .safeguards import router as safeguards_router
 from .incident_routes import router as incidents_router
+from .incident_response_routes import router as incident_response_router, board as incident_response_board
 from .auth.routes import router as auth_router
 from .auth.middleware import AuthMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -224,6 +227,8 @@ from fastapi.responses import JSONResponse
 app.include_router(auth_router)
 app.include_router(safeguards_router)
 app.include_router(incidents_router)
+app.include_router(incident_response_router)
+app.include_router(incident_response_board)
 from .auth.onboarding import router as onboarding_router
 app.include_router(onboarding_router)
 from .auth.recovery import router as recovery_router

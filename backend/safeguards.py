@@ -2,13 +2,14 @@
 from datetime import date, datetime, timezone
 from hashlib import sha256
 import json
+import os
 import unicodedata
 from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import case, func, literal, or_, select
+from sqlalchemy import case, func, literal, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 
 from .api import local_only, sensor_ids
@@ -19,6 +20,56 @@ from .sensitive import session_redactors
 
 router = APIRouter(prefix="/api/salvaguardas", dependencies=[Depends(local_only)])
 STATES = ("pendiente", "en_desarrollo", "realizada")
+
+
+def legacy_archive(app):
+    return getattr(app.state, "safeguard_archive_active", False)
+
+
+def legacy_pending(conn, tables):
+    """Count unresolved handoffs without translating historical decisions."""
+    if "incidente_accion" not in tables:
+        return {"tareas_por_conciliar": None, "revisiones_por_conciliar": None}
+    query = text("""
+        WITH approved_actions AS (
+            SELECT procedencia FROM honeypot.incidente_accion WHERE estado <> 'propuesta'
+        )
+        SELECT
+            (SELECT count(*) FROM honeypot.salvaguarda l JOIN honeypot.sesion s USING(id_sesion)
+              WHERE s.id_honeypot = ANY(:ids) AND l.estado IN ('pendiente','en_desarrollo')
+                AND NOT EXISTS (SELECT 1 FROM approved_actions a
+                     WHERE a.procedencia->>'id_salvaguarda' = l.id_salvaguarda::text)) AS tareas_por_conciliar,
+            (SELECT count(*) FROM honeypot.analisis_llm l JOIN honeypot.sesion s USING(id_sesion)
+              CROSS JOIN LATERAL jsonb_each(CASE
+                WHEN jsonb_typeof(l.resultado_estructurado->'seguimiento_salvaguardas') = 'object'
+                  THEN l.resultado_estructurado->'seguimiento_salvaguardas' ELSE '{}'::jsonb END) r
+              WHERE s.id_honeypot = ANY(:ids) AND r.value->-1->>'estado' IN ('aprobada','en_curso')
+                AND NOT EXISTS (SELECT 1 FROM approved_actions a
+                     WHERE a.procedencia->>'id_analisis' = l.id_analisis::text
+                       AND 'SG-' || lpad(a.procedencia->>'posicion',
+                           greatest(3, length(a.procedencia->>'posicion')), '0') = r.key)) AS revisiones_por_conciliar
+    """)
+    return dict(conn.execute(query, {"ids": list(sensor_ids())}).mappings().one())
+
+
+def configure_legacy_archive(app, conn):
+    requested = os.getenv("INCIDENT_RESPONSE_ARCHIVE_SAFEGUARDS", "").lower() == "true"
+    app.state.safeguard_archive_requested = requested
+    app.state.safeguard_archive_active = requested and all(
+        count == 0 for count in legacy_pending(conn, app.state.tables).values())
+
+
+@router.get("/archivo")
+def legacy_status(request: Request):
+    with request.app.state.engine.connect() as conn:
+        return {"archivo_activo": legacy_archive(request.app),
+                "archivo_solicitado": getattr(request.app.state, "safeguard_archive_requested", False),
+                **legacy_pending(conn, request.app.state.tables)}
+
+
+def require_legacy_writes(request):
+    if legacy_archive(request.app):
+        raise HTTPException(409, "Salvaguardas está en modo histórico. Gestione la acción desde Respuesta a Incidentes.")
 
 
 def capacity(conn, tables, *, lock=False, require_space=False):
@@ -162,6 +213,7 @@ def board_config(request: Request):
 
 @router.put("/configuracion")
 def configure_board(body: BoardConfig, request: Request):
+    require_legacy_writes(request)
     tables = request.app.state.tables
     config = tables["salvaguarda_config"]
     with request.app.state.engine.begin() as conn:
@@ -237,6 +289,7 @@ class Change(BaseModel):
 @router.post("/{task_id}/{operation}")
 def change(task_id: UUID, operation: Literal["asignacion","estado","avance","evidencia","reapertura"],
            body: Change, request: Request):
+    require_legacy_writes(request)
     tables = request.app.state.tables
     task, log = tables["salvaguarda"], tables["salvaguarda_historial"]
     with request.app.state.engine.begin() as conn:

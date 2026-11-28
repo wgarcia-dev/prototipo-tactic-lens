@@ -148,7 +148,8 @@ def session_detail(id_sesion: UUID):
             mode = measured_modality(conn, id_sesion)
     if not row:
         raise HTTPException(404, "Sesion no encontrada")
-    return redactor.payload({**plain(row), "modalidad": mode, "procedencia": public_provenance(mode), **public_state(state)})
+    return redactor.payload({**plain(row), "modalidad": mode, "procedencia": public_provenance(
+        mode, {"fuentes": ["eventos_consistentes"]} if mode != "desconocido" else None), **public_state(state)})
 
 
 def dashboard_snapshot():
@@ -575,11 +576,12 @@ def execute_analysis(id_sesion, actualizar_informe, actualizar_rag):
                          "clasificacion_mitre":classification,
                          "candidatas_mitre_no_validadas":unvalidated, "enriquecimiento":enrichment,
                          "evaluacion_incidente":incident_assessment}
-            from .safeguards import register_recommendations
+            from .safeguards import legacy_archive, register_recommendations
             persisted = redactor.payload(persisted)
             persisted["vigencia_snapshot"] = snapshot
             persisted["ejecucion"] = execution
-            register_recommendations(conn, app.state.tables, analysis_id, id_sesion, persisted)
+            if not legacy_archive(app):
+                register_recommendations(conn, app.state.tables, analysis_id, id_sesion, persisted)
             budget.left(phase)
             completed = conn.execute(a.update().where(*active).values(
                 estado="completado", fecha_fin=func.clock_timestamp(), resumen=redactor.text(result.resumen),
@@ -1134,6 +1136,8 @@ def list_safeguard_proposals(id_analisis: UUID | None = None, id_sesion: UUID | 
 
 @app.post("/api/analisis/{id_analisis}/salvaguardas/{codigo}/revision", dependencies=[Depends(local_only)])
 def review_safeguard(id_analisis: UUID, codigo: str, decision: safeguard_proposals.SafeguardReview, request: Request):
+    from .safeguards import require_legacy_writes
+    require_legacy_writes(request)
     analysis = table("analisis_llm")
     with app.state.engine.begin() as conn:
         _, actor = require_admin(conn, request)

@@ -171,4 +171,3 @@ class DiagnosticTrace:
             return True
         except (OSError,ValueError,subprocess.SubprocessError):
             return False
-

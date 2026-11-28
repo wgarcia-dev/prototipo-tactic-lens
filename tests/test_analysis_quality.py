@@ -261,4 +261,3 @@ class AnalysisQualityTests(unittest.TestCase):
             actual=json.loads(text)["etapas"]
             self.assertEqual(actual["contexto_entregado"]["referencias_tty"],[1])
             self.assertEqual(actual["consolidacion"]["estado"],"intento")
-

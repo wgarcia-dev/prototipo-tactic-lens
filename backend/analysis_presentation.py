@@ -172,4 +172,3 @@ def analytical_sections(payload):
     output.append(section("Metadatos técnicos", [
         f"Esquema {payload['version_esquema']} · metodología {payload['version_metodologia']} · matriz {payload['version_matriz']} · contratos {payload['version_contratos']} · narrativa {payload['version_narrativa']}"]))
     return output
-

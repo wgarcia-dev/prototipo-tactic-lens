@@ -270,4 +270,3 @@ def risk(potential, organization: OrganizationEvidence | None = None):
         rules.append("RSK04")
     return {"estado": "no_evaluable", "nivel": None, "reglas_aplicadas": rules,
             "fundamento": "Riesgo organizacional no evaluado. Se requieren activo, exposición, criticidad, probabilidad e impacto documentados."}
-

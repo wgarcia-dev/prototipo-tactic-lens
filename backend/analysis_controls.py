@@ -138,4 +138,3 @@ def cited_safeguard(focus, behaviors, priority, *, provider_selected=True):
             "justificacion":("Diligencia propuesta por el modelo y verificada con los eventos citados." if provider_selected
                              else "Diligencia priorizada por la evidencia de los eventos citados."),
             "tecnicas_relacionadas":[], "mitigaciones_mitre":[], "eventos":[str(b.evento) for b in behaviors]}
-

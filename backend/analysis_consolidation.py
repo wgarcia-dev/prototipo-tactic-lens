@@ -439,4 +439,3 @@ def structure_result(result, evaluated, delivered, modality, by_event, enrichmen
                          + (f" Evidencia {citations}." if citations else ""))
     report["conclusion"] = "\n\n".join(filter(None, [outcome, technical, investigation, observed_scope]))
     return structured
-

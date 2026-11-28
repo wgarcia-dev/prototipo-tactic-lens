@@ -583,4 +583,3 @@ def strategies(witnesses):
             }
         result[code]["eventos"] = list(dict.fromkeys([*result[code]["eventos"], *(str(eid) for eid in witness.ids)]))
     return list(result.values())
-

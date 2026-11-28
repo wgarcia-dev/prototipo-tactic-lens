@@ -251,4 +251,3 @@ def validated_sentences(proposal, behaviors):
     accepted = list(unique.values())
     return accepted, {"aceptadas":len(accepted), "rechazadas":rejected, "duplicadas":len(parts)-len(accepted)-rejected,
                       "motivo_codigo":"comparacion_literal","motivo":"La proposición debe describir una solicitud u observación contenida en sus citas."}
-

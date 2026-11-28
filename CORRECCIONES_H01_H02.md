@@ -64,4 +64,3 @@ El backfill de salvaguardas conserva las concesiones requeridas para escribir ta
 
 - H01 enmascara secretos reconocibles por estructura, sintaxis o contexto de la sesión. No puede inferir un valor arbitrario sin esas señales ni asociar automáticamente credenciales entre sesiones distintas. El dato original permanece en PostgreSQL y requiere controles de acceso, respaldo y retención adecuados. Los resultados históricos se protegen al publicarse, sin reescribir el histórico.
 - H02 protege frente a la identidad SQL de ejecución. El DBA y el propietario conservan capacidad administrativa. Se requiere separar también el acceso al secreto administrativo y al respaldo a nivel de sistema operativo. La verificación aislada incluyó la preparación posterior a la restauración, pero no una restauración operativa completa ni una rotación real de credenciales.
-

@@ -181,4 +181,3 @@ def organizational_context(behaviors):
                 "El tipo de recurso y su exposición siguen sin poder establecerse."]
     return ["La evidencia de esta sesión no identifica un recurso expuesto por una operación interpretable. "
             "Valorar exposición y controles del servicio si aparecen registros de actividad adicionales."] if behaviors else []
-

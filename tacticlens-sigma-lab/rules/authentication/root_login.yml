@@ -1,0 +1,17 @@
+title: Autenticacion exitosa como root
+id: 595580e9-18bf-5906-81d2-5eaa2e65ba6e
+name: root_login
+status: experimental
+description: Observed honeypot activity; does not establish successful execution or
+  compromise.
+author: TacticLens
+logsource:
+  product: cowrie
+detection:
+  selection:
+    eventid: cowrie.login.success
+    username: root
+  condition: selection
+falsepositives:
+- Authorized laboratory activity; administrative commands; quoted text.
+level: low

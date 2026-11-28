@@ -1,0 +1,17 @@
+title: Acceso root seguido de archivo sensible
+id: 11783425-0ba9-5721-b822-550ae24f9fc9
+name: login_then_sensitive
+status: experimental
+correlation:
+  type: temporal_ordered
+  rules:
+  - root_login
+  - sensitive_files
+  group-by:
+  - id_sesion
+  - id_honeypot
+  - instance_type
+  timespan: 5m
+  generate: true
+level: high
+tags: []

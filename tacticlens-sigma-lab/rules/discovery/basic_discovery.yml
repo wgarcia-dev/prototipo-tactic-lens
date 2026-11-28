@@ -1,0 +1,17 @@
+title: Reconocimiento basico
+id: 3a0af94a-d49b-5bda-ac48-398ecb199244
+name: basic_discovery
+status: experimental
+description: Observed honeypot activity; does not establish successful execution or
+  compromise.
+author: TacticLens
+logsource:
+  product: cowrie
+detection:
+  selection:
+    eventid: cowrie.command.input
+    input|re: ^\s*(ls|pwd|whoami)(\s|$)
+  condition: selection
+falsepositives:
+- Authorized laboratory activity; administrative commands; quoted text.
+level: low

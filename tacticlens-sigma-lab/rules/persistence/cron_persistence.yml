@@ -1,0 +1,19 @@
+title: Intento de persistencia mediante cron
+id: 9d3b4408-ee7f-5045-b23e-dc1df82c7ce4
+name: cron_persistence
+status: experimental
+description: Observed honeypot activity; does not establish successful execution or
+  compromise.
+author: TacticLens
+logsource:
+  product: cowrie
+detection:
+  selection:
+    eventid: cowrie.command.input
+    input|re: (>>?\s*[^;]*/etc/cron|crontab\s+-[ei])
+  condition: selection
+falsepositives:
+- Authorized laboratory activity; administrative commands; quoted text.
+level: high
+tags:
+- attack.t1053.003

@@ -1,0 +1,3 @@
+# Optional; plan and replay work without this dependency.
+-r requirements.txt
+paramiko==4.0.0

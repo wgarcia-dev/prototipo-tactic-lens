@@ -1,0 +1,16 @@
+title: Comando no reconocido
+id: a3da0924-2d1d-514e-8832-a143373bed31
+name: unknown_command
+status: experimental
+description: Observed honeypot activity; does not establish successful execution or
+  compromise.
+author: TacticLens
+logsource:
+  product: cowrie
+detection:
+  selection:
+    eventid: cowrie.command.failed
+  condition: selection
+falsepositives:
+- Authorized laboratory activity; administrative commands; quoted text.
+level: low

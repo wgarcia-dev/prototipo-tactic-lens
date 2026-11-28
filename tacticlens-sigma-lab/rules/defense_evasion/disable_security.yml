@@ -1,0 +1,21 @@
+title: Intento de deshabilitar firewall
+id: 9fe13636-57dd-5ead-8e41-77283cb38a9f
+name: disable_security
+status: experimental
+description: Observed honeypot activity; does not establish successful execution or
+  compromise.
+author: TacticLens
+logsource:
+  product: cowrie
+detection:
+  selection:
+    eventid: cowrie.command.input
+    input|contains:
+    - iptables -F
+    - ufw disable
+  condition: selection
+falsepositives:
+- Authorized laboratory activity; administrative commands; quoted text.
+level: high
+tags:
+- attack.t1686

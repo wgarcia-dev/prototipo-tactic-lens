@@ -1,0 +1,19 @@
+title: Comportamiento potencialmente destructivo
+id: 795705fa-40ac-5ef0-9051-7b9732e83cc3
+name: destructive_command
+status: experimental
+description: Observed honeypot activity; does not establish successful execution or
+  compromise.
+author: TacticLens
+logsource:
+  product: cowrie
+detection:
+  selection:
+    eventid: cowrie.command.input
+    input|re: (rm\s+(-[rfRF]+\s+)+/(\s|$|\*)|mkfs(\.[a-z0-9]+)?\s+/dev/|dd\s+.*of=/dev/)
+  condition: selection
+falsepositives:
+- Authorized laboratory activity; administrative commands; quoted text.
+level: critical
+tags:
+- attack.t1485

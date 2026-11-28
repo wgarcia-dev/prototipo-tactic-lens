@@ -1,0 +1,19 @@
+title: Posible prompt injection en texto no confiable
+id: aab26807-3e8d-5771-aaf1-c25db5f85f0a
+name: prompt_injection
+status: experimental
+description: Observed honeypot activity; does not establish successful execution or
+  compromise.
+author: TacticLens
+logsource:
+  product: cowrie
+detection:
+  selection:
+    eventid: cowrie.command.input
+    input|contains:
+    - ignore previous instructions
+    - ignora las instrucciones anteriores
+  condition: selection
+falsepositives:
+- Authorized laboratory activity; administrative commands; quoted text.
+level: medium

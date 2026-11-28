@@ -1,0 +1,17 @@
+title: Autenticacion SSH fallida (base)
+id: 58689f60-b822-5f0f-8a2d-2d010f12932f
+name: login_failed
+status: experimental
+description: Observed honeypot activity; does not establish successful execution or
+  compromise.
+author: TacticLens
+logsource:
+  product: cowrie
+detection:
+  selection:
+    eventid: cowrie.login.failed
+    protocol: ssh
+  condition: selection
+falsepositives:
+- Authorized laboratory activity; administrative commands; quoted text.
+level: informational

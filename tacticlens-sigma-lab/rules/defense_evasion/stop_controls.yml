@@ -1,0 +1,20 @@
+title: Intento de deshabilitar auditoria o SELinux
+id: e1812890-82f2-5eff-8792-0fff410849f8
+name: stop_controls
+status: experimental
+description: Observed honeypot activity; does not establish successful execution or
+  compromise.
+author: TacticLens
+logsource:
+  product: cowrie
+detection:
+  selection:
+    eventid: cowrie.command.input
+    input|contains:
+    - setenforce 0
+    - systemctl stop auditd
+  condition: selection
+falsepositives:
+- Authorized laboratory activity; administrative commands; quoted text.
+level: high
+tags: []

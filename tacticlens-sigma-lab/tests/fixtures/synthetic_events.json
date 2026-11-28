@@ -1,0 +1,101 @@
+[
+  {
+    "id_evento": "synthetic-0",
+    "id_sesion": "synthetic-session-0",
+    "id_honeypot": "synthetic-shell",
+    "instance_type": "shell",
+    "timestamp": "2026-11-27T00:00:00Z",
+    "eventid": "cowrie.command.input",
+    "input": "ls",
+    "src_ip": "192.0.2.1",
+    "protocol": "ssh"
+  },
+  {
+    "id_evento": "synthetic-1",
+    "id_sesion": "synthetic-session-1",
+    "id_honeypot": "synthetic-proxy",
+    "instance_type": "proxy",
+    "timestamp": "2026-11-27T00:00:01Z",
+    "eventid": "cowrie.command.input",
+    "input": "cat /etc/shadow",
+    "src_ip": "192.0.2.1",
+    "protocol": "ssh"
+  },
+  {
+    "id_evento": "synthetic-2",
+    "id_sesion": "synthetic-session-2",
+    "id_honeypot": "synthetic-llm",
+    "instance_type": "llm",
+    "timestamp": "2026-11-27T00:00:02Z",
+    "eventid": "cowrie.command.input",
+    "input": "curl https://example.invalid/sample",
+    "src_ip": "192.0.2.1",
+    "protocol": "ssh"
+  },
+  {
+    "id_evento": "synthetic-3",
+    "id_sesion": "synthetic-session-3",
+    "id_honeypot": "synthetic-shell",
+    "instance_type": "shell",
+    "timestamp": "2026-11-27T00:00:03Z",
+    "eventid": "cowrie.command.input",
+    "input": "sudo id",
+    "src_ip": "192.0.2.1",
+    "protocol": "ssh"
+  },
+  {
+    "id_evento": "synthetic-4",
+    "id_sesion": "synthetic-session-4",
+    "id_honeypot": "synthetic-proxy",
+    "instance_type": "proxy",
+    "timestamp": "2026-11-27T00:00:04Z",
+    "eventid": "cowrie.command.input",
+    "input": "echo key >> ~/.ssh/authorized_keys",
+    "src_ip": "192.0.2.1",
+    "protocol": "ssh"
+  },
+  {
+    "id_evento": "synthetic-5",
+    "id_sesion": "synthetic-session-5",
+    "id_honeypot": "synthetic-llm",
+    "instance_type": "llm",
+    "timestamp": "2026-11-27T00:00:05Z",
+    "eventid": "cowrie.command.input",
+    "input": "ufw disable",
+    "src_ip": "192.0.2.1",
+    "protocol": "ssh"
+  },
+  {
+    "id_evento": "synthetic-6",
+    "id_sesion": "synthetic-session-6",
+    "id_honeypot": "synthetic-shell",
+    "instance_type": "shell",
+    "timestamp": "2026-11-27T00:00:06Z",
+    "eventid": "cowrie.command.input",
+    "input": "rm -rf /",
+    "src_ip": "192.0.2.1",
+    "protocol": "ssh"
+  },
+  {
+    "id_evento": "synthetic-7",
+    "id_sesion": "synthetic-session-7",
+    "id_honeypot": "synthetic-llm",
+    "instance_type": "llm",
+    "timestamp": "2026-11-27T00:00:07Z",
+    "eventid": "cowrie.command.input",
+    "input": "",
+    "src_ip": "192.0.2.1",
+    "protocol": "ssh"
+  },
+  {
+    "id_evento": "synthetic-8",
+    "id_sesion": "synthetic-session-8",
+    "id_honeypot": "synthetic-proxy",
+    "instance_type": "proxy",
+    "timestamp": "2026-11-27T00:00:08Z",
+    "eventid": "cowrie.command.input",
+    "input": "echo safe",
+    "src_ip": "192.0.2.1",
+    "protocol": "ssh"
+  }
+]

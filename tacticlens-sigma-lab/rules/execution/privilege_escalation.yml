@@ -1,0 +1,19 @@
+title: Intento de escalamiento de privilegios
+id: 051632a5-b3a0-58ac-84d8-ed17f382bfe1
+name: privilege_escalation
+status: experimental
+description: Observed honeypot activity; does not establish successful execution or
+  compromise.
+author: TacticLens
+logsource:
+  product: cowrie
+detection:
+  selection:
+    eventid: cowrie.command.input
+    input|re: (^|[;|&]\s*)(sudo\s|su\s+-|chmod\s+[u+]*[+]s)
+  condition: selection
+falsepositives:
+- Authorized laboratory activity; administrative commands; quoted text.
+level: high
+tags:
+- attack.t1548

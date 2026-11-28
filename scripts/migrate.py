@@ -1,11 +1,13 @@
 """Apply reviewed, versioned SQL migrations without recreating the schema."""
 import hashlib
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
 from sqlalchemy import text
 
-from backend.db import database_engine
+from backend.db import migration_engine
+from backend.db_access import configure_runtime_grants, verify_migration_owner
 
 MIGRATIONS = Path(__file__).resolve().parents[1] / "database" / "migrations"
 # Keep the published SQL and its checksum for collaborators who already applied
@@ -13,10 +15,12 @@ MIGRATIONS = Path(__file__).resolve().parents[1] / "database" / "migrations"
 DEFERRED_DATA_MIGRATIONS = {"008_limpieza_dominios.sql"}
 
 
-def migrate(engine):
+def migrate(engine, runtime_role=None):
     applied, deferred = [], []
     with engine.begin() as conn:
         conn.execute(text("SELECT pg_advisory_xact_lock(724610901)"))
+        if runtime_role:
+            verify_migration_owner(conn)
         conn.execute(text("""CREATE TABLE IF NOT EXISTS honeypot.schema_migration (
             version varchar(100) PRIMARY KEY, checksum varchar(64) NOT NULL,
             aplicado_en timestamptz NOT NULL DEFAULT now())"""))
@@ -40,14 +44,16 @@ def migrate(engine):
             conn.connection.driver_connection.execute(sql, prepare=False)
             conn.execute(text("INSERT INTO honeypot.schema_migration(version,checksum) VALUES(:v,:c)"), {"v": path.name, "c": digest})
             applied.append(path.name)
+        if runtime_role:
+            configure_runtime_grants(conn, runtime_role)
     return {"applied": applied, "deferred": deferred}
 
 
 if __name__ == "__main__":
     load_dotenv()
-    engine = database_engine()
+    engine = migration_engine()
     try:
-        result = migrate(engine)
+        result = migrate(engine, runtime_role=os.environ["DATABASE_USER"])
         print("Migraciones aplicadas. Los datos existentes se conservan.")
         if result['deferred']:
             print("Limpieza destructiva NO ejecutada: " + ", ".join(result['deferred']))

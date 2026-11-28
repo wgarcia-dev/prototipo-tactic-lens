@@ -3,7 +3,7 @@ import argparse,hashlib,json,time
 from dotenv import load_dotenv
 from sqlalchemy import select,text
 from sqlalchemy.dialects.postgresql import insert
-from backend.db import database_engine
+from backend.db import migration_engine
 from backend.rag.catalog import tables
 from backend.rag.embeddings import MODEL,REVISION,encoder,prepare_model,catalog_text
 
@@ -41,7 +41,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--preparar-modelo',action='store_true');args=parser.parse_args();load_dotenv()
     if args.preparar_modelo:print(json.dumps(prepare_model(),ensure_ascii=False),flush=True)
-    engine=database_engine()
+    engine=migration_engine()
     try:print(json.dumps(generate(engine),ensure_ascii=False))
     finally:engine.dispose()
 

@@ -56,6 +56,7 @@ async function apiResponse(
         message = body.detail
           .map((e: { msg: string }) => e.msg.replace(/^Value error, /, ""))
           .join(". ");
+      else if (typeof body.detail?.mensaje === "string") message = body.detail.mensaje;
     } catch {
       /* Proxy failures can return plain text. */
     }

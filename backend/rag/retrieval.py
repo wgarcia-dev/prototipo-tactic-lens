@@ -20,19 +20,29 @@ def active_catalog(conn):
 def query_vector(query):return tuple(encoder().encode([query])[0])
 
 
+def ready_embeddings(conn, catalog_id):
+    params = {"model": MODEL + '@' + REVISION[:12], "catalog": str(catalog_id)}
+    model_id = conn.scalar(text("SELECT id_modelo_embedding FROM honeypot.modelo_embedding WHERE proveedor='local-onnx-cpu' AND nombre_modelo=:model AND dimension=384"), params)
+    if model_id is None:
+        raise RuntimeError('Genere primero los embeddings del catalogo')
+    availability = conn.execute(text('''SELECT count(*) total,
+        count(*) FILTER(WHERE id_modelo_rag=CAST(:model_id AS uuid) AND embedding_rag IS NOT NULL) listos
+        FROM honeypot.tecnica_mitre WHERE id_catalogo=CAST(:catalog AS uuid) AND NOT revocada AND NOT deprecada'''),
+        {**params, "model_id": str(model_id)}).mappings().one()
+    if not availability.total or availability.total != availability.listos:
+        raise RuntimeError('Embeddings incompletos; finalice su generacion antes de analizar')
+    return str(model_id)
+
+
 def search(engine,query,k=12,encode=None,priority=()):
     k=max(1,min(int(k),40))
     vector=encode([query])[0] if encode else query_vector(query)
     if len(vector)!=384:raise ValueError('Dimension vectorial incorrecta')
     lexical_query=' OR '.join(dict.fromkeys(re.findall(r'[A-Za-z]{3,}',query)[:60]))
-    params={'vector':json.dumps(vector),'query':lexical_query,'limit':max(40,k*3),'model':MODEL+'@'+REVISION[:12]}
+    params={'vector':json.dumps(vector),'query':lexical_query,'limit':max(40,k*3)}
     with engine.connect() as conn:
         catalog=active_catalog(conn);params['catalog']=catalog['id_catalogo']
-        model_id=conn.scalar(text("SELECT id_modelo_embedding FROM honeypot.modelo_embedding WHERE proveedor='local-onnx-cpu' AND nombre_modelo=:model AND dimension=384"),params)
-        if model_id is None:raise RuntimeError('Genere primero los embeddings del catalogo')
-        params['model_id']=str(model_id)
-        availability=conn.execute(text('SELECT count(*) total,count(*) FILTER(WHERE id_modelo_rag=CAST(:model_id AS uuid) AND embedding_rag IS NOT NULL) listos FROM honeypot.tecnica_mitre WHERE id_catalogo=CAST(:catalog AS uuid) AND NOT revocada AND NOT deprecada'),params).mappings().one()
-        if availability.total!=availability.listos:raise RuntimeError('Embeddings incompletos; finalice su generacion antes de analizar')
+        model_id=params['model_id']=ready_embeddings(conn, catalog['id_catalogo'])
         base="FROM honeypot.tecnica_mitre WHERE id_catalogo=CAST(:catalog AS uuid) AND NOT revocada AND NOT deprecada"
         dense=conn.execute(text('SELECT codigo_tecnica,1-(embedding_rag <=> CAST(:vector AS vector)) similitud '+base+
             ' AND id_modelo_rag=CAST(:model_id AS uuid) AND embedding_rag IS NOT NULL ORDER BY embedding_rag <=> CAST(:vector AS vector),codigo_tecnica LIMIT :limit'),params).mappings().all()
@@ -92,14 +102,15 @@ def select_candidates(candidates,limit=24):
     ranked=sorted(candidates,key=rank)
     supported=[row for row in ranked if row.get('observabilidad')=='intento_evaluable']
     exploratory=[row for row in ranked if row.get('observabilidad')!='intento_evaluable']
-    reserve=min(limit//4,len(exploratory))
-    chosen=supported[:limit-reserve]
-    return chosen+exploratory[:limit-len(chosen)]
+    return supported+exploratory[:max(0,limit-len(supported))]
 
 
 def context(engine,events,k=16,modality='desconocido',sample=None):
     behavior=represent(events,modality)
-    evidence=technique_evidence(evidence_sample(events,modality) if sample is None else sample,modality)
+    delivered={event.id_evento for event in (evidence_sample(events,modality) if sample is None else sample)}
+    evidence={code: {eid: grade for eid,grade in grades.items() if eid in delivered}
+              for code,grades in technique_evidence(events,modality).items()}
+    evidence={code: grades for code,grades in evidence.items() if grades}
     # Per-behavior retrieval prevents one strong action hiding other session actions.
     tags=list(dict.fromkeys([*(CONTRACTS[code].tag for code in evidence),*behavior['acciones']]))
     queries=[behavior['consulta_segura']]+[behavior_label(tag) for tag in tags[:12]]

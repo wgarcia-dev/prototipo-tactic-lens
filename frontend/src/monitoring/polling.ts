@@ -8,7 +8,7 @@ export type PollEnvironment = {
   subscribe: (run: () => void) => () => void
 }
 
-export function startPolling(task: PollTask, interval: number, env: PollEnvironment) {
+export function startPolling(task: PollTask, interval: number | (()=>number), env: PollEnvironment) {
   let stopped = false, running = false, failures = 0, wake = false
   let timer: unknown
   let controller: AbortController | undefined
@@ -25,7 +25,8 @@ export function startPolling(task: PollTask, interval: number, env: PollEnvironm
       running = false
       controller = undefined
       if (!stopped && env.visible()) {
-        const period = Math.min(interval * 2 ** Math.min(failures, 4), 15000)
+        const base = typeof interval === 'function' ? interval() : interval
+        const period = Math.min(base * 2 ** Math.min(failures, 4), Math.max(base, 15000))
         timer = env.schedule(() => { void run() }, wake?50:Math.max(50, period - (env.now() - started)))
         wake=false
       }

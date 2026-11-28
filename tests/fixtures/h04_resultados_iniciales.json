@@ -1,0 +1,3394 @@
+{
+  "metadata": {
+    "corpus": {
+      "version": "h04-inicial-1",
+      "independiente": true,
+      "revision_experta": "pendiente",
+      "origen": "Etiquetas preliminares de lectura manual de evidencia sintética, definidas antes de ejecutar predicciones.",
+      "particion": "evaluacion",
+      "ajuste_separado": "tests/fixtures/rag_retrieval_dev.json",
+      "nota": "E24 es un control de límite con referencia externa sintética. La interfaz operativa de Cowrie no autentica dicha referencia."
+    },
+    "corpus_sha256": "41055335501f6e45ac81dc5b37dfe7d72945ea157bf6e05bab1579ee07461525",
+    "modo": "simulado",
+    "metodologia": {
+      "catalogo": {
+        "id_catalogo": "c5dba57a-e7c4-4c94-835d-6aab1e9badec",
+        "version": "20.1",
+        "fuente": "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/v20.1/enterprise-attack/enterprise-attack.json",
+        "sha256": "539a843a7b53ed9749740b2123dddae3726b1a4831841c32aca740b011b910b5"
+      },
+      "proveedor": "simulado",
+      "modelo": "simulador-h04-v1",
+      "endpoint_sha256": "8622d4dc0537dddd4c081cefd0caf2b4fc60d06ef55b4bc32ff780b83d1af7ef",
+      "prompt_sha256": "72f31c04d13bc88fbd2d737a5126965b5e4309c9099e49d3b2feea40ec1c369b",
+      "parametros": {
+        "temperature": 0,
+        "thinking": {
+          "type": "disabled"
+        },
+        "response_format": {
+          "type": "json_object"
+        },
+        "max_tokens": 8192
+      },
+      "metodo": "deepseek_rag_mitre_v1",
+      "pipeline": "automatic_mitre_v5",
+      "validador": "cowrie_contracts_v5",
+      "contratos": [
+        [
+          "T1003.008",
+          "1",
+          "shadow_access",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0006"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1007",
+          "1",
+          "system_service_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0007"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1016",
+          "2",
+          "network_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell",
+            "desconocido"
+          ],
+          [],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1016.001",
+          "1",
+          "internet_connectivity_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0007"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1016.002",
+          "1",
+          "wifi_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0007"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1018",
+          "2",
+          "remote_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1033",
+          "2",
+          "user_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell",
+            "desconocido"
+          ],
+          [],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1040",
+          "1",
+          "packet_capture",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0007"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1046",
+          "2",
+          "network_scan",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1049",
+          "1",
+          "connection_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0007"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1053.002",
+          "1",
+          "at_schedule",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0002"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1053.003",
+          "2",
+          "cron",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell",
+            "desconocido"
+          ],
+          [
+            "TA0003"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1053.006",
+          "1",
+          "systemd_timer",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0003"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1057",
+          "3",
+          "process_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell",
+            "desconocido"
+          ],
+          [],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1059.001",
+          "1",
+          "powershell_execution",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0002"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1059.004",
+          "2",
+          "shell",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell",
+            "desconocido"
+          ],
+          [],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1059.006",
+          "1",
+          "python_execution",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0002"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1059.007",
+          "1",
+          "javascript_execution",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0002"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1059.011",
+          "1",
+          "lua_execution",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0002"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1069",
+          "1",
+          "group_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0007"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1069.001",
+          "2",
+          "group_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0007"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1070.003",
+          "2",
+          "history",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell",
+            "desconocido"
+          ],
+          [],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1082",
+          "3",
+          "system_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell",
+            "desconocido"
+          ],
+          [],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1083",
+          "2",
+          "file_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell",
+            "desconocido"
+          ],
+          [],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1087.001",
+          "1",
+          "local_account_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0007"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1098.004",
+          "2",
+          "ssh_keys",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0003"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1098.007",
+          "1",
+          "account_group_change",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0003"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1105",
+          "2",
+          "transfer",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell",
+            "desconocido"
+          ],
+          [],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input",
+            "cowrie.session.file_download"
+          ]
+        ],
+        [
+          "T1110",
+          "2",
+          "auth_repeated",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell",
+            "desconocido"
+          ],
+          [],
+          3,
+          [],
+          null,
+          [
+            "cowrie.login.failed"
+          ]
+        ],
+        [
+          "T1110.001",
+          "1",
+          "password_guessing",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0006"
+          ],
+          3,
+          [],
+          null,
+          [
+            "cowrie.login.failed"
+          ]
+        ],
+        [
+          "T1110.003",
+          "1",
+          "password_spraying",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0006"
+          ],
+          3,
+          [],
+          null,
+          [
+            "cowrie.login.failed"
+          ]
+        ],
+        [
+          "T1120",
+          "1",
+          "peripheral_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0007"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1124",
+          "1",
+          "time_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0007"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1135",
+          "1",
+          "network_share_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0007"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1136.001",
+          "2",
+          "account_create",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell",
+            "desconocido"
+          ],
+          [],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1201",
+          "1",
+          "password_policy",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0007"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1222.002",
+          "1",
+          "permission_change",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0112"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1489",
+          "1",
+          "service_stop",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0040"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1518",
+          "1",
+          "software_inventory",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0007"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1518.001",
+          "1",
+          "security_software_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0007"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1518.002",
+          "1",
+          "backup_software_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0007"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1529",
+          "1",
+          "system_shutdown",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0040"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1531",
+          "1",
+          "account_access_removal",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0040"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1543.002",
+          "1",
+          "systemd_service_registration",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0003"
+          ],
+          1,
+          [
+            "enlace",
+            "habilitacion"
+          ],
+          300,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1552.003",
+          "1",
+          "history_credential_search",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0006"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1552.004",
+          "1",
+          "private_key_access",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0006"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1560.001",
+          "1",
+          "archive_after_read",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0009"
+          ],
+          1,
+          [
+            "lectura",
+            "archivo"
+          ],
+          300,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1572",
+          "1",
+          "protocol_tunnel_request",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0011"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.direct-tcpip.request"
+          ]
+        ],
+        [
+          "T1614.001",
+          "1",
+          "language_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0007"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1652",
+          "1",
+          "driver_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0007"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1654",
+          "1",
+          "log_enumeration",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0007"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1673",
+          "1",
+          "virtual_machine_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0007"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1680",
+          "1",
+          "storage_discovery",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0007"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1685.006",
+          "1",
+          "system_log_clear",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0112"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ],
+        [
+          "T1690",
+          "1",
+          "prevent_history",
+          [
+            "cowrie_llm",
+            "cowrie_proxy",
+            "cowrie_shell"
+          ],
+          [
+            "TA0112"
+          ],
+          1,
+          [],
+          null,
+          [
+            "cowrie.command.input"
+          ]
+        ]
+      ],
+      "informe": 6,
+      "modelo_analitico": [
+        1,
+        "tacticlens-amenazas-2.0",
+        "2.0",
+        "dbefc467dca9cf18d93163e2422d6fd3dfca5edbd7c22eea3e788411591d4d3c",
+        "evidence_bound_v1",
+        "700b44c8c14d7b02a0419e9096ec26fbfa10d6a49c7671cfb96607b10ee53473",
+        "evidence_semantics_v7"
+      ],
+      "implementacion": "df7d815be4e564fce7f6e15e9d161ae356fd7289f9c06484ac8425a02214269e",
+      "recurrencia": {
+        "version": "1",
+        "ventana_horas": 24,
+        "minimo_sesiones": 3,
+        "factor": "AG10"
+      },
+      "embeddings": [
+        "sentence-transformers/all-MiniLM-L6-v2",
+        "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
+      ],
+      "sensores": {},
+      "enriquecimiento": {
+        "MISP_WARNING_LISTS_DIR": false,
+        "THREATFOX_AUTH_KEY": false,
+        "URLHAUS_AUTH_KEY": false
+      }
+    }
+  },
+  "metricas": {
+    "casos": 26,
+    "completados": 26,
+    "fallos_tecnicos": 0,
+    "recuperacion": {
+      "casos": 26,
+      "positivos": 11,
+      "Recall@5": 1.0,
+      "Recall@10": 1.0,
+      "Recall@20": 1.0
+    },
+    "mitre_contratos": {
+      "verdaderos_positivos": 12,
+      "falsos_positivos": 0,
+      "falsos_negativos": 0,
+      "precision_micro": 1.0,
+      "recall_micro": 1.0,
+      "f1_micro": 1.0,
+      "abstencion_negativos": 1.0,
+      "etiquetas_esperadas_distintas": 8,
+      "etiquetas_detectadas_distintas": 8,
+      "cobertura_etiquetas_esperadas": 1.0,
+      "casos": 26,
+      "accuracy_conjunto_exacto": 1.0
+    },
+    "mitre_seleccion": {
+      "verdaderos_positivos": 12,
+      "falsos_positivos": 0,
+      "falsos_negativos": 0,
+      "precision_micro": 1.0,
+      "recall_micro": 1.0,
+      "f1_micro": 1.0,
+      "abstencion_negativos": 1.0,
+      "etiquetas_esperadas_distintas": 8,
+      "etiquetas_detectadas_distintas": 8,
+      "cobertura_etiquetas_esperadas": 1.0,
+      "casos": 26,
+      "accuracy_conjunto_exacto": 1.0
+    },
+    "abstencion_mitre": {
+      "casos_sin_tecnica": 15,
+      "casos_evaluados": 26,
+      "tasa": 0.5769
+    },
+    "iocs": {
+      "verdaderos_positivos": 29,
+      "falsos_positivos": 0,
+      "falsos_negativos": 0,
+      "precision_micro": 1.0,
+      "recall_micro": 1.0,
+      "f1_micro": 1.0,
+      "abstencion_negativos": 1.0,
+      "etiquetas_esperadas_distintas": 4,
+      "etiquetas_detectadas_distintas": 4,
+      "cobertura_etiquetas_esperadas": 1.0,
+      "casos": 26,
+      "accuracy_conjunto_exacto": 1.0
+    },
+    "acciones_por_estado": {
+      "verdaderos_positivos": 36,
+      "falsos_positivos": 1,
+      "falsos_negativos": 1,
+      "precision_micro": 0.972972972972973,
+      "recall_micro": 0.972972972972973,
+      "f1_micro": 0.972972972972973,
+      "abstencion_negativos": null,
+      "etiquetas_esperadas_distintas": 12,
+      "etiquetas_detectadas_distintas": 11,
+      "cobertura_etiquetas_esperadas": 0.9166666666666666,
+      "casos": 26,
+      "accuracy_conjunto_exacto": 0.9615
+    },
+    "severidad": {
+      "accuracy": 0.9615,
+      "matriz_confusion": {
+        "No evaluable": {
+          "No evaluable": 4
+        },
+        "S0": {
+          "S0": 3
+        },
+        "S1": {
+          "S1": 12
+        },
+        "S2": {
+          "S2": 5
+        },
+        "S3": {
+          "S3": 1
+        },
+        "S4": {
+          "S0": 1
+        }
+      }
+    },
+    "cia": {
+      "confidencialidad": {
+        "observado": {
+          "aciertos": 25,
+          "casos": 26,
+          "accuracy": 0.9615
+        },
+        "potencial": {
+          "aciertos": 26,
+          "casos": 26,
+          "accuracy": 1.0
+        }
+      },
+      "integridad": {
+        "observado": {
+          "aciertos": 25,
+          "casos": 26,
+          "accuracy": 0.9615
+        },
+        "potencial": {
+          "aciertos": 26,
+          "casos": 26,
+          "accuracy": 1.0
+        }
+      },
+      "disponibilidad": {
+        "observado": {
+          "aciertos": 24,
+          "casos": 26,
+          "accuracy": 0.9231
+        },
+        "potencial": {
+          "aciertos": 25,
+          "casos": 26,
+          "accuracy": 0.9615
+        }
+      }
+    },
+    "evidencia": {
+      "propuestas": 14,
+      "admisibles": 14,
+      "narrativa": 26,
+      "narrativa_admisibles": 26,
+      "tecnicas_referencia": 12,
+      "tecnicas_con_cita_suficiente": 12,
+      "validez_citas_mitre_en_muestra": 1.0,
+      "validez_citas_narrativa": 1.0,
+      "afirmaciones_no_permitidas": []
+    },
+    "cobertura": {
+      "eventos": 37,
+      "eventos_en_muestra": 37,
+      "proporcion_eventos": 1.0,
+      "proporcion_casos": 1.0
+    },
+    "latencia_ms": {
+      "total": {
+        "casos": 26,
+        "promedio": 77.39,
+        "maximo": 420.85
+      },
+      "recuperacion": {
+        "casos": 26,
+        "promedio": 74.31,
+        "maximo": 417.77
+      },
+      "proveedor": {
+        "casos": 26,
+        "promedio": 1.63,
+        "maximo": 4.0
+      }
+    },
+    "tokens": {
+      "casos_con_medicion": 0,
+      "total": null
+    }
+  },
+  "resultados": {
+    "E01": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 417.77,
+        "proveedor": 1.56,
+        "total": 420.85
+      },
+      "eventos_sha256": "7e38dedbc8600bd59de17c13f8d6bfc6334d8c55841a8ee5ca6ad18baff2ec5b",
+      "recuperadas": [
+        "T1563.001",
+        "T1033",
+        "T1070",
+        "T1564.011",
+        "T1057",
+        "T1678",
+        "T1098.004",
+        "T1070.003",
+        "T1518.001",
+        "T1202",
+        "T1651",
+        "T1059.003",
+        "T1609",
+        "T1059.008",
+        "T1596",
+        "T1590.006"
+      ],
+      "estado_local": "completado",
+      "contratos": [],
+      "acciones": [
+        "1:registrado"
+      ],
+      "iocs": [
+        "IP:198.51.100.43"
+      ],
+      "severidad": "S0",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON01",
+        "fundamento": "El evento estructurado registra directamente el hecho acotado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "no_evaluable",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": null
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 1,
+      "afirmaciones": [],
+      "identificadas": [],
+      "propuestas": [],
+      "citas_mitre": {},
+      "citas": {
+        "propuestas": 0,
+        "admisibles": 0,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "51dd0dd3951e308f9785983a85448686c0745940deeff02fd7f468415e229104"
+    },
+    "E02": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 40.46,
+        "proveedor": 1.4,
+        "total": 42.78
+      },
+      "eventos_sha256": "f370256c65c062ae4225e4818190d26ae155ae276512c11290c6daf802917d07",
+      "recuperadas": [
+        "T1563.001",
+        "T1033",
+        "T1070",
+        "T1564.011",
+        "T1057",
+        "T1678",
+        "T1098.004",
+        "T1070.003",
+        "T1518.001",
+        "T1202",
+        "T1651",
+        "T1059.003",
+        "T1609",
+        "T1059.008",
+        "T1596",
+        "T1590.006"
+      ],
+      "estado_local": "completado",
+      "contratos": [],
+      "acciones": [
+        "1:registrado",
+        "2:registrado"
+      ],
+      "iocs": [
+        "IP:198.51.100.43"
+      ],
+      "severidad": "S0",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON01",
+        "fundamento": "El evento estructurado registra directamente el hecho acotado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "no_evaluable",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": null
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 2,
+      "afirmaciones": [],
+      "identificadas": [],
+      "propuestas": [],
+      "citas_mitre": {},
+      "citas": {
+        "propuestas": 0,
+        "admisibles": 0,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "496a013d7c1710609ed8a8b25d0a02881e67a983c271643d0b93b7f1c9dec620"
+    },
+    "E03": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 43.21,
+        "proveedor": 1.5,
+        "total": 45.64
+      },
+      "eventos_sha256": "477a63159383c55867a512051c2bbeb64ca64306d932ab8de6537a9c55412f93",
+      "recuperadas": [
+        "T1563.001",
+        "T1033",
+        "T1070",
+        "T1564.011",
+        "T1057",
+        "T1678",
+        "T1098.004",
+        "T1070.003",
+        "T1518.001",
+        "T1202",
+        "T1651",
+        "T1059.003",
+        "T1609",
+        "T1059.008",
+        "T1596",
+        "T1590.006"
+      ],
+      "estado_local": "completado",
+      "contratos": [],
+      "acciones": [
+        "1:registrado",
+        "2:registrado",
+        "3:registrado"
+      ],
+      "iocs": [
+        "IP:198.51.100.43"
+      ],
+      "severidad": "S0",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON01",
+        "fundamento": "El evento estructurado registra directamente el hecho acotado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "no_evaluable",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": null
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 3,
+      "afirmaciones": [],
+      "identificadas": [],
+      "propuestas": [],
+      "citas_mitre": {},
+      "citas": {
+        "propuestas": 0,
+        "admisibles": 0,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "dd0c399eb43eaedac8f50ea24145c8e3f1889f4213e4cbf19404e881c204046a"
+    },
+    "E04": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 39.72,
+        "proveedor": 1.38,
+        "total": 41.99
+      },
+      "eventos_sha256": "dc59c387b0c2564b6a9e685c095cd949c4c48b7a97d19fc1f9634b17138797a3",
+      "recuperadas": [
+        "T1563.001",
+        "T1033",
+        "T1070",
+        "T1564.011",
+        "T1057",
+        "T1678",
+        "T1098.004",
+        "T1070.003",
+        "T1518.001",
+        "T1202",
+        "T1651",
+        "T1059.003",
+        "T1609",
+        "T1059.008",
+        "T1596",
+        "T1590.006"
+      ],
+      "estado_local": "completado",
+      "contratos": [],
+      "acciones": [
+        "1:registrado"
+      ],
+      "iocs": [
+        "IP:198.51.100.43"
+      ],
+      "severidad": "S1",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON01",
+        "fundamento": "El evento estructurado registra directamente el hecho acotado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "no_evaluable",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": null
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 1,
+      "afirmaciones": [],
+      "identificadas": [],
+      "propuestas": [],
+      "citas_mitre": {},
+      "citas": {
+        "propuestas": 0,
+        "admisibles": 0,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "2b5c9343d6278eb91da487ae4b730c150ddf8e716f250a16684ae49ecd4e8e22"
+    },
+    "E05": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 32.09,
+        "proveedor": 1.79,
+        "total": 35.07
+      },
+      "eventos_sha256": "98bb2bf154609f305e4148da48c1fa603197577446368d469d7fbf1fde4759ab",
+      "recuperadas": [
+        "T1563.001",
+        "T1033",
+        "T1070",
+        "T1564.011",
+        "T1057",
+        "T1678",
+        "T1098.004",
+        "T1070.003",
+        "T1518.001",
+        "T1202",
+        "T1651",
+        "T1059.003",
+        "T1609",
+        "T1059.008",
+        "T1596",
+        "T1590.006"
+      ],
+      "estado_local": "completado",
+      "contratos": [],
+      "acciones": [
+        "1:registrado",
+        "2:registrado",
+        "3:registrado"
+      ],
+      "iocs": [
+        "IP:198.51.100.43"
+      ],
+      "severidad": "S1",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON01",
+        "fundamento": "El evento estructurado registra directamente el hecho acotado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "no_evaluable",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": null
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 3,
+      "afirmaciones": [],
+      "identificadas": [],
+      "propuestas": [],
+      "citas_mitre": {},
+      "citas": {
+        "propuestas": 0,
+        "admisibles": 0,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "d283b320a6e9a20591e739e2aaef432dba74c3c7fafbdbd0f31ce0bdae6d4d15"
+    },
+    "E06": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 31.74,
+        "proveedor": 1.2,
+        "total": 33.68
+      },
+      "eventos_sha256": "9caa145c3a9c691a0153a3e607e39257ad350f9e9c5839c0e3c8f1023eb49a31",
+      "recuperadas": [
+        "T1563.001",
+        "T1033",
+        "T1070",
+        "T1564.011",
+        "T1057",
+        "T1678",
+        "T1098.004",
+        "T1070.003",
+        "T1518.001",
+        "T1202",
+        "T1651",
+        "T1059.003",
+        "T1609",
+        "T1059.008",
+        "T1596",
+        "T1590.006"
+      ],
+      "estado_local": "completado",
+      "contratos": [],
+      "acciones": [
+        "1:registrado"
+      ],
+      "iocs": [
+        "IP:198.51.100.43"
+      ],
+      "severidad": "S1",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON01",
+        "fundamento": "El evento estructurado registra directamente el hecho acotado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "no_evaluable",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": null
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 1,
+      "afirmaciones": [],
+      "identificadas": [],
+      "propuestas": [],
+      "citas_mitre": {},
+      "citas": {
+        "propuestas": 0,
+        "admisibles": 0,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "e2faf46862ab318177ad898ad62270a4bd7331069beb694a8f7ce88aba5d41dc"
+    },
+    "E07": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 81.75,
+        "proveedor": 1.5,
+        "total": 84.89
+      },
+      "eventos_sha256": "4cc53302990e81272cda7e926aede1359c9df59930dbc10e913131d226adad83",
+      "recuperadas": [
+        "T1082",
+        "T1033",
+        "T1016",
+        "T1124",
+        "T1049",
+        "T1007",
+        "T1018",
+        "T1057",
+        "T1614",
+        "T1497.001",
+        "T1680",
+        "T1016.002",
+        "T1592.001",
+        "T1592",
+        "T1592.002",
+        "T1589"
+      ],
+      "estado_local": "completado",
+      "contratos": [
+        "T1082"
+      ],
+      "acciones": [
+        "1:intento"
+      ],
+      "iocs": [
+        "IP:198.51.100.43"
+      ],
+      "severidad": "S1",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON02",
+        "fundamento": "El contrato sustenta la proposición y su grado indicado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO02",
+          "potencial": "bajo"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "bajo",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": "RSK02"
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 1,
+      "afirmaciones": [],
+      "identificadas": [
+        "T1082"
+      ],
+      "propuestas": [
+        "T1082"
+      ],
+      "citas_mitre": {
+        "T1082": [
+          1
+        ]
+      },
+      "citas": {
+        "propuestas": 1,
+        "admisibles": 1,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "63281ec40635aecf2e5283e6882527c19935f784907b2c8488d5a249df9476f0"
+    },
+    "E08": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 77.68,
+        "proveedor": 1.26,
+        "total": 80.39
+      },
+      "eventos_sha256": "eebbebcae0e7451ed5abfd674ab6b1e8478c7703e3fc1ba516d747f633b030f3",
+      "recuperadas": [
+        "T1033",
+        "T1564.002",
+        "T1049",
+        "T1082",
+        "T1124",
+        "T1098.004",
+        "T1685.006",
+        "T1021",
+        "T1003.008",
+        "T1018",
+        "T1550",
+        "T1070.007",
+        "T1087",
+        "T1556.007",
+        "T1547.001",
+        "T1589"
+      ],
+      "estado_local": "completado",
+      "contratos": [
+        "T1033"
+      ],
+      "acciones": [
+        "1:intento"
+      ],
+      "iocs": [
+        "IP:198.51.100.43"
+      ],
+      "severidad": "S1",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON02",
+        "fundamento": "El contrato sustenta la proposición y su grado indicado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO02",
+          "potencial": "bajo"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "bajo",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": "RSK02"
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 1,
+      "afirmaciones": [],
+      "identificadas": [
+        "T1033"
+      ],
+      "propuestas": [
+        "T1033"
+      ],
+      "citas_mitre": {
+        "T1033": [
+          1
+        ]
+      },
+      "citas": {
+        "propuestas": 1,
+        "admisibles": 1,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "70c86817bdca88c7300d2239f70b5ad08fcf3925b00b572ccaaf50494cd46bde"
+    },
+    "E09": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 57.59,
+        "proveedor": 1.31,
+        "total": 60.49
+      },
+      "eventos_sha256": "c2a7acc157a761928cf8917fa4e334bdc8e93aea0b7057a00d57b67de0534bc9",
+      "recuperadas": [
+        "T1083",
+        "T1564.001",
+        "T1564.005",
+        "T1680",
+        "T1033",
+        "T1049",
+        "T1087",
+        "T1027.011",
+        "T1098.004",
+        "T1039",
+        "T1135",
+        "T1222",
+        "T1025",
+        "T1027.013",
+        "T1619",
+        "T1564.004"
+      ],
+      "estado_local": "completado",
+      "contratos": [
+        "T1083"
+      ],
+      "acciones": [
+        "1:intento"
+      ],
+      "iocs": [
+        "IP:198.51.100.43"
+      ],
+      "severidad": "S1",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON02",
+        "fundamento": "El contrato sustenta la proposición y su grado indicado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO02",
+          "potencial": "bajo"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "bajo",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": "RSK02"
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 1,
+      "afirmaciones": [],
+      "identificadas": [
+        "T1083"
+      ],
+      "propuestas": [
+        "T1083"
+      ],
+      "citas_mitre": {
+        "T1083": [
+          1
+        ]
+      },
+      "citas": {
+        "propuestas": 1,
+        "admisibles": 1,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "981aea3a970a7cbdea689110a0b9b848b13eeffe04b9350c1ee8354cbd79ebb2"
+    },
+    "E10": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 53.55,
+        "proveedor": 1.35,
+        "total": 56.41
+      },
+      "eventos_sha256": "4c8d96dfae738380b35b011a1eb8d79825c3ee436d83784a486c543300be211d",
+      "recuperadas": [
+        "T1057",
+        "T1036.009",
+        "T1033",
+        "T1049",
+        "T1046",
+        "T1518.001",
+        "T1055",
+        "T1564.011",
+        "T1673",
+        "T1087",
+        "T1543",
+        "T1082",
+        "T1007",
+        "T1564.010",
+        "T1055.015",
+        "T1134.004",
+        "T1055.013"
+      ],
+      "estado_local": "completado",
+      "contratos": [
+        "T1057"
+      ],
+      "acciones": [
+        "1:intento"
+      ],
+      "iocs": [
+        "IP:198.51.100.43"
+      ],
+      "severidad": "S1",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON02",
+        "fundamento": "El contrato sustenta la proposición y su grado indicado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO02",
+          "potencial": "bajo"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "bajo",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": "RSK02"
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 1,
+      "afirmaciones": [],
+      "identificadas": [
+        "T1057"
+      ],
+      "propuestas": [
+        "T1057"
+      ],
+      "citas_mitre": {
+        "T1057": [
+          1
+        ]
+      },
+      "citas": {
+        "propuestas": 1,
+        "admisibles": 1,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "f139748a99b50146366e3f65b0353ab25ccfb8a3d432b9d2b504cef35e9904ff"
+    },
+    "E11": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 79.8,
+        "proveedor": 1.31,
+        "total": 82.52
+      },
+      "eventos_sha256": "76a221a1b377a675150ffc688f9dd7993daccf07e3a4aea05c5e26f7dbbd1d13",
+      "recuperadas": [
+        "T1016",
+        "T1049",
+        "T1557.003",
+        "T1018",
+        "T1124",
+        "T1082",
+        "T1040",
+        "T1070.007",
+        "T1033",
+        "T1016.002",
+        "T1046",
+        "T1135",
+        "T1614",
+        "T1602.002",
+        "T1602",
+        "T1557.004"
+      ],
+      "estado_local": "completado",
+      "contratos": [
+        "T1016"
+      ],
+      "acciones": [
+        "1:intento"
+      ],
+      "iocs": [
+        "IP:198.51.100.43"
+      ],
+      "severidad": "S1",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON02",
+        "fundamento": "El contrato sustenta la proposición y su grado indicado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO02",
+          "potencial": "bajo"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "bajo",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": "RSK02"
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 1,
+      "afirmaciones": [],
+      "identificadas": [
+        "T1016"
+      ],
+      "propuestas": [
+        "T1016"
+      ],
+      "citas_mitre": {
+        "T1016": [
+          1
+        ]
+      },
+      "citas": {
+        "propuestas": 1,
+        "admisibles": 1,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "a29b37680199165e80c66a80c0720b464861263319cf4f036ac83ba833a9318d"
+    },
+    "E12": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 35.65,
+        "proveedor": 1.16,
+        "total": 38.12
+      },
+      "eventos_sha256": "ee8274c5f7ca67aac37a7d5df277c3611ee0595ab558ff94735ecd11697e2182",
+      "recuperadas": [
+        "T1059.004",
+        "T1059",
+        "T1546.004",
+        "T1070.003",
+        "T1505.003",
+        "T1027.010",
+        "T1552.003",
+        "T1690",
+        "T1546.005",
+        "T1059.001",
+        "T1059.011",
+        "T1021.004",
+        "T1059.003",
+        "T1202",
+        "T1059.002",
+        "T1059.008"
+      ],
+      "estado_local": "completado",
+      "contratos": [],
+      "acciones": [
+        "1:intento"
+      ],
+      "iocs": [
+        "IP:198.51.100.43"
+      ],
+      "severidad": "S1",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON01",
+        "fundamento": "El evento estructurado registra directamente el hecho acotado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO02",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "no_evaluable",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": null
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 1,
+      "afirmaciones": [],
+      "identificadas": [],
+      "propuestas": [],
+      "citas_mitre": {},
+      "citas": {
+        "propuestas": 0,
+        "admisibles": 0,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "ce1e74e1d819392178d5e9c92ab9f6a8677fab665f8f2bfc63304fa20afbb016"
+    },
+    "E13": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 34.95,
+        "proveedor": 1.15,
+        "total": 37.14
+      },
+      "eventos_sha256": "545291d53d816de44420335853f8ee07b8d8d972d723b79a60a2dbd29eb681bb",
+      "recuperadas": [
+        "T1059.004",
+        "T1059",
+        "T1546.004",
+        "T1070.003",
+        "T1505.003",
+        "T1027.010",
+        "T1552.003",
+        "T1690",
+        "T1546.005",
+        "T1059.001",
+        "T1059.011",
+        "T1021.004",
+        "T1059.003",
+        "T1202",
+        "T1059.002",
+        "T1059.008"
+      ],
+      "estado_local": "completado",
+      "contratos": [],
+      "acciones": [
+        "1:intento"
+      ],
+      "iocs": [
+        "IP:198.51.100.43"
+      ],
+      "severidad": "S1",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON01",
+        "fundamento": "El evento estructurado registra directamente el hecho acotado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "no_evaluable",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": null
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 1,
+      "afirmaciones": [],
+      "identificadas": [],
+      "propuestas": [],
+      "citas_mitre": {},
+      "citas": {
+        "propuestas": 0,
+        "admisibles": 0,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "ed637e936679621a4f5b60c962105d2b1e7463b68b9fdb5030ac592213a75025"
+    },
+    "E14": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 32.6,
+        "proveedor": 1.12,
+        "total": 34.4
+      },
+      "eventos_sha256": "62957fb9407a34bff0d8a0bb569da383fc1d24bb56d1df1af4c9f1ed4627b4cf",
+      "recuperadas": [
+        "T1563.001",
+        "T1033",
+        "T1070",
+        "T1564.011",
+        "T1057",
+        "T1678",
+        "T1098.004",
+        "T1070.003",
+        "T1518.001",
+        "T1202",
+        "T1651",
+        "T1059.003",
+        "T1609",
+        "T1059.008",
+        "T1596",
+        "T1590.006"
+      ],
+      "estado_local": "completado",
+      "contratos": [],
+      "acciones": [
+        "1:salida_simulada"
+      ],
+      "iocs": [],
+      "severidad": "No evaluable",
+      "confianza": {
+        "codigo": "CF0",
+        "nivel": "insuficiente",
+        "regla": "CON08",
+        "fundamento": "La hipótesis carece de un testigo verificable."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "no_evaluable",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": null
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 1,
+      "afirmaciones": [],
+      "identificadas": [],
+      "propuestas": [],
+      "citas_mitre": {},
+      "citas": {
+        "propuestas": 0,
+        "admisibles": 0,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "693d3809cc4fe235af5a4f04159467da9f1e20cdc22b59d67bb79290df27be45"
+    },
+    "E15": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 33.8,
+        "proveedor": 1.1,
+        "total": 35.84
+      },
+      "eventos_sha256": "7b759f5db8adf9a5e112ccacaf02a86b8d19c2066f595325107e7a6dbdf0678b",
+      "recuperadas": [
+        "T1059.004",
+        "T1059",
+        "T1546.004",
+        "T1070.003",
+        "T1505.003",
+        "T1027.010",
+        "T1552.003",
+        "T1690",
+        "T1546.005",
+        "T1059.001",
+        "T1059.011",
+        "T1021.004",
+        "T1059.003",
+        "T1202",
+        "T1059.002",
+        "T1059.008"
+      ],
+      "estado_local": "completado",
+      "contratos": [],
+      "acciones": [
+        "1:no_determinable"
+      ],
+      "iocs": [
+        "IP:198.51.100.43"
+      ],
+      "severidad": "No evaluable",
+      "confianza": {
+        "codigo": "CF0",
+        "nivel": "insuficiente",
+        "regla": "CON08",
+        "fundamento": "La hipótesis carece de un testigo verificable."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "no_evaluable",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": null
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 1,
+      "afirmaciones": [],
+      "identificadas": [],
+      "propuestas": [],
+      "citas_mitre": {},
+      "citas": {
+        "propuestas": 0,
+        "admisibles": 0,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "dd49f451914a744b1251b281b0a407e6d1a7653c0e83ae75f3b505cc38b46e50"
+    },
+    "E16": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 30.07,
+        "proveedor": 1.09,
+        "total": 31.79
+      },
+      "eventos_sha256": "a63c8da33c7d0c7ac4997129f7c967b7b3c1d626a745dcb2e30c1a2db7baa0d1",
+      "recuperadas": [
+        "T1563.001",
+        "T1033",
+        "T1070",
+        "T1564.011",
+        "T1057",
+        "T1678",
+        "T1098.004",
+        "T1070.003",
+        "T1518.001",
+        "T1202",
+        "T1651",
+        "T1059.003",
+        "T1609",
+        "T1059.008",
+        "T1596",
+        "T1590.006"
+      ],
+      "estado_local": "completado",
+      "contratos": [],
+      "acciones": [
+        "1:fallido"
+      ],
+      "iocs": [],
+      "severidad": "No evaluable",
+      "confianza": {
+        "codigo": "CF0",
+        "nivel": "insuficiente",
+        "regla": "CON08",
+        "fundamento": "La hipótesis carece de un testigo verificable."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "no_evaluable",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": null
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 1,
+      "afirmaciones": [],
+      "identificadas": [],
+      "propuestas": [],
+      "citas_mitre": {},
+      "citas": {
+        "propuestas": 0,
+        "admisibles": 0,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "0c06fe513d30e19ad9aae52307da8a2b5fcdd5c2b9882d7b98fd7f03f7940404"
+    },
+    "E17": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 70.08,
+        "proveedor": 3.61,
+        "total": 75.9
+      },
+      "eventos_sha256": "43b09485490a13f4aebee820aa4b132db7a86fa2c6fc97215a1cc3c668448003",
+      "recuperadas": [
+        "T1110.001",
+        "T1110",
+        "T1201",
+        "T1110.002",
+        "T1555.005",
+        "T1110.003",
+        "T1563.001",
+        "T1098.004",
+        "T1021.004",
+        "T1621",
+        "T1556",
+        "T1111",
+        "T1550",
+        "T1110.004",
+        "T1550.002",
+        "T1697"
+      ],
+      "estado_local": "completado",
+      "contratos": [
+        "T1110.001"
+      ],
+      "acciones": [
+        "1:registrado",
+        "2:registrado",
+        "3:registrado"
+      ],
+      "iocs": [
+        "IP:198.51.100.43"
+      ],
+      "severidad": "S2",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON02",
+        "fundamento": "El contrato sustenta la proposición y su grado indicado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO02",
+          "potencial": "moderado"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "moderado",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": "RSK02"
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 3,
+      "afirmaciones": [],
+      "identificadas": [
+        "T1110.001"
+      ],
+      "propuestas": [
+        "T1110.001"
+      ],
+      "citas_mitre": {
+        "T1110.001": [
+          1,
+          2,
+          3
+        ]
+      },
+      "citas": {
+        "propuestas": 3,
+        "admisibles": 3,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "29bb46c6170f9b15b1c8fde32fcc37527b46c4816ea5203dcd9c532f6b153df5"
+    },
+    "E18": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 105.85,
+        "proveedor": 1.58,
+        "total": 109.67
+      },
+      "eventos_sha256": "231e3081c98024f36bdbfa750cd5fe90cadfa132eb07ea740db096a0a464a88c",
+      "recuperadas": [
+        "T1105",
+        "T1570",
+        "T1027.015",
+        "T1027.006",
+        "T1098.004",
+        "T1021",
+        "T1048",
+        "T1036.008",
+        "T1119",
+        "T1071.002",
+        "T1219",
+        "T1564.001",
+        "T1074.002",
+        "T1608.002",
+        "T1197",
+        "T1537"
+      ],
+      "estado_local": "completado",
+      "contratos": [
+        "T1105"
+      ],
+      "acciones": [
+        "1:intento"
+      ],
+      "iocs": [
+        "IP:198.51.100.43",
+        "URL:https://updates.eval.local/sample.bin"
+      ],
+      "severidad": "S2",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON02",
+        "fundamento": "El contrato sustenta la proposición y su grado indicado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO02",
+          "potencial": "moderado"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "moderado",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": "RSK02"
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 1,
+      "afirmaciones": [],
+      "identificadas": [
+        "T1105"
+      ],
+      "propuestas": [
+        "T1105"
+      ],
+      "citas_mitre": {
+        "T1105": [
+          1
+        ]
+      },
+      "citas": {
+        "propuestas": 1,
+        "admisibles": 1,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "085a2fb268b188eb1413e802490bf62a696e69a0568a63ba612c35050c4a2073"
+    },
+    "E19": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 91.86,
+        "proveedor": 1.48,
+        "total": 94.61
+      },
+      "eventos_sha256": "eba11117f3d309de104d273aea7be045a78a5e20ebb5ffa452920f1a9907cf0b",
+      "recuperadas": [
+        "T1105",
+        "T1570",
+        "T1027.015",
+        "T1027.006",
+        "T1098.004",
+        "T1021",
+        "T1048",
+        "T1036.008",
+        "T1119",
+        "T1071.002",
+        "T1219",
+        "T1564.001",
+        "T1074.002",
+        "T1608.002",
+        "T1197",
+        "T1537"
+      ],
+      "estado_local": "completado",
+      "contratos": [
+        "T1105"
+      ],
+      "acciones": [
+        "1:resultado_observado"
+      ],
+      "iocs": [
+        "Hash:a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4",
+        "IP:198.51.100.43",
+        "URL:https://updates.eval.local/sample.bin"
+      ],
+      "severidad": "S2",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON02",
+        "fundamento": "El contrato sustenta la proposición y su grado indicado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO02",
+          "potencial": "moderado"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "moderado",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": "RSK02"
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 1,
+      "afirmaciones": [
+        "resultado_transferencia_senuelo"
+      ],
+      "identificadas": [
+        "T1105"
+      ],
+      "propuestas": [
+        "T1105"
+      ],
+      "citas_mitre": {
+        "T1105": [
+          1
+        ]
+      },
+      "citas": {
+        "propuestas": 1,
+        "admisibles": 1,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "ab1c714b9378e8e5ffad01738aa33f5697cafa019bf29de82dbdea7af1ec7f61"
+    },
+    "E20": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 80.54,
+        "proveedor": 1.9,
+        "total": 84.69
+      },
+      "eventos_sha256": "844b05b7b08050286e4143969dfa6001ae8f804cd11cef343eadc914ac08c44a",
+      "recuperadas": [
+        "T1105",
+        "T1570",
+        "T1027.015",
+        "T1027.006",
+        "T1098.004",
+        "T1021",
+        "T1048",
+        "T1036.008",
+        "T1119",
+        "T1071.002",
+        "T1219",
+        "T1564.001",
+        "T1074.002",
+        "T1608.002",
+        "T1197",
+        "T1537"
+      ],
+      "estado_local": "completado",
+      "contratos": [
+        "T1105"
+      ],
+      "acciones": [
+        "1:intento",
+        "2:fallido"
+      ],
+      "iocs": [
+        "IP:198.51.100.43",
+        "URL:https://updates.eval.local/sample.bin"
+      ],
+      "severidad": "S2",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON02",
+        "fundamento": "El contrato sustenta la proposición y su grado indicado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO02",
+          "potencial": "moderado"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "moderado",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": "RSK02"
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 2,
+      "afirmaciones": [],
+      "identificadas": [
+        "T1105"
+      ],
+      "propuestas": [
+        "T1105"
+      ],
+      "citas_mitre": {
+        "T1105": [
+          1
+        ]
+      },
+      "citas": {
+        "propuestas": 1,
+        "admisibles": 1,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "9719cd8fe7cc0a1d0b3fe2291af6955e13dd943f8aa228271b5a4a7a25438bd2"
+    },
+    "E21": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 303.66,
+        "proveedor": 4.0,
+        "total": 311.91
+      },
+      "eventos_sha256": "3b82f8eac39af5b37d63e0fefd4e27a4cae5c01b5131d37055d557a0f51654cc",
+      "recuperadas": [
+        "T1105",
+        "T1082",
+        "T1570",
+        "T1016",
+        "T1124",
+        "T1033",
+        "T1018",
+        "T1049",
+        "T1027.015",
+        "T1083",
+        "T1680",
+        "T1564.005",
+        "T1039",
+        "T1608.002",
+        "T1592",
+        "T1592.001",
+        "T1592.003",
+        "T1601.001"
+      ],
+      "estado_local": "completado",
+      "contratos": [
+        "T1082",
+        "T1105"
+      ],
+      "acciones": [
+        "1:registrado",
+        "2:intento",
+        "3:intento"
+      ],
+      "iocs": [
+        "IP:198.51.100.43",
+        "URL:https://updates.eval.local/sample.bin"
+      ],
+      "severidad": "S2",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON02",
+        "fundamento": "El contrato sustenta la proposición y su grado indicado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO02",
+          "potencial": "bajo"
+        },
+        "integridad": {
+          "observado": "IO02",
+          "potencial": "moderado"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "moderado",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": "RSK02"
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 3,
+      "afirmaciones": [],
+      "identificadas": [
+        "T1082",
+        "T1105"
+      ],
+      "propuestas": [
+        "T1082",
+        "T1105"
+      ],
+      "citas_mitre": {
+        "T1105": [
+          3
+        ],
+        "T1082": [
+          2
+        ]
+      },
+      "citas": {
+        "propuestas": 2,
+        "admisibles": 2,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "6e9c37281024843d004ed4e0e4fd0a3d877c7b6586ae0c38ce047b0a0fa45e80"
+    },
+    "E22": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 39.96,
+        "proveedor": 1.32,
+        "total": 42.63
+      },
+      "eventos_sha256": "44feaf308bbe0908cc2ecbe0b955e2f77eb80f0f6e86f0021ad11190c22e85ea",
+      "recuperadas": [
+        "T1529",
+        "T1490",
+        "T1685.004",
+        "T1124",
+        "T1685.006",
+        "T1499.004",
+        "T1049",
+        "T1082",
+        "T1033",
+        "T1653",
+        "T1018",
+        "T1098.004",
+        "T1070",
+        "T1563.001",
+        "T1564.005",
+        "T1601.002",
+        "T1685.001",
+        "T1601.001"
+      ],
+      "estado_local": "completado",
+      "contratos": [
+        "T1529"
+      ],
+      "acciones": [
+        "1:intento"
+      ],
+      "iocs": [
+        "IP:198.51.100.43"
+      ],
+      "severidad": "S3",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON02",
+        "fundamento": "El contrato sustenta la proposición y su grado indicado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO02",
+          "potencial": "alto"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "alto",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": "RSK02"
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 1,
+      "afirmaciones": [],
+      "identificadas": [
+        "T1529"
+      ],
+      "propuestas": [
+        "T1529"
+      ],
+      "citas_mitre": {
+        "T1529": [
+          1
+        ]
+      },
+      "citas": {
+        "propuestas": 1,
+        "admisibles": 1,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "b7fd0c7465a0b5426b87068218d1482df4e05024a0157f803d71901074b0f759"
+    },
+    "E23": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 24.86,
+        "proveedor": 1.37,
+        "total": 27.63
+      },
+      "eventos_sha256": "3992d693edd3d868fa4db8a6fb61c1ad498f8965121f15221f23d0818568cd88",
+      "recuperadas": [
+        "T1563.001",
+        "T1033",
+        "T1070",
+        "T1564.011",
+        "T1057",
+        "T1678",
+        "T1098.004",
+        "T1070.003",
+        "T1518.001",
+        "T1202",
+        "T1651",
+        "T1059.003",
+        "T1609",
+        "T1059.008",
+        "T1596",
+        "T1590.006"
+      ],
+      "estado_local": "completado",
+      "contratos": [],
+      "acciones": [
+        "1:intento"
+      ],
+      "iocs": [
+        "Dominio:assets.eval.local",
+        "IP:198.51.100.43"
+      ],
+      "severidad": "S1",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON01",
+        "fundamento": "El evento estructurado registra directamente el hecho acotado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "no_evaluable",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": null
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 1,
+      "afirmaciones": [],
+      "identificadas": [],
+      "propuestas": [],
+      "citas_mitre": {},
+      "citas": {
+        "propuestas": 0,
+        "admisibles": 0,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "5b8fe8370955c3e908b128251c531730664b6d0dfc09c6557cefa61278d35ed2"
+    },
+    "E24": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 25.65,
+        "proveedor": 2.36,
+        "total": 29.32
+      },
+      "eventos_sha256": "08445014a9b40b1776d01fe712efb7a253448269dda675412ee2536e009505b2",
+      "recuperadas": [
+        "T1563.001",
+        "T1033",
+        "T1070",
+        "T1564.011",
+        "T1057",
+        "T1678",
+        "T1098.004",
+        "T1070.003",
+        "T1518.001",
+        "T1202",
+        "T1651",
+        "T1059.003",
+        "T1609",
+        "T1059.008",
+        "T1596",
+        "T1590.006"
+      ],
+      "estado_local": "completado",
+      "contratos": [],
+      "acciones": [
+        "1:registrado",
+        "2:no_determinable"
+      ],
+      "iocs": [
+        "IP:198.51.100.43"
+      ],
+      "severidad": "S0",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON01",
+        "fundamento": "El evento estructurado registra directamente el hecho acotado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "no_evaluable",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": null
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 2,
+      "afirmaciones": [],
+      "identificadas": [],
+      "propuestas": [],
+      "citas_mitre": {},
+      "citas": {
+        "propuestas": 0,
+        "admisibles": 0,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "2ad9448f71fd103a155993b0fd9c890f135a2e88c83832f7924e9e536047366e"
+    },
+    "E25": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 34.24,
+        "proveedor": 1.69,
+        "total": 37.12
+      },
+      "eventos_sha256": "5d87994e698d55111f85425bdf2fa3644332a9087c83f9553bb3ee5e987fbee1",
+      "recuperadas": [
+        "T1563.001",
+        "T1033",
+        "T1070",
+        "T1564.011",
+        "T1057",
+        "T1678",
+        "T1098.004",
+        "T1070.003",
+        "T1518.001",
+        "T1202",
+        "T1651",
+        "T1059.003",
+        "T1609",
+        "T1059.008",
+        "T1596",
+        "T1590.006"
+      ],
+      "estado_local": "completado",
+      "contratos": [],
+      "acciones": [
+        "1:no_determinable"
+      ],
+      "iocs": [],
+      "severidad": "No evaluable",
+      "confianza": {
+        "codigo": "CF0",
+        "nivel": "insuficiente",
+        "regla": "CON08",
+        "fundamento": "La hipótesis carece de un testigo verificable."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "no_evaluable",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": null
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 1,
+      "afirmaciones": [],
+      "identificadas": [],
+      "propuestas": [],
+      "citas_mitre": {},
+      "citas": {
+        "propuestas": 0,
+        "admisibles": 0,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "b786acc0be941192303a5f02399fdd8aa824d1be793f2ba15a4e58aa0ed2795e"
+    },
+    "E26": {
+      "estado": "completado",
+      "latencia_ms": {
+        "recuperacion": 32.92,
+        "proveedor": 1.9,
+        "total": 36.76
+      },
+      "eventos_sha256": "92e827271a131dfc47f94bf879df285e822ad48f32df5e180da8f7f11f5cf6f5",
+      "recuperadas": [
+        "T1563.001",
+        "T1033",
+        "T1070",
+        "T1564.011",
+        "T1057",
+        "T1678",
+        "T1098.004",
+        "T1070.003",
+        "T1518.001",
+        "T1202",
+        "T1651",
+        "T1059.003",
+        "T1609",
+        "T1059.008",
+        "T1596",
+        "T1590.006"
+      ],
+      "estado_local": "completado",
+      "contratos": [],
+      "acciones": [
+        "1:intento"
+      ],
+      "iocs": [
+        "IP:198.51.100.43"
+      ],
+      "severidad": "S1",
+      "confianza": {
+        "codigo": "CF3",
+        "nivel": "alta",
+        "regla": "CON01",
+        "fundamento": "El evento estructurado registra directamente el hecho acotado."
+      },
+      "cia": {
+        "confidencialidad": {
+          "observado": "IO02",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "riesgo_tecnico": {
+        "nivel": "no_evaluable",
+        "fundamento": "Los escenarios potenciales dependen de que se materialicen las condiciones indicadas.",
+        "regla": null
+      },
+      "organizacion": "no_evaluable",
+      "eventos_entregados": 1,
+      "afirmaciones": [],
+      "identificadas": [],
+      "propuestas": [],
+      "citas_mitre": {},
+      "citas": {
+        "propuestas": 0,
+        "admisibles": 0,
+        "narrativa": 1,
+        "narrativa_admisibles": 1
+      },
+      "tokens": null,
+      "modelo_reportado": "simulador-h04-v1",
+      "solicitud_sha256": "f991ff820030c0be551d790e54022b127eba67cf86127fd7e7acc494e95c9c96"
+    }
+  }
+}

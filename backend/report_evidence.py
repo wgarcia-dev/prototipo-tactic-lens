@@ -8,7 +8,7 @@ def references(events):
     return ", ".join("#" + str(event.id_evento) for event in events) or "Sin eventos correspondientes en el conjunto revisado"
 
 
-def complete_assessment(report, events, session, payload, total):
+def complete_assessment(report, events, session, payload, total, *, modality="desconocido"):
     by_kind = {}
     for event in events:
         by_kind.setdefault(event.tipo_evento, []).append(event)
@@ -19,19 +19,16 @@ def complete_assessment(report, events, session, payload, total):
     connects = by_kind.get("cowrie.session.connect", [])
     raw = connects[0].datos_originales if connects else {}
     port = raw.get("dst_port") or getattr(session, "puerto_destino", None)
-    modes = {2222:"Shell Cowrie", 2223:"Proxy hacia Alpine/QEMU", 2224:"Respuestas LLM DeepSeek"}
-    try:
-        mode = modes.get(int(port), "Modo pendiente de identificar")
-    except (ValueError, TypeError):
-        mode = "Modo pendiente de identificar"
+    registered = (payload.get("contexto_observado") or {}).get("modalidad")
+    mode = registered or modality
     proxy_events = by_kind.get("cowrie.proxy.backend_connected", [])
     node = section("Nodo de captura y certeza del entorno", [
-        "La relación entre los puertos 2222, 2223 y 2224 y sus modos corresponde a la arquitectura declarada del laboratorio. El puerto observado permite identificar esa ruta; su configuración debe contrastarse con el servicio del sensor.",
+        "La modalidad procede de la identidad registrada del sensor. El puerto es un dato de transporte.",
         "La comprobación del guest exige telemetría del sistema invitado, obtenida por un canal administrativo de confianza y relacionada con la sesión y su hora."
     ], ["Dato", "Evidencia y nivel de certeza"], [
         ["Sensor declarado en el evento", str(raw.get("sensor", "Sin identificador de sensor en la conexión"))],
         ["Destino y puerto observado", str(raw.get("dst_ip", "Dirección no registrada")) + ":" + str(port or "Sin puerto")],
-        ["Ruta del laboratorio", mode],
+        ["Modalidad registrada", mode],
         ["Conexión al backend del proxy", references(proxy_events)],
         ["Estado real del guest", "Pendiente de verificación independiente. Una conexión proxy o una salida de shell/LLM carece por sí sola de prueba de integridad, persistencia o compromiso del guest."],
         ["Referencia de conexión", references(connects)]
@@ -97,20 +94,6 @@ def complete_assessment(report, events, session, payload, total):
         "En los nodos del laboratorio deben preservarse los objetivos de captura. La réplica de validación permite medir los controles sin modificar la evidencia del caso.",
         "Referencias de configuración. OpenSSH https://man.openbsd.org/sshd_config.5 y auditoría Linux https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/8/html/system_design_guide/auditing-the-system_system-design-guide"
     ], ["Clase y prioridad", "Trazabilidad e intervención", "Eficacia e impacto operativo"], safeguards)
-    # Use evidence and human decisions as the sole authority for executive severity.
-    assessment = payload.get("evaluacion_incidente") or {}
-    revisions = assessment.get("revisiones") or []
-    decision = revisions[-1] if revisions else {}
-    executive = [
-        f"La sesión contiene {total} eventos almacenados. En el conjunto revisado hay {len(commands)} entradas de comando, {len(by_kind.get('cowrie.login.success', []))} autenticaciones aceptadas y {len(by_kind.get('cowrie.login.failed', []))} rechazadas.",
-        "Se observaron consultas de reconocimiento del entorno. Eventos relacionados. " + references(discovery)
-        if discovery else "La reconstrucción técnica documenta las actividades identificadas y sus referencias.",
-        "Clasificación del expediente. " + decision.get("decision", assessment.get("clasificacion", "Pendiente de evaluación")) +
-        ". Severidad. " + decision.get("severidad", "Por determinar por el analista") + ".",
-        "Valoración humana. " + decision["justificacion"] if decision else "La autorización, impacto y decisión de incidente requieren revisión del analista.",
-        "La verificación de persistencia, exfiltración y movimiento lateral documenta qué patrones se revisaron y qué corroboración falta."
-    ]
-    report["sections"][0]["paragraphs"] = executive
     event_types = {str(event.id_evento):event.tipo_evento for event in events}
     phases = (payload.get("informe") or {}).get("fases", [])
     for index, phase in enumerate(phases, 1):

@@ -30,6 +30,41 @@ def connect(values, **kwargs):
                           dbname=values['DATABASE_NAME'], **kwargs)
 
 
+def configure_restored_roles(admin, owner, directory):
+    """Finalize a freshly restored database before writing its runtime configuration."""
+    from dotenv import set_key
+    from sqlalchemy import create_engine
+    from sqlalchemy.engine import URL
+    from scripts.migrate import migrate
+    from scripts.private_paths import protect
+
+    database = owner["DATABASE_NAME"]
+    runtime = database + "_app"
+    password = secrets.token_urlsafe(36)
+    with connect(admin) as conn:
+        conn.execute(sql.SQL(
+            "CREATE ROLE {} LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD {}"
+        ).format(sql.Identifier(runtime), sql.Literal(password)))
+        conn.execute(sql.SQL("REVOKE CONNECT, CREATE, TEMP ON DATABASE {} FROM PUBLIC").format(sql.Identifier(database)))
+        conn.execute(sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(sql.Identifier(database), sql.Identifier(runtime)))
+        conn.execute("REVOKE CREATE ON SCHEMA public FROM PUBLIC")
+
+    owner_file = directory / f"{database}-migration.env"
+    protect(directory)
+    owner_file.touch(exist_ok=False)
+    set_key(owner_file, "DATABASE_MIGRATION_USER", owner["DATABASE_USER"])
+    set_key(owner_file, "DATABASE_MIGRATION_PASSWORD", owner["DATABASE_PASSWORD"])
+    protect(owner_file)
+    engine = create_engine(URL.create("postgresql+psycopg", username=owner["DATABASE_USER"],
+        password=owner["DATABASE_PASSWORD"], host=owner["DATABASE_HOST"],
+        port=int(owner["DATABASE_PORT"]), database=database), hide_parameters=True)
+    try:
+        migrate(engine, runtime_role=runtime)
+    finally:
+        engine.dispose()
+    return {**owner, "DATABASE_USER": runtime, "DATABASE_PASSWORD": password, "DATABASE_ENFORCE_RUNTIME_ROLE": "true"}
+
+
 def inspect(conn):
     version = int(conn.execute('SHOW server_version_num').fetchone()[0])
     extensions = dict(conn.execute('SELECT extname,extversion FROM pg_extension').fetchall())
@@ -41,6 +76,9 @@ def inspect(conn):
 
 def backup(args):
     values = dotenv_values(args.config)
+    if os.getenv("DATABASE_MIGRATION_USER"):
+        from backend.db import migration_credentials
+        values["DATABASE_USER"], values["DATABASE_PASSWORD"] = migration_credentials()
     output = Path(args.dump).resolve()
     if output.exists() or Path(str(output)+'.json').exists():
         raise RuntimeError('El respaldo ya existe; use otro nombre')
@@ -82,7 +120,7 @@ def restore(args):
     admin = dict(DATABASE_NAME='postgres', DATABASE_USER='postgres', DATABASE_HOST='127.0.0.1', DATABASE_PORT='5432',
                  DATABASE_PASSWORD=os.environ.pop('TACTICLENS_PG_ADMIN_PASSWORD'))
     db = 'tacticlens_historico_'+uuid.uuid4().hex[:8]
-    role = db+'_app'
+    role = db+'_owner'
     password = secrets.token_urlsafe(36)
     private = ROOT/'.local/restauracion'
     private.mkdir(parents=True, exist_ok=True)
@@ -121,8 +159,8 @@ def restore(args):
             raise RuntimeError('Conteos distintos: revise el respaldo; no se habilita .env')
         if not conn.execute('SELECT 1 FROM honeypot.honeypot WHERE id_honeypot=%s', (source['HONEYPOT_ID'],)).fetchone():
             raise RuntimeError('Sensor original no encontrado')
-    values = dict(source)
-    values.update(local)
+    values = {key: value for key, value in source.items() if not key.startswith("DATABASE_MIGRATION_")}
+    values.update(configure_restored_roles(admin, local, private))
     values.update(AUTH_ENV='development', AUTH_COOKIE_SECURE='false', AUTH_PUBLIC_URL='http://127.0.0.1:5173',
                   AUTH_ALLOWED_ORIGINS='http://127.0.0.1:5173,http://localhost:5173', MAIL_TRANSPORT='file',
                   MAIL_DEV_DIRECTORY='.local/mail', INGEST_TRANSPORT='', INGEST_API_KEY=secrets.token_urlsafe(32),
@@ -137,7 +175,7 @@ def restore(args):
         if value is not None:
             set_key(ROOT/'.env', key, value)
     (private/(db+'.verified.json')).write_text(json.dumps(restored, indent=2), encoding='utf-8')
-    print('Restauración validada: todas las tablas honeypot conservan sus conteos. Ejecutar migraciones compatibles.')
+    print('Restauración validada con migraciones compatibles y rol operativo dedicado.')
 
 
 if __name__ == '__main__':

@@ -1,0 +1,217 @@
+[
+  {
+    "analisis_base": "2739be28-5ebc-4168-99ec-9266cc827ada",
+    "rechazo_mitre": [
+      2493,
+      2494,
+      2495,
+      2497
+    ],
+    "eventos": [
+      {
+        "id": 2490,
+        "tipo": "cowrie.session.connect",
+        "segundos": 0.0,
+        "forma": {
+          "protocol": "ssh"
+        }
+      },
+      {
+        "id": 2489,
+        "tipo": "cowrie.client.version",
+        "segundos": 0.017459,
+        "forma": {
+          "protocol": "ssh"
+        }
+      },
+      {
+        "id": 2488,
+        "tipo": "cowrie.client.kex",
+        "segundos": 0.019954,
+        "forma": {
+          "protocol": "ssh"
+        }
+      },
+      {
+        "id": 2491,
+        "tipo": "cowrie.login.success",
+        "segundos": 0.071965,
+        "forma": {
+          "password": "valor-ficticio",
+          "protocol": "ssh"
+        }
+      },
+      {
+        "id": 2492,
+        "tipo": "cowrie.client.size",
+        "segundos": 0.080674,
+        "forma": {
+          "protocol": "ssh"
+        }
+      },
+      {
+        "id": 2493,
+        "tipo": "cowrie.command.input",
+        "segundos": 0.394673,
+        "forma": {
+          "input": "echo muestra",
+          "protocol": "ssh"
+        }
+      },
+      {
+        "id": 2494,
+        "tipo": "cowrie.command.input",
+        "segundos": 1.327636,
+        "forma": {
+          "input": "orden_no_clasificada",
+          "protocol": "ssh"
+        }
+      },
+      {
+        "id": 2495,
+        "tipo": "cowrie.command.input",
+        "segundos": 2.205428,
+        "forma": {
+          "input": "pwd",
+          "protocol": "ssh"
+        }
+      },
+      {
+        "id": 2497,
+        "tipo": "cowrie.command.input",
+        "segundos": 3.059852,
+        "forma": {
+          "input": "exit",
+          "protocol": "ssh"
+        }
+      },
+      {
+        "id": 2498,
+        "tipo": "cowrie.log.closed",
+        "segundos": 3.06202,
+        "forma": {
+          "ttylog": "fixture.tty",
+          "protocol": "ssh"
+        }
+      },
+      {
+        "id": 2496,
+        "tipo": "cowrie.session.closed",
+        "segundos": 3.063999,
+        "forma": {
+          "protocol": "ssh"
+        }
+      }
+    ]
+  },
+  {
+    "analisis_base": "aa0ddd76-ed07-4e8d-af2a-b1584a079fd9",
+    "rechazo_mitre": [
+      2468
+    ],
+    "eventos": [
+      {
+        "id": 2464,
+        "tipo": "cowrie.session.connect",
+        "segundos": 0.0,
+        "forma": {
+          "protocol": "ssh"
+        }
+      },
+      {
+        "id": 2463,
+        "tipo": "cowrie.client.version",
+        "segundos": 0.00131,
+        "forma": {
+          "protocol": "ssh"
+        }
+      },
+      {
+        "id": 2465,
+        "tipo": "cowrie.client.kex",
+        "segundos": 0.006403,
+        "forma": {
+          "protocol": "ssh"
+        }
+      },
+      {
+        "id": 2462,
+        "tipo": "cowrie.login.success",
+        "segundos": 0.05788,
+        "forma": {
+          "password": "valor-ficticio",
+          "protocol": "ssh"
+        }
+      },
+      {
+        "id": 2467,
+        "tipo": "cowrie.client.size",
+        "segundos": 0.20788,
+        "forma": {
+          "protocol": "ssh"
+        }
+      },
+      {
+        "id": 2466,
+        "tipo": "cowrie.session.params",
+        "segundos": 0.210536,
+        "forma": {
+          "protocol": "ssh"
+        }
+      },
+      {
+        "id": 2468,
+        "tipo": "cowrie.command.input",
+        "segundos": 0.520237,
+        "forma": {
+          "input": "echo muestra",
+          "protocol": "ssh"
+        }
+      },
+      {
+        "id": 2469,
+        "tipo": "cowrie.command.input",
+        "segundos": 1.40204,
+        "forma": {
+          "input": "orden_no_clasificada",
+          "protocol": "ssh"
+        }
+      },
+      {
+        "id": 2470,
+        "tipo": "cowrie.command.input",
+        "segundos": 2.381691,
+        "forma": {
+          "input": "pwd",
+          "protocol": "ssh"
+        }
+      },
+      {
+        "id": 2472,
+        "tipo": "cowrie.command.input",
+        "segundos": 3.344204,
+        "forma": {
+          "input": "exit",
+          "protocol": "ssh"
+        }
+      },
+      {
+        "id": 2473,
+        "tipo": "cowrie.log.closed",
+        "segundos": 3.352435,
+        "forma": {
+          "ttylog": "fixture.tty",
+          "protocol": "ssh"
+        }
+      },
+      {
+        "id": 2471,
+        "tipo": "cowrie.session.closed",
+        "segundos": 3.353585,
+        "forma": {
+          "protocol": "ssh"
+        }
+      }
+    ]
+  }
+]

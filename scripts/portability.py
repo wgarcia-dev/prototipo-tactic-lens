@@ -17,13 +17,16 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
 
+from backend.db import migration_credentials
+
 ROOT = Path(__file__).resolve().parents[1]
 DEFERRED = {'008_limpieza_dominios.sql'}
 
 
-def engine_for(database=None, *, autocommit=False):
-    return create_engine(URL.create('postgresql+psycopg', username=os.environ['DATABASE_USER'],
-        password=os.environ['DATABASE_PASSWORD'], host=os.environ['DATABASE_HOST'],
+def engine_for(database=None, *, autocommit=False, administrative=False):
+    user, password = migration_credentials() if administrative else (os.environ['DATABASE_USER'], os.environ['DATABASE_PASSWORD'])
+    return create_engine(URL.create('postgresql+psycopg', username=user,
+        password=password, host=os.environ['DATABASE_HOST'],
         port=int(os.getenv('DATABASE_PORT','5432')), database=database or os.environ['DATABASE_NAME']),
         hide_parameters=True, isolation_level='AUTOCOMMIT' if autocommit else 'READ COMMITTED')
 
@@ -64,10 +67,11 @@ def pg_tool(name):
     raise RuntimeError(f'No se encontro {name}; configure PG_BIN_DIRECTORY o PATH')
 
 
-def run_pg(name,arguments,database=None,stdout=None):
+def run_pg(name,arguments,database=None,stdout=None,*,administrative=False):
+    user, password = migration_credentials() if administrative else (os.environ['DATABASE_USER'], os.environ['DATABASE_PASSWORD'])
     environment=os.environ.copy()
-    environment.update(PGPASSWORD=os.environ['DATABASE_PASSWORD'],PGHOST=os.environ['DATABASE_HOST'],
-        PGPORT=os.getenv('DATABASE_PORT','5432'),PGUSER=os.environ['DATABASE_USER'],
+    environment.update(PGPASSWORD=password,PGHOST=os.environ['DATABASE_HOST'],
+        PGPORT=os.getenv('DATABASE_PORT','5432'),PGUSER=user,
         PGDATABASE=database or os.environ['DATABASE_NAME'],PGCONNECT_TIMEOUT='10')
     result=subprocess.run([pg_tool(name),*arguments],env=environment,stdout=stdout or subprocess.PIPE,
         stderr=subprocess.PIPE,check=False)
@@ -150,7 +154,7 @@ def backup(directory):
     directory.mkdir(parents=True,exist_ok=True)
     archive=directory/'TacticLens_Completo.backup'
     if archive.exists():raise ValueError('El respaldo ya existe; no sobrescribir')
-    engine=engine_for()
+    engine=engine_for(administrative=True)
     try:
         with engine.connect() as conn:
             conn.execute(text('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY'))
@@ -159,7 +163,7 @@ def backup(directory):
                 'database':conn.scalar(text('SELECT current_database()')),'postgresql':conn.scalar(text('SHOW server_version')),
                 'port':conn.scalar(text('SHOW port')),'vector':conn.scalar(text("SELECT extversion FROM pg_extension WHERE extname='vector'")),
                 'snapshot':snapshot(conn),'migrations':migration_status(conn)}
-            run_pg('pg_dump',['--format=custom','--snapshot='+exported,'--file='+str(archive)])
+            run_pg('pg_dump',['--format=custom','--snapshot='+exported,'--file='+str(archive)],administrative=True)
         toc=run_pg('pg_restore',['--list',str(archive)]).decode('utf-8',errors='replace')
         (directory/'TacticLens_Completo.toc.txt').write_text(toc,encoding='utf-8')
         run_pg('pg_restore',['--file='+os.devnull,str(archive)])
@@ -171,7 +175,7 @@ def backup(directory):
 
 
 def verify_database(database,manifest_path):
-    manifest=json.loads(Path(manifest_path).read_text(encoding='utf-8'));engine=engine_for(database)
+    manifest=json.loads(Path(manifest_path).read_text(encoding='utf-8'));engine=engine_for(database,administrative=True)
     try:
         with engine.connect() as conn:
             conn.execute(text('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY'))
@@ -191,20 +195,21 @@ def restore(archive,manifest_path,database):
     if os.environ['DATABASE_HOST'] not in {'localhost','127.0.0.1','::1'}:raise ValueError('Restauracion automatica solo en PostgreSQL local')
     archive=Path(archive).resolve();manifest=json.loads(Path(manifest_path).read_text(encoding='utf-8'))
     if sha256(archive)!=manifest['sha256']:raise ValueError('SHA-256 del respaldo no coincide')
-    maintenance=engine_for('postgres',autocommit=True)
+    maintenance=engine_for('postgres',autocommit=True,administrative=True)
     try:
         with maintenance.connect() as conn:
             exists=conn.scalar(text('SELECT 1 FROM pg_database WHERE datname=:name'),{'name':database})
             if not exists:
                 conn.execute(text('CREATE DATABASE '+conn.dialect.identifier_preparer.quote(database)+" TEMPLATE template0 ENCODING 'UTF8'"))
     finally:maintenance.dispose()
-    target=engine_for(database)
+    target=engine_for(database,administrative=True)
     try:
         with target.connect() as conn:
             count=conn.scalar(text("SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema' AND c.relkind IN ('r','p','v','m','f')"))
             if count:raise ValueError('Destino contiene objetos; se rechaza sobrescribir. Use una base nueva y vacia')
     finally:target.dispose()
-    run_pg('pg_restore',['--no-owner','--no-privileges','--exit-on-error','--single-transaction','--dbname='+database,str(archive)],database)
+    run_pg('pg_restore',['--no-owner','--no-privileges','--exit-on-error','--single-transaction','--dbname='+database,str(archive)],
+           database,administrative=True)
     return verify_database(database,manifest_path)
 
 

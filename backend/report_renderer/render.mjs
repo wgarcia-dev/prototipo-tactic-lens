@@ -7,7 +7,7 @@ const report = JSON.parse(Buffer.concat(chunks).toString('utf8'));
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function table(columns, rows) {
   if (!rows.length) return '';
-  return '<table><thead><tr>'+columns.map(c=>'<th>'+esc(c)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(row=>'<tr>'+row.map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+  return '<table><thead><tr>'+columns.map(c=>'<th>'+esc(c)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(row=>'<tr>'+row.map(v=>'<td>'+esc(v).replace(/\r?\n/g,'<br>')+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
 }
 function activityChart(counts) {
   const types = Object.entries(counts).sort((a,b) => b[1]-a[1]);

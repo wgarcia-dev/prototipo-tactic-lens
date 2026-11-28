@@ -108,3 +108,13 @@ export function mappingEvidencePath(id: string, context?:{technique:string;sessi
   }
   return '/mitre?' + query
 }
+const enrichmentStates: Record<string,string> = {
+  coincidencia:'Coincidencia encontrada', sin_resultados:'Sin coincidencias',
+  no_disponible:'Servicio no disponible', timeout:'Tiempo de espera agotado',
+  cuota:'Cuota agotada', respuesta_incompatible:'Respuesta incompatible',
+  error_autenticacion:'Error de autenticación', omitido:'Consulta omitida', error:'Error de consulta',
+}
+
+export function enrichmentStatusLabel(state?:string) {
+  return state ? enrichmentStates[state] ?? state : 'Sin resultado'
+}

@@ -1,15 +1,17 @@
 """A consistent, read-only view of the evidence behind a Cowrie session."""
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
-from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
 
-from .analysis_state import analyzed_count
+from .analysis_state import analyzed_count, current_inputs, result_freshness, states_for_sessions
 from .correlation import mapping_evidence
-from .rag.behavior import redact
+from .intelligence_metrics import observable_totals, technique_count
+from .ioc_views import IocFilters, observation_query
+from .mitre_views import MitreFilters, mapping_rows
 from .rag.mitre_evidence import AUTO_CLASSIFICATION
+from .sensitive import Redactor, session_redactors
 
 EVENT_LIMIT = 500
 OBSERVABLE_LIMIT = 100
@@ -33,7 +35,8 @@ def stored_time(value):
         return "Fecha sin verificar"
 
 
-def report_snapshot(conn, tables, honeypot_id, session_id, analysis_id=None):
+def report_snapshot(conn, tables, honeypot_id, session_id, analysis_id=None, modality="desconocido",
+                    sensors=None, instances=None):
     session, event, analysis = (tables[name] for name in ("sesion", "evento", "analisis_llm"))
     record = conn.execute(select(session).where(
         session.c.id_sesion == session_id, session.c.id_honeypot == honeypot_id
@@ -59,21 +62,25 @@ def report_snapshot(conn, tables, honeypot_id, session_id, analysis_id=None):
     if not saved:
         raise HTTPException(409, "Complete el análisis de esta sesión antes de generar el informe")
     covered = analyzed_count(saved) if saved else None
-    status = (
-        "Sin análisis guardado" if not saved else
-        "Cobertura del análisis sin verificar" if covered is None else
-        "Análisis desactualizado" if covered != total else "Análisis vigente"
-    )
+    inputs, _ = current_inputs(conn, tables, [session_id], sensors or (honeypot_id,), instances or {})
+    freshness = result_freshness(saved.resultado_estructurado, inputs[session_id])
+    state = states_for_sessions(conn, analysis, inputs)[session_id]
+    status = ("Análisis histórico · vigencia no verificable" if freshness["metodologia"] == "no_verificable"
+              else "Análisis desactualizado" if freshness["metodologia"] == "desactualizada"
+              or freshness["cobertura_eventos"] == "incompleta" else "Análisis vigente")
 
     obs, ioc, typ = (tables[name] for name in ("observacion_ioc", "ioc", "tipo_ioc"))
-    observations = conn.execute(select(typ.c.nombre, ioc.c.valor, obs.c.estado_revision,
+    observed = select(typ.c.nombre, ioc.c.valor, obs.c.estado_revision,
         func.count(func.distinct(obs.c.id_evento)), func.min(obs.c.id_evento))
+    observed = (observed
         .select_from(obs).join(event, obs.c.id_evento == event.c.id_evento)
         .join(ioc, obs.c.id_ioc == ioc.c.id_ioc).join(typ, typ.c.id_tipo_ioc == ioc.c.id_tipo_ioc)
         .where(event.c.id_sesion == session_id)
         .group_by(typ.c.nombre, ioc.c.valor, obs.c.estado_revision)
-        .order_by(typ.c.nombre, ioc.c.valor, obs.c.estado_revision)
-        .limit(OBSERVABLE_LIMIT + 1)).all()
+        .order_by(typ.c.nombre, ioc.c.valor, obs.c.estado_revision))
+    observations = conn.execute(observed.limit(OBSERVABLE_LIMIT + 1)).all()
+    observation_total = (conn.scalar(select(func.count()).select_from(observed.order_by(None).subquery()))
+                         if len(observations)>OBSERVABLE_LIMIT else len(observations))
 
     mappings = list(mapping_evidence(conn,tables,analysis_id=saved.id_analisis,limit=FINDING_LIMIT+1))
 
@@ -83,11 +90,40 @@ def report_snapshot(conn, tables, honeypot_id, session_id, analysis_id=None):
         event.c.numero_secuencia, event.c.id_evento).limit(EVENT_LIMIT)).all()
     report = assemble_report(record, total, counts, events, saved, covered, status, observations, mappings, examples)
     sections = report["sections"]
-    if covered != total:
-        sections.insert(0, dict(title="Cobertura del análisis", columns=[], rows=[], paragraphs=[
-            "El análisis seleccionado tiene cobertura sin verificar." if covered is None else
-            f"El análisis seleccionado cubre {covered} eventos de los {total} actualmente almacenados.",
-            "La cronología y los observables corresponden a los registros actuales de la sesión. La interpretación y los mapeos corresponden al análisis seleccionado."]))
+    sensor_scope = sensors or (honeypot_id,)
+    ioc_scope = observation_query(tables, sensor_scope, instances or {}, IocFilters()).where(
+        session.c.id_sesion == session_id).subquery().c
+    mitre_scope = mapping_rows(tables, sensor_scope, instances or {}, MitreFilters()).where(
+        analysis.c.id_analisis == saved.id_analisis).subquery().c
+    intelligence = conn.execute(observable_totals(ioc_scope)).mappings().one()
+    sections.append({"title":"Indicadores del alcance", "columns":["Indicador", "Cantidad"], "paragraphs":[
+        "IoCs únicos observados en la sesión y técnicas distintas con mapeo en el análisis seleccionado. Los totales incluyen registros históricos y descartados."],
+        "rows":[["IoCs observados",str(intelligence.observables)],["IoCs con evidencia verificable",str(intelligence.verificables)],
+                ["Técnicas MITRE registradas",str(conn.scalar(select(technique_count(mitre_scope))))]]})
+    mapping_total = (conn.scalar(select(func.count()).select_from(mitre_scope.codigo_tecnica.table))
+                     if len(mappings)>FINDING_LIMIT else len(mappings))
+    coverage_rows = [("Cronología y reglas de captura",total,len(events)),
+                     ("Registro de comandos",counts.get("cowrie.command.input",0),len(commands)),
+                     ("Grupos de observables por revisión",observation_total,min(len(observations),OBSERVABLE_LIMIT)),
+                     ("Mapeos MITRE",mapping_total,min(len(mappings),FINDING_LIMIT))]
+    coverage = [{"seccion":name,"disponibles":available,"incluidos":included,"omitidos":available-included,
+                 "estado":"no_disponible" if not available else "limitada" if available>included else "disponible"}
+                for name,available,included in coverage_rows]
+    sections.insert(1,{"title":"Cobertura por sección", "paragraphs":["Los totales corresponden al alcance identificado del informe."],
+        "columns":["Sección","Disponibles","Incluidos","Omitidos","Estado"],
+        "rows":[[item["seccion"],str(item["disponibles"]),str(item["incluidos"]),str(item["omitidos"]),
+                 {"no_disponible":"No disponible","limitada":"Limitada","disponible":"Disponible"}[item["estado"]]] for item in coverage]})
+    evidence_digest = freshness["evidencia_sha256"] or "Sin huella histórica"
+    sections.insert(0, dict(title="Vigencia y cobertura del análisis", columns=["Campo", "Valor"], rows=[
+        ["Cobertura de eventos", freshness["cobertura_eventos"]],
+        ["Vigencia metodológica", freshness["metodologia"].replace("_", " ")],
+        ["Último intento de la sesión", state["estado_ultimo_intento"].replace("_", " ")],
+        ["Huella de la evidencia seleccionada", evidence_digest],
+    ], paragraphs=[
+        "El análisis seleccionado no conserva un conteo verificable." if covered is None else
+        f"El resultado registra {covered} eventos analizados. Actualmente hay {total} almacenados.",
+        "La cronología y los observables corresponden a los registros actuales de la sesión. La interpretación y los mapeos corresponden al análisis seleccionado.",
+    ]))
     sections.insert(1, dict(title="Registro de comandos", columns=["Hora Ecuador", "Entrada en Cowrie", "Evento"],
         paragraphs=[f"{len(commands)} entradas mostradas de {counts.get('cowrie.command.input', 0)} registradas. "
                     "Cada fila identifica el texto recibido por el señuelo. La entrada por sí sola no acredita su resultado."],
@@ -97,7 +133,7 @@ def report_snapshot(conn, tables, honeypot_id, session_id, analysis_id=None):
     external_rows = []
     for observable in enrichment.get("observables", []):
         for provider, result in observable.get("proveedores", {}).items():
-            results = result if isinstance(result, list) else [result]
+            results = result if isinstance(result, list) else [result, *result.get("coincidencias", [])] if isinstance(result, dict) else []
             for entry in results:
                 if entry.get("estado") == "omitido":
                     reason = ("Esta integración de URLhaus evalúa archivos por SHA-256. La dirección IP no identifica un archivo."
@@ -112,10 +148,10 @@ def report_snapshot(conn, tables, honeypot_id, session_id, analysis_id=None):
                              paragraphs=[], rows=external_rows))
     assessment = ((saved.resultado_estructurado or {}).get("evaluacion_incidente") or {}) if saved else {}
     if assessment:
-        sections.insert(0, dict(title="Evaluación de incidente", columns=["Campo", "Valor"],
-            paragraphs=[assessment.get("fundamento_prioridad", ""), *assessment.get("limitaciones", [])],
-            rows=[[key.replace('_', ' '), str(assessment.get(key, ""))] for key in
-                  ("clasificacion", "estado", "severidad", "prioridad_triaje", "metodologia", "snapshot_sha256")]))
+        if evidence := assessment.get("snapshot_sha256"):
+            sections.append(dict(title="Conjunto de evidencia del triaje", columns=[], rows=[], paragraphs=[
+                f"Eventos de la evaluación {assessment['eventos_evaluados']}. Huella SHA-256 {evidence}."
+            ]))
         for revision in assessment.get("revisiones", []):
             sections.append(dict(title="Decisión documentada del analista", columns=["Campo", "Valor"], paragraphs=[],
                 rows=[[key.replace('_', ' '), stored_time(revision.get(key)) if key == "revisado_en" else str(revision.get(key, ""))] for key in
@@ -145,31 +181,25 @@ def report_snapshot(conn, tables, honeypot_id, session_id, analysis_id=None):
     index = next(i for i, item in enumerate(sections) if item["title"] == "Cronología de evidencia")
     sections[index:index] = narrative
     from .operational_report import analyst_sections
-    report = analyst_sections(report, saved.resultado_estructurado or {}, commands)
+    from .safeguards import linked_tasks
+    safeguard_links = linked_tasks(conn, tables, saved.id_analisis) if "salvaguarda" in tables else {}
+    report = analyst_sections(report, saved.resultado_estructurado or {}, commands, safeguard_links)
     raw_events = conn.execute(select(event.c.id_evento, event.c.tipo_evento, event.c.fecha_hora, event.c.datos_originales)
         .where(event.c.id_sesion == session_id).order_by(event.c.fecha_hora, event.c.id_evento).limit(EVENT_LIMIT)).all()
     from .report_evidence import complete_assessment
-    report = complete_assessment(report, raw_events, record, saved.resultado_estructurado or {}, total)
-    sections = report["sections"]
-    # Preserve every section and row, including tuple-backed SQL results.
-    report["metadata"] = [[label, redact(value)] for label, value in report["metadata"]]
-    for section in sections:
-        section["title"] = redact(section["title"])
-        section["paragraphs"] = [redact(value) for value in section["paragraphs"]]
-        section["rows"] = [[redact(value) for value in row] for row in section["rows"]]
-    return report
+    report = complete_assessment(report, raw_events, record, saved.resultado_estructurado or {}, total, modality=modality)
+    report["sections"] = [item for item in report["sections"]
+                          if item["title"] != "Salvaguardas defensivas para un servidor Linux en producción"]
+    from .analysis_presentation import analytical_sections
+    report["sections"][1:1] = analytical_sections(saved.resultado_estructurado or {})
+    report = session_redactors(conn, event, [session_id])[session_id].payload(report)
+    return {**report, "cobertura_secciones": coverage, "revision_eventos":record.revision_eventos,
+            "vigencia_analisis": freshness, "estado_ultimo_intento": state["estado_ultimo_intento"],
+            "ultimo_resultado_exitoso": state["analisis"]}
 
 
 def observable_value(kind, value):
-    if kind != "URL":
-        return value
-    try:
-        parsed = urlsplit(value)
-        if not parsed.hostname:
-            return "URL no disponible"
-        return urlunsplit((parsed.scheme, parsed.netloc.rsplit("@", 1)[-1], parsed.path, "", ""))
-    except ValueError:
-        return "URL no disponible"
+    return Redactor((value,)).text(value, observable_url=kind == "URL")
 
 
 def assemble_report(record, total, counts, events, saved, covered, status, observations, mappings, examples=None):
@@ -186,7 +216,7 @@ def assemble_report(record, total, counts, events, saved, covered, status, obser
         examples = {kind: eid for eid, kind, _ in events}
     safeguards = []
     for kind, measure, check in (
-        ("cowrie.login.success", "Verificar el origen del acceso", "Contrastar la IP y la hora con las pruebas autorizadas del laboratorio."),
+        ("cowrie.login.success", "Verificar el origen del acceso", "Contrastar la IP y la hora con los registros de acceso y autorización disponibles."),
         ("cowrie.login.failed", "Revisar los intentos de acceso", "Comparar origen y frecuencia con otras sesiones antes de proponer restricciones."),
         ("cowrie.command.input", "Proteger el registro de comandos", "Conservar el original con acceso restringido y revisar las entradas por si contienen secretos antes de compartir el informe."),
         ("cowrie.session.file_download", "Revisar la salida de red del señuelo", "Contrastar el destino registrado con las reglas de salida de la VM."),
@@ -259,6 +289,7 @@ def assemble_report(record, total, counts, events, saved, covered, status, obser
     if saved and saved.resumen:
         sections.insert(1, section("Interpretación del análisis guardado", [
             "Resumen generado por el modelo y sujeto a revisión.",
+            saved.resumen if (saved.resultado_estructurado or {}).get("version_esquema") else
             saved.resumen[:3500] + ("… Consulte el resultado completo en TacticLens." if len(saved.resumen) > 3500 else ""),
         ]))
     return {

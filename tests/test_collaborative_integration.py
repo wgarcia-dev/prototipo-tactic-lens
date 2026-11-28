@@ -116,12 +116,14 @@ class CollaborativeIntegrationTests(fixtures.AuthFixture):
             resultado_estructurado={'eventos_analizados':0, 'informe':report_data()}))
         historical = self.client.get(f'/api/sesiones/{sid}/informe?id_analisis={aid}')
         self.assertEqual(historical.status_code,200,historical.text)
-        self.assertEqual(historical.json()['status'],'Análisis desactualizado')
+        self.assertEqual(historical.json()['vigencia_analisis']['metodologia'], 'no_verificable')
+        self.assertEqual(historical.json()['vigencia_analisis']['cobertura_eventos'], 'incompleta')
         self.connection.execute(analysis.update().where(analysis.c.id_analisis==aid).values(
             resultado_estructurado={'acciones':[]}))
         legacy = self.client.get(f'/api/sesiones/{sid}/informe?id_analisis={aid}')
         self.assertEqual(legacy.status_code,200,legacy.text)
-        self.assertEqual(legacy.json()['status'],'Cobertura del análisis sin verificar')
+        self.assertEqual(legacy.json()['status'], 'Análisis histórico · vigencia no verificable')
+        self.assertIsNone(legacy.json()['vigencia_analisis']['eventos_analizados'])
         self.assertNotIn('Formato del análisis conservado',json.dumps(legacy.json(),ensure_ascii=False))
 
     def test_review_survives_reingestion_and_backfill_with_audit(self):
@@ -131,7 +133,7 @@ class CollaborativeIntegrationTests(fixtures.AuthFixture):
         row = self.observable(event_id)
         endpoint = '/api/inteligencia/ioc/'+str(row['id_ioc'])+'/revision'
         self.assertEqual(self.client.patch(endpoint,json={'estado':'confirmado','motivo':' '*12}).status_code,422)
-        response = self.client.patch(endpoint,json={'estado':'confirmado','motivo':'Origen comprobado en esta prueba'})
+        response = self.client.patch(endpoint,json={'estado':'confirmado','motivo':'Origen comprobado en esta prueba','revision_esperada':self.client.get(endpoint).json()['revision']})
         self.assertEqual(response.status_code,200,response.text)
         self.ingest([raw])
         persist_observables(self.connection,app.state.tables,raw,event_id,self.clock)
@@ -152,10 +154,10 @@ class CollaborativeIntegrationTests(fixtures.AuthFixture):
         self.assertEqual(self.client.get(detail).status_code,200)
         self.assertEqual(self.client.get('/api/iocs/'+str(uuid4())+'/observaciones').status_code,404)
         response = self.client.patch('/api/inteligencia/ioc/'+str(row['id_ioc'])+'/revision',
-            json={'estado':'descartado','motivo':'Analista no puede decidir este estado'})
+            json={'estado':'descartado','motivo':'Analista no puede decidir este estado','revision_esperada':None})
         self.assertEqual(response.status_code,403,response.text)
         self.assertEqual(self.client.patch('/api/inteligencia/observacion_ioc/'+str(row['id_observacion'])+'/revision',
-            json={'estado':'confirmado','motivo':'Analista no puede confirmar relevancia'}).status_code,403)
+            json={'estado':'confirmado','motivo':'Analista no puede confirmar relevancia','revision_esperada':None}).status_code,403)
         self.assertEqual(self.observable(event_id)['estado_revision'],'pendiente')
 
     def test_model_findings_and_review_remain_visible_with_supported_mitre_only(self):
@@ -197,7 +199,7 @@ class CollaborativeIntegrationTests(fixtures.AuthFixture):
         action = app.state.tables['accion_identificada']
         mid = self.connection.scalar(select(m.c.id_mapeo).join(action,m.c.id_accion==action.c.id_accion).where(action.c.id_analisis==aid))
         response = self.client.patch('/api/inteligencia/mitre/'+str(mid)+'/revision',
-            json={'estado':'confirmado','motivo':'Evidencia literal de shell revisada'})
+            json={'estado':'confirmado','motivo':'Evidencia literal de shell revisada','revision_esperada':None})
         self.assertEqual(response.status_code,200,response.text)
         self.assertEqual(self.connection.scalar(select(m.c.estado_revision).where(m.c.id_mapeo==mid)),'confirmado')
         backfill_detections(self.connection,app.state.tables)
@@ -233,7 +235,7 @@ class CollaborativeIntegrationTests(fixtures.AuthFixture):
         stored = self.connection.scalar(select(event.c.datos_originales).where(event.c.id_evento==receipts[0]['id_evento']))
         self.assertEqual(stored,{k:v for k,v in raw.items() if k!='_collector'})
         review = self.client.patch(f"/api/inteligencia/observacion_ioc/{first['id_observacion']}/revision",
-            json={'estado':'confirmado','motivo':'Resultado relevante para esta sesión'})
+            json={'estado':'confirmado','motivo':'Resultado relevante para esta sesión','revision_esperada':None})
         self.assertEqual(review.status_code,200,review.text)
         self.assertEqual(self.client.get(endpoint).json()[1]['estado_revision'],'pendiente')
         self.assertEqual(next(x for x in self.client.get('/api/iocs').json() if x['id_ioc']==row['id_ioc'])['estado_revision'],'mixto')
@@ -263,7 +265,7 @@ class CollaborativeIntegrationTests(fixtures.AuthFixture):
         listing = next(row for row in self.client.get('/api/iocs').json() if row['id_ioc']==str(ioc))
         self.assertEqual((listing['estado_revision'],listing['observaciones_historicas']),('historico',1))
         response = self.client.patch(f"/api/inteligencia/observacion_ioc/{before['id_observacion']}/revision",
-            json={'estado':'confirmado','motivo':'Esta propuesta carece de evidencia'})
+            json={'estado':'confirmado','motivo':'Esta propuesta carece de evidencia','revision_esperada':None})
         self.assertEqual(response.status_code,409,response.text)
 
     def test_seed_preserves_existing_metadata_and_catalog_supplies_allowed_codes(self):

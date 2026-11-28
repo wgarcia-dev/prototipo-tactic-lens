@@ -1,4 +1,5 @@
-import {useEffect, useState, type ReactNode} from 'react'
+import {useState, type ReactNode} from 'react'
+import {useMonitorQuery} from '../monitoring/Realtime'
 import {Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis} from 'recharts'
 import {api} from '../auth/client'
 import {mitreBrowseStates} from './iocEvidence'
@@ -34,15 +35,15 @@ export function mitreDate(value?:string|null) {
 function useMitreData<T>(path:string, revision=0) {
   const [result,setResult]=useState<{path:string;data?:T;error?:string}>()
   const [attempt,retry]=useState(0)
-  useEffect(()=>{
-    const controller=new AbortController()
-    api<T>(path,{signal:controller.signal}).then(data=>{
-      if(!controller.signal.aborted)setResult({path,data})
-    }).catch(error=>{
-      if(!controller.signal.aborted)setResult({path,error:error.message})
-    })
-    return ()=>controller.abort()
-  },[path,revision,attempt])
+  useMonitorQuery(async signal=>{
+    try {
+      const data=await api<T>(path,{signal})
+      if(!signal.aborted)setResult({path,data})
+    } catch(error) {
+      if(!signal.aborted)setResult({path,error:(error as Error).message})
+      throw error
+    }
+  },5000,[path,revision,attempt],['mitre'])
   const current=result?.path===path?result:undefined
   return {...current,retry:()=>{setResult(undefined);retry(value=>value+1)}}
 }

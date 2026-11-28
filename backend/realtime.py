@@ -1,10 +1,15 @@
 """Bounded invalidation stream. Database receipts remain the source of truth."""
 import asyncio
 from datetime import datetime, timezone
+import json
+import logging
+from threading import Event, Thread
 from uuid import uuid4
 
 from anyio import CancelScope
 from fastapi import Request, WebSocket, WebSocketDisconnect
+import psycopg
+from sqlalchemy import text
 from starlette.concurrency import run_in_threadpool
 
 from .auth.store import AuthError, rate, session, transaction
@@ -12,6 +17,79 @@ from .auth.store import AuthError, rate, session, transaction
 PROTOCOL = 'tacticlens.monitor.v1'
 HEARTBEAT_SECONDS = 15
 CLIENT_IDLE_SECONDS = 40
+CHANNEL = 'tacticlens_monitor_v1'
+DOMAINS = ('sesiones', 'analisis', 'iocs', 'mitre', 'salvaguardas', 'panel')
+logger = logging.getLogger(__name__)
+
+
+def notify_change(conn, sensors, *domains, events=(), received_at=None):
+    """Register a small invalidation on the write transaction itself."""
+    payload = {'sensores': sorted({str(sensor) for sensor in sensors}), 'dominios': sorted(set(domains)),
+               'eventos': [event for event in events[:100] if type(event) is int],
+               'recibido_api': received_at}
+    conn.execute(text('SELECT pg_notify(:channel, :payload)'),
+                 {'channel': CHANNEL, 'payload': json.dumps(payload, separators=(',', ':'))})
+
+
+class PostgresMonitor:
+    """One LISTEN connection per API worker, including Windows event loops."""
+    def __init__(self, engine, hub, sensors, cache):
+        self.hub, self.cache = hub, cache
+        self.sensors = {str(sensor) for sensor in sensors}
+        self.connection = engine.url.translate_connect_args(username='user', database='dbname')
+        self.stop, self.ready = Event(), Event()
+        self.thread = Thread(target=self.listen, name='tacticlens-listen', daemon=True)
+
+    def listen(self):
+        resync = False
+        while not self.stop.is_set():
+            try:
+                with psycopg.connect(**self.connection, autocommit=True, connect_timeout=3) as conn:
+                    conn.execute('LISTEN ' + CHANNEL)
+                    if resync:
+                        self.dispatch({'dominios': list(DOMAINS)})
+                    resync = True
+                    self.ready.set()
+                    while not self.stop.is_set():
+                        for notification in conn.notifies(timeout=1):
+                            if notice := self.parse(notification.payload):
+                                self.dispatch(notice)
+            except (psycopg.Error, OSError, RuntimeError):
+                if not self.stop.is_set():
+                    resync = True
+                    logger.warning('Suscripción PostgreSQL de monitoreo interrumpida; se reintentará.')
+                    self.stop.wait(1)
+
+    def parse(self, payload):
+        try:
+            value = json.loads(payload)
+            sensors, domains = value['sensores'], value['dominios']
+            if not isinstance(sensors, list) or not isinstance(domains, list) or not self.sensors.intersection(sensors):
+                return None
+            domains = [domain for domain in DOMAINS if domain in domains]
+            if not domains:
+                return None
+            notice = {'dominios': domains}
+            if 'sesiones' in domains:
+                events = value.get('eventos') or []
+                if isinstance(events, list):
+                    notice['eventos'] = [item for item in events[:100] if type(item) is int and item > 0]
+                received = value.get('recibido_api')
+                if isinstance(received, str) and len(received) <= 40:
+                    notice['recibido_api'] = datetime.fromisoformat(received).isoformat()
+            return notice
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return None
+
+    def dispatch(self, notice):
+        if 'panel' in notice['dominios']:
+            self.cache.invalidate()
+        self.hub.loop.call_soon_threadsafe(self.hub._broadcast,
+            {'tipo': 'cambio', 'confirmado_api': datetime.now(timezone.utc).isoformat(), **notice})
+
+    def close(self):
+        self.stop.set()
+        self.thread.join(timeout=4)
 
 
 class MonitorHub:
@@ -32,22 +110,19 @@ class MonitorHub:
     def unsubscribe(self, key):
         self.clients.pop(key, None)
 
-    def publish(self, result, received_at):
-        # Called ONLY after persist() has committed. Thread-safe for sync routes.
-        notice = {'tipo': 'cambio', 'recibido_api': received_at,
-                  'confirmado_api': datetime.now(timezone.utc).isoformat(),
-                  'eventos': [r['id_evento'] for r in result['confirmaciones'] if r['estado'] == 'insertado']}
-        if notice['eventos']:
-            self.loop.call_soon_threadsafe(self._broadcast, notice)
-
     def _broadcast(self, notice):
         self.revision += 1
         notice = {**notice, 'revision': self.revision, 'epoca': self.epoch}
         for _, queue in tuple(self.clients.values()):
             # Coalesce invalidations, never durable events. Slow tabs resync SQL.
             if queue.full():
-                queue.get_nowait()
-            queue.put_nowait(notice)
+                previous = queue.get_nowait()
+                merged = {**previous, **notice,
+                          'dominios': sorted(set(previous.get('dominios', ())) | set(notice.get('dominios', ()))),
+                          'eventos': list(dict.fromkeys(previous.get('eventos', []) + notice.get('eventos', [])))[-100:]}
+                queue.put_nowait(merged)
+            else:
+                queue.put_nowait(notice)
 
 
 def authorize_socket(ws, initial=False):

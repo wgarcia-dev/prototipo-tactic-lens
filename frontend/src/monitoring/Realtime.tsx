@@ -1,44 +1,37 @@
 import {createContext,useContext,useEffect,useRef,useState,type DependencyList,type ReactNode} from 'react'
-import {startMonitor,type Notice} from './socket'
+import {affectedDomains,startMonitor,type MonitorDomain,type Notice} from './socket'
 import {usePolling} from './usePolling'
-import {invalidationTask} from './invalidation'
 
+const configuredReconcile=Number(import.meta.env?.VITE_MONITOR_RECONCILE_MS??30000)
+const reconcile=Number.isFinite(configuredReconcile)?Math.min(300000,Math.max(5000,configuredReconcile)):30000
 const Context=createContext({connected:false,revision:0,notice:null as Notice|null})
+
 export function RealtimeProvider({children}:{children:ReactNode}){
   const [state,setState]=useState({connected:false,revision:0,notice:null as Notice|null})
   useEffect(()=>{
     let dispose:(()=>void)|undefined
-    // StrictMode probes effects with mount/cleanup/mount. Defer the handshake
-    // so the discarded mount cannot abort a CONNECTING socket through Vite.
+    // StrictMode probes effects before the real mount. Defer its socket handshake.
     const timer=window.setTimeout(()=>{dispose=startMonitor({
-    connect:()=>new WebSocket(`${location.protocol==='https:'?'wss:':'ws:'}//${location.host}/api/monitor/ws`,'tacticlens.monitor.v1'),
-    now:()=>Date.now(),random:()=>Math.random(),
-    schedule:(fn,ms)=>window.setTimeout(fn,ms),cancel:id=>window.clearTimeout(id as number),
-    visible:()=>document.visibilityState==='visible',
-    subscribe:fn=>{document.addEventListener('visibilitychange',fn);return()=>document.removeEventListener('visibilitychange',fn)},
-  },(connected,notice)=>setState(previous=>({connected,revision:previous.revision+(notice?1:0),notice:notice??previous.notice})),
-    ()=>window.dispatchEvent(new Event('tacticlens:session-expired')))},0)
+      connect:()=>new WebSocket(`${location.protocol==='https:'?'wss:':'ws:'}//${location.host}/api/monitor/ws`,'tacticlens.monitor.v1'),
+      now:()=>Date.now(),random:()=>Math.random(),
+      schedule:(fn,ms)=>window.setTimeout(fn,ms),cancel:id=>window.clearTimeout(id as number),
+      visible:()=>document.visibilityState==='visible',
+      subscribe:fn=>{document.addEventListener('visibilitychange',fn);return()=>document.removeEventListener('visibilitychange',fn)},
+    },(connected,notice)=>{
+      setState(previous=>({connected,revision:previous.revision+(notice?1:0),notice:notice?.eventos?.length?notice:previous.notice}))
+      if(notice)window.dispatchEvent(new CustomEvent('tacticlens:monitor-invalidate',{detail:affectedDomains(notice)}))
+    },()=>window.dispatchEvent(new Event('tacticlens:session-expired')))},0)
     return()=>{window.clearTimeout(timer);dispose?.()}
   },[])
   return <Context.Provider value={state}>{children}</Context.Provider>
 }
+
 export const useRealtime=()=>useContext(Context)
 
-/** Immediate fetch on invalidation, serialized and coalesced during a slow request.
- * Only a disconnected WebSocket enables the slower 15-second fallback.
- */
-export function useMonitorQuery(refresh:(signal:AbortSignal)=>Promise<void>,delay=1000,dependencies:DependencyList=[]){
-  const live=useRealtime(), realtime=delay===1000
-  const current=useRef(refresh);current.current=refresh
-  const state=useRef(live);state.current=live
-  const task=useRef<ReturnType<typeof invalidationTask>|null>(null)
-  if(!task.current)task.current=invalidationTask(signal=>current.current(signal),()=>state.current)
-  useEffect(()=>{task.current!.reset()},dependencies)
-  // Existing non-monitoring screens retain their original cadence.
-  usePolling(async signal=>{
-    if(!realtime){await current.current(signal);return}
-    await task.current!.run(signal)
-  },realtime?15000:delay,[...dependencies],realtime)
-  // Wake the active scheduler via a custom event without creating a second fetch.
-  useEffect(()=>{if(realtime)window.dispatchEvent(new Event('tacticlens:monitor-invalidate'))},[live.revision,realtime])
+/** Domain invalidations share the serialized scheduler with periodic reconciliation. */
+export function useMonitorQuery(refresh:(signal:AbortSignal)=>Promise<void>,delay=5000,
+  dependencies:DependencyList=[],domains?:readonly MonitorDomain[]){
+  const {connected}=useRealtime()
+  const active=useRef(connected);active.current=connected
+  usePolling(refresh,domains?()=>active.current?reconcile:Math.min(reconcile,15000):delay,dependencies,domains)
 }

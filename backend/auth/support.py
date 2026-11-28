@@ -9,7 +9,7 @@ from fastapi import APIRouter, Query, Request
 from pydantic import Field, field_validator
 from sqlalchemy import select, text
 
-from .notifications import enqueue, schedule
+from .notifications import enqueue
 from .schemas import AdministrativeAction, EmailPayload
 from .security import fingerprint, now
 from .service import reauthenticate
@@ -110,15 +110,14 @@ def retry_notification(identifier: UUID,payload: AdministrativeAction,request: R
         row=conn.execute(select(q).where(q.c.id_notificacion==identifier).with_for_update()).mappings().first()
         if not row:
             raise AuthError(404,"Notificación no encontrada")
-        if row.estado in {"aceptado","cancelado"} or row.intentos>=request.app.state.mail_config.max_attempts:
+        if row.estado not in {"fallido", "reintento"} or row.intentos>=request.app.state.mail_config.max_attempts:
             raise AuthError(409,"La notificación no admite más reintentos")
         if row.primer_intento_en and row.primer_intento_en<=now()-timedelta(hours=23):
             raise AuthError(409,"La ventana segura de idempotencia expiró; revise el caso manualmente")
-        if row.estado=="en_proceso" and row.ultimo_intento_en>now()-timedelta(minutes=5):
-            raise AuthError(409,"Ya existe un intento en curso")
         if row.proximo_intento_en and row.proximo_intento_en>now():
             raise AuthError(409,"Espere hasta la fecha indicada para volver a intentar")
-        schedule(request,identifier)
+        conn.execute(q.update().where(q.c.id_notificacion == identifier).values(
+            estado="reintento", proximo_intento_en=now()))
         audit(conn,request,"correo_reintento_solicitado",actor.id_usuario,actor.id_usuario,
               notification_id=str(identifier),reason=payload.motivo,resultado="programado")
     return {"mensaje":"Reintento programado con la misma referencia; no se confirma entrega en el buzón."}

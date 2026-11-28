@@ -2,7 +2,7 @@
 import argparse,json
 from pathlib import Path
 from dotenv import load_dotenv
-from backend.db import database_engine
+from backend.db import migration_engine
 from backend.rag.catalog import download,import_catalog
 
 def main():
@@ -11,7 +11,7 @@ def main():
     parser.add_argument('--descargar',action='store_true')
     args=parser.parse_args();load_dotenv()
     if args.descargar:download(args.archivo)
-    engine=database_engine()
+    engine=migration_engine()
     try:print(json.dumps(import_catalog(engine,args.archivo),ensure_ascii=False))
     finally:engine.dispose()
 

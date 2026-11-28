@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from .config import SESSION_COOKIE
 from .security import fingerprint, now, opaque_token
+from ..sensitive import redact
 
 
 class AuthError(HTTPException):
@@ -37,12 +38,12 @@ def ip_hash(request):
 
 
 def audit(conn, request, kind, user_id=None, actor=None, **metadata):
-    allowed = {"reason", "rol", "referencia_hash", "session_id", "request_id", "resultado", "notification_id"}
+    allowed = {"reason", "rol", "referencia_hash", "session_id", "request_id", "resultado", "notification_id", "revision"}
     if set(metadata) - allowed:
         raise ValueError("Metadatos de auditoría no permitidos")
     identifier = conn.scalar(table(request, "auth_auditoria").insert().values(
         id_usuario=user_id, actor_id=actor, tipo=kind,
-        metadatos={"ip_hash": ip_hash(request), **metadata}, creado_por=actor,
+        metadatos={"ip_hash": ip_hash(request), **redact(metadata)}, creado_por=actor,
     ).returning(table(request,"auth_auditoria").c.id_auditoria))
     from .notifications import queue_event
     queue_event(conn,request,identifier,kind,user_id,actor)

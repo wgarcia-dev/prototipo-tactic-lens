@@ -3,19 +3,30 @@
 import base64
 from collections import defaultdict
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import datetime
+from hashlib import sha256
+from pathlib import PurePosixPath
 import re
 import shlex
 from urllib.parse import urlsplit
 
 from ..intelligence import DOWNLOAD, SHA256, SHELL_TOKEN, download_positions, normalize_ip
+from .mitre_command_rules import COMMAND_RULES, KEY_PATH, PATH
 
-VALIDATOR_VERSION = "cowrie_contracts_v2"
+VALIDATOR_VERSION = "cowrie_contracts_v5"
 AUTO_CLASSIFICATION = "identificada_automaticamente"
-SUPPORTED_MODES = frozenset({"cowrie_shell", "desconocido"})
-SHELL_ONLY = frozenset({"cowrie_shell"})
+KNOWN_MODES = frozenset({"cowrie_shell", "cowrie_proxy", "cowrie_llm"})
+SUPPORTED_MODES = KNOWN_MODES | {"desconocido"}
 ATTEMPT = "intento"
 OBSERVED = "resultado_en_honeypot"
+COMMAND_INPUT = "cowrie.command.input"
+SOURCE_LIMITATIONS = {
+    "cowrie_shell": "Entrada del cliente o registro del señuelo Shell. Sin atribución de efectos al anfitrión.",
+    "cowrie_proxy": "Entrada del cliente en una sesión Proxy. Sin verificación independiente de cambios en el entorno aislado o el anfitrión.",
+    "cowrie_llm": "Entrada del cliente o evento estructurado independiente. La respuesta generada no acredita ejecución ni efectos.",
+    "desconocido": "La modalidad histórica no está registrada.",
+}
 
 @dataclass(frozen=True)
 class Command:
@@ -38,6 +49,8 @@ class Signal:
     group: tuple[str, str] | None = None
     distinct: str | None = None
     step: str | None = None
+    session: str | None = None
+    timestamp: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -52,22 +65,38 @@ class EvidenceContract:
     limitation: str = "La evidencia respalda un intento; el resultado y el impacto no están confirmados."
     observed_limitation: str = "El sensor registró un resultado. Su alcance fuera del señuelo no está confirmado."
     version: str = "1"
+    event_types: frozenset[str] = frozenset({COMMAND_INPUT})
+    minimum: str = "Una entrada estructurada que cumple el predicado literal del contrato."
+    window_seconds: int | None = None
 
     def groups(self, matches):
         groups = defaultdict(dict)
         for eid, signal in matches.items():
-            groups[signal.group][eid] = signal
+            groups[(signal.session, signal.group)][eid] = signal
         return [group for group in groups.values()
                 if len({signal.distinct for signal in group.values()}) >= self.minimum_distinct
                 and (not self.sequence or self.sequence_witness(group))]
 
     def sequence_witness(self, matches):
-        witness = []
+        # Keep the most recent prefix so an expired first occurrence does not
+        # mask a later valid sequence. Iterate backwards to consume each row once.
+        prefixes = {0: ()}
         for eid, signal in matches.items():
-            if signal.step == self.sequence[len(witness)]:
-                witness.append(eid)
+            if signal.step == "contradiccion":
+                prefixes = {0: ()}
+                continue
+            for length in range(len(self.sequence) - 1, -1, -1):
+                if signal.step != self.sequence[length] or length not in prefixes:
+                    continue
+                prefix = prefixes[length]
+                if prefix and self.window_seconds is not None:
+                    start = matches[prefix[0]].timestamp
+                    if (signal.timestamp - start).total_seconds() > self.window_seconds:
+                        continue
+                witness = (*prefix, eid)
                 if len(witness) == len(self.sequence):
-                    return tuple(witness)
+                    return witness
+                prefixes[length + 1] = witness
         return ()
 
     def sample_ids(self, matches):
@@ -177,7 +206,13 @@ def from_command(predicate):
 
 def system_discovery(tool, args):
     return (tool == "uname" and all(re.fullmatch(r"-[asnrvmpio]+", arg) for arg in args)
+            or tool in {"hostname", "uptime"} and not args
             or tool == "cat" and args in (("/etc/os-release",), ("/proc/version",), ("/proc/cpuinfo",)))
+
+
+def process_discovery(tool, args):
+    return (tool == "ps" and all(re.fullmatch(r"-?[auxeflA]+", arg) for arg in args)
+            or tool == "top" and args == ("-b", "-n", "1"))
 
 
 def file_discovery(tool, args):
@@ -217,9 +252,17 @@ def authentication_guess(observation):
     if observation.kind != "cowrie.login.failed" or not all(isinstance(v, str) and v for v in (user, password, address)):
         return None
     try:
-        return Signal(group=(str(normalize_ip(address)), user), distinct=password)
+        return Signal(group=(str(normalize_ip(address)), user), distinct=sha256(password.encode("utf-8")).hexdigest())
     except ValueError:
         return None
+
+
+def authentication_spray(observation):
+    guess = authentication_guess(observation)
+    if guess is None:
+        return None
+    address, account = guess.group
+    return Signal(group=(address, guess.distinct), distinct=account)
 
 
 def authorized_key_append(observation):
@@ -255,58 +298,154 @@ def remote_discovery(tool, args):
             or tool == "arp" and args in (("-a",), ("-an",), ("-n",)))
 
 
+def ssh_forward_request(observation):
+    raw = observation.raw
+    if raw.get("protocol") != "ssh" or type(raw.get("dst_port")) is not int or not 1 <= raw["dst_port"] <= 65535:
+        return None
+    if not isinstance(raw.get("dst_ip"), str):
+        return None
+    try:
+        address = normalize_ip(raw["dst_ip"])
+    except ValueError:
+        return None
+    return Signal() if not (address.is_unspecified or address.is_multicast) else None
+
+
+def archive_after_read(observation):
+    command = observation.command
+    if not command or command.append_target is not None:
+        return None
+    tool, args = command.tool, command.args
+    if tool == "cat" and len(args) == 1 and re.fullmatch(r"/etc/shadow|" + KEY_PATH, args[0]):
+        return Signal(group=("archive", args[0]), step="lectura")
+    if (tool == "tar" and len(args) == 3 and args[0] in {"-cf", "-czf", "-cjf"}
+            and re.fullmatch(r"/(?:var/)?tmp/" + PATH.removeprefix(r"(?:/|\./)") + r"\.(?:tar|tgz|tar\.gz|tar\.bz2)", args[1])
+            and ".." not in PurePosixPath(args[1]).parts
+            and re.fullmatch(r"/etc/shadow|" + KEY_PATH, args[2])):
+        return Signal(group=("archive", args[2]), step="archivo")
+    return None
+
+
+def systemd_service_registration(observation):
+    command = observation.command
+    if not command or command.append_target is not None or command.tool != "systemctl":
+        return None
+    args = command.args
+    if len(args) == 2 and args[0] == "link" and re.fullmatch(PATH + r"\.service", args[1]) and args[1].startswith("/"):
+        unit = args[1].rsplit("/", 1)[-1]
+        return Signal(group=("systemd", unit), step="enlace")
+    if (len(args) == 2 and args[0] == "enable" or len(args) == 3 and args[:2] == ("enable", "--now")) and re.fullmatch(r"[A-Za-z0-9_@-][A-Za-z0-9_.@-]*\.service", args[-1]):
+        return Signal(group=("systemd", args[-1]), step="habilitacion")
+    if len(args) == 2 and args[0] in {"disable", "mask"}:
+        return Signal(group=("systemd", args[1]), step="contradiccion")
+    return None
+
+
 # Registering a policy here requires no change to retrieval, validation or persistence.
 CONTRACTS = {
     "T1105": EvidenceContract("transfer", inbound_transfer, contradicts=opposite_transfer,
+        version="2",
+        event_types=frozenset({COMMAND_INPUT, DOWNLOAD}),
+        minimum="Orden de descarga con destino a archivo o descarga HTTP estructurada de Shell con SHA-256 o tamaño positivo.",
         observed_limitation="Cowrie registró la descarga. El evento no acredita ejecución del archivo ni compromiso del sistema."),
-    "T1110": EvidenceContract("auth_repeated", authentication_guess, minimum_distinct=3),
-    "T1082": EvidenceContract("system_discovery", from_command(system_discovery)),
-    "T1033": EvidenceContract("user_discovery", from_command(lambda tool, args: tool in {"whoami", "id"} and not args)),
-    "T1083": EvidenceContract("file_discovery", from_command(file_discovery)),
-    "T1016": EvidenceContract("network_discovery", from_command(network_discovery)),
-    "T1057": EvidenceContract("process_discovery", from_command(
-        lambda tool, args: tool == "ps" and all(re.fullmatch(r"-?[auxeflA]+", arg) for arg in args))),
+    "T1110": EvidenceContract("auth_repeated", authentication_guess, minimum_distinct=3,
+        version="2",
+        event_types=frozenset({"cowrie.login.failed"}),
+        minimum="Tres contraseñas distintas rechazadas para la misma cuenta y origen en la misma sesión."),
+    "T1082": EvidenceContract("system_discovery", from_command(system_discovery), version="3",
+        minimum="Consulta de información del sistema con uname, hostname o uptime, o lectura de metadatos conocidos."),
+    "T1033": EvidenceContract("user_discovery", from_command(lambda tool, args: tool in {"whoami", "id"} and not args),
+        version="2", minimum="Invocación de whoami o id sin argumentos para identificar la cuenta actual."),
+    "T1083": EvidenceContract("file_discovery", from_command(file_discovery), version="2",
+        minimum="Listado con ls, opciones admitidas y operandos de ruta literales."),
+    "T1016": EvidenceContract("network_discovery", from_command(network_discovery), version="2",
+        minimum="Consulta explícita de configuración de interfaces o rutas locales."),
+    "T1057": EvidenceContract("process_discovery", from_command(process_discovery),
+        version="3", minimum="Listado de procesos con ps y opciones de consulta admitidas o top en lote de una iteración."),
     "T1059.004": EvidenceContract("shell", from_command(
-        lambda tool, args: tool in {"sh", "bash", "dash", "zsh"} and len(args) == 2 and args[0] == "-c" and bool(args[1].strip()))),
+        lambda tool, args: tool in {"sh", "bash", "dash", "zsh"} and len(args) == 2 and args[0] == "-c" and bool(args[1].strip())),
+        version="2", minimum="Invocación explícita de shell Unix con un argumento de código no vacío."),
     "T1053.003": EvidenceContract("cron", from_command(
         lambda tool, args: tool == "crontab" and len(args) == 1 and bool(re.fullmatch(r"(?:/|\./)[\w./-]+", args[0]))),
-        tactics=frozenset({"TA0003"})),
+        tactics=frozenset({"TA0003"}), version="2", minimum="Solicitud de instalar un crontab desde archivo literal."),
     "T1136.001": EvidenceContract("account_create", from_command(
-        lambda tool, args: tool == "useradd" and len(args) == 1 and bool(re.fullmatch(r"[a-z_][a-z0-9_-]*", args[0])))),
-    "T1070.003": EvidenceContract("history", from_command(lambda tool, args: tool == "history" and args == ("-c",))),
-    "T1098.004": EvidenceContract("ssh_keys", authorized_key_append, modes=SHELL_ONLY, tactics=frozenset({"TA0003"}),
+        lambda tool, args: tool == "useradd" and len(args) == 1 and bool(re.fullmatch(r"[a-z_][a-z0-9_-]*", args[0]))),
+        version="2", minimum="Solicitud explícita de crear una cuenta local nombrada."),
+    "T1070.003": EvidenceContract("history", from_command(lambda tool, args: tool == "history" and args == ("-c",)),
+        version="2", minimum="Solicitud explícita de vaciar el historial de comandos."),
+    "T1098.004": EvidenceContract("ssh_keys", authorized_key_append, modes=KNOWN_MODES, tactics=frozenset({"TA0003"}),
+        version="2", minimum="Escritura por anexado de un registro Ed25519 válido a una ruta estándar authorized_keys.",
         limitation="La orden intenta añadir una clave pública. Cowrie no acredita escritura efectiva ni acceso posterior."),
-    "T1046": EvidenceContract("network_scan", from_command(service_discovery), modes=SHELL_ONLY,
+    "T1046": EvidenceContract("network_scan", from_command(service_discovery), modes=KNOWN_MODES,
+        version="2", minimum="Sondeo de servicios con destino IP explícito y puertos válidos.",
         limitation="Se observó una orden de identificación de servicios. No hay resultados de escaneo confirmados."),
-    "T1018": EvidenceContract("remote_discovery", from_command(remote_discovery), modes=SHELL_ONLY,
+    "T1018": EvidenceContract("remote_discovery", from_command(remote_discovery), modes=KNOWN_MODES,
+        version="2", minimum="Consulta literal de vecinos o lectura de la caché ARP.",
         limitation="La orden consulta vecinos o la caché ARP. No acredita que se hayan descubierto otros sistemas."),
+    "T1110.001": EvidenceContract("password_guessing", authentication_guess, modes=KNOWN_MODES,
+        tactics=frozenset({"TA0006"}), minimum_distinct=3, event_types=frozenset({"cowrie.login.failed"}),
+        minimum="Tres contraseñas distintas rechazadas para la misma cuenta y origen en la misma sesión.",
+        limitation="Patrón de intentos de contraseña; sin confirmación de credenciales válidas ni de compromiso."),
+    "T1110.003": EvidenceContract("password_spraying", authentication_spray, modes=KNOWN_MODES,
+        tactics=frozenset({"TA0006"}), minimum_distinct=3, event_types=frozenset({"cowrie.login.failed"}),
+        minimum="La misma contraseña rechazada para tres cuentas distintas desde el mismo origen y sesión.",
+        limitation="Patrón de reutilización de un intento de contraseña entre cuentas del señuelo. No identifica una campaña ni su alcance."),
+    "T1572": EvidenceContract("protocol_tunnel_request", ssh_forward_request, modes=KNOWN_MODES,
+        tactics=frozenset({"TA0011"}), event_types=frozenset({"cowrie.direct-tcpip.request"}),
+        minimum="Petición SSH direct-tcpip estructurada con dirección de destino y puerto válidos.",
+        limitation="Se solicitó un reenvío SSH. La solicitud no acredita conexión, tráfico transferido ni canal de C2."),
+    "T1560.001": EvidenceContract("archive_after_read", archive_after_read, modes=KNOWN_MODES,
+        tactics=frozenset({"TA0009"}), sequence=("lectura", "archivo"), window_seconds=300,
+        minimum="Lectura explícita de material sensible seguida de solicitud de archivado del mismo archivo en destino temporal.",
+        limitation="La secuencia acredita dos solicitudes relacionadas. No confirma lectura, creación del archivo ni exfiltración."),
+    "T1543.002": EvidenceContract("systemd_service_registration", systemd_service_registration, modes=KNOWN_MODES,
+        tactics=frozenset({"TA0003"}), sequence=("enlace", "habilitacion"), window_seconds=300,
+        minimum="Enlace de un archivo de unidad absoluto seguido de habilitación de la misma unidad en la sesión.",
+        limitation="Se solicitó registrar y habilitar una unidad. Su instalación, arranque y privilegios no están acreditados."),
+    **{
+        code: EvidenceContract(tag, from_command(predicate), modes=KNOWN_MODES,
+                               tactics=frozenset({tactic}), minimum=minimum,
+                               version="2" if code == "T1069.001" else "1")
+        for code, tactic, tag, minimum, predicate in COMMAND_RULES
+    },
 }
 
 
 def contract_signature():
     return [(code, contract.version, contract.tag, sorted(contract.modes), sorted(contract.tactics),
-             contract.minimum_distinct, contract.sequence) for code, contract in sorted(CONTRACTS.items())]
+             contract.minimum_distinct, contract.sequence, contract.window_seconds, sorted(contract.event_types))
+            for code, contract in sorted(CONTRACTS.items())]
 
 
 def telemetry(event, modality):
-    command = parse_command(event.datos_originales.get("input")) if event.tipo_evento == "cowrie.command.input" else None
-    return Telemetry(event.tipo_evento, event.datos_originales, command, modality)
+    raw = event.datos_originales
+    command = parse_command(raw.get("input")) if event.tipo_evento == COMMAND_INPUT and raw.get("realm") is None else None
+    return Telemetry(event.tipo_evento, raw, command, modality)
 
 
 def command_technique(command):
-    observation = Telemetry("cowrie.command.input", {}, parse_command(command), "cowrie_shell")
-    return next((code for code, contract in CONTRACTS.items() if contract.recognize(observation)), None)
+    observation = Telemetry(COMMAND_INPUT, {}, parse_command(command), "cowrie_shell")
+    return next((code for code, contract in CONTRACTS.items()
+                 if COMMAND_INPUT in contract.event_types and contract.recognize(observation) and not contract.sequence), None)
 
 
 def collect_evidence(events, modality):
     """Return local signals, including groups that may lack enough matching events."""
     matches = defaultdict(dict)
-    contracts = [(code, contract) for code, contract in CONTRACTS.items() if modality in contract.modes]
+    contracts = defaultdict(list)
+    for code, contract in CONTRACTS.items():
+        if modality in contract.modes:
+            for kind in contract.event_types:
+                contracts[kind].append((code, contract))
     for event in sorted(events,key=lambda item:(item.fecha_hora,item.id_evento)):
+        if not contracts[event.tipo_evento]:
+            continue
         observation = telemetry(event, modality)
-        for code, contract in contracts:
+        session = getattr(event, "id_sesion", None) or observation.raw.get("session")
+        session = str(session) if session is not None else None
+        for code, contract in contracts[event.tipo_evento]:
             if signal := contract.recognize(observation):
-                matches[code][event.id_evento] = signal
+                matches[code][event.id_evento] = replace(signal, session=session, timestamp=event.fecha_hora)
     return matches
 
 
@@ -314,7 +453,11 @@ def technique_evidence(events, modality):
     """Only IDs and grades may leave the server's evidence evaluator."""
     qualified = {}
     for code, matches in collect_evidence(events, modality).items():
-        grades = {eid: signal.grade for group in CONTRACTS[code].groups(matches) for eid, signal in group.items()}
+        contract = CONTRACTS[code]
+        grades = {
+            eid: group[eid].grade for group in contract.groups(matches)
+            for eid in (contract.sequence_witness(group) if contract.sequence else group)
+        }
         if grades:
             qualified[code] = grades
     return qualified

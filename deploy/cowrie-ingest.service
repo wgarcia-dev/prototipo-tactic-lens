@@ -1,17 +1,29 @@
 [Unit]
-Description=Recolector de eventos Cowrie para TacticLens
+Description=Exportador SQLite de Cowrie para TacticLens
 After=network-online.target
 Wants=network-online.target
+Conflicts=tacticlens-exportador.timer
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
 User=cowrie
 Group=cowrie
-WorkingDirectory=/home/cowrie
-EnvironmentFile=/home/cowrie/.config/cowrie-ingest.env
-ExecStart=/usr/bin/python3 /home/cowrie/collector.py
-Restart=always
-RestartSec=2
+WorkingDirectory=/opt/tacticlens-cowrie
+ExecStart=/usr/bin/python3 /opt/tacticlens-cowrie/event_watch.py
+Environment=PYTHONDONTWRITEBYTECODE=1
+StateDirectory=tacticlens-cowrie
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target

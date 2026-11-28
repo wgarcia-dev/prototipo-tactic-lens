@@ -1,5 +1,6 @@
 """Central, fail-closed boundary for private modules and all browser writes."""
 import hmac
+import logging
 
 from fastapi import Request
 from itsdangerous import BadSignature, SignatureExpired
@@ -12,6 +13,7 @@ from .store import AuthError, authorize_request, rate, transaction
 
 MACHINE_ROUTES = {"/api/ingesta/eventos", "/api/ingesta/heartbeat"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+logger = logging.getLogger(__name__)
 
 
 def check_request(request):
@@ -48,13 +50,25 @@ class AuthMiddleware:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
         request = Request(scope)
-        try:
-            return await self.handle_http(scope,receive,send,request)
-        finally:
-            if getattr(request.state,"mail_jobs",None):
-                from .notifications import dispatch_scheduled
-                await run_in_threadpool(dispatch_scheduled,request)
+        started = False
 
+        async def tracked_send(message):
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            return await self.handle_http(scope, receive, tracked_send, request)
+        except Exception as exc:
+            if not request.url.path.startswith("/api/"):
+                raise
+            # Driver and provider exceptions can embed SQL, URLs or raw telemetry.
+            logger.error("Error interno de API (%s)", type(exc).__name__)
+            if started:
+                raise RuntimeError("Respuesta de API interrumpida") from None
+            await JSONResponse({"detail": "Error interno del servicio"}, status_code=500,
+                               headers={"Cache-Control": "no-store"})(scope, receive, send)
     async def handle_http(self, scope, receive, send, request):
 
         async def secure_send(message):

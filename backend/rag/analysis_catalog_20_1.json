@@ -1,0 +1,1795 @@
+{
+  "catalogo": "20.1",
+  "sha256": "539a843a7b53ed9749740b2123dddae3726b1a4831841c32aca740b011b910b5",
+  "atribucion": "Copyright 2015–2026 The MITRE Corporation. https://github.com/mitre-attack/attack-stix-data/blob/master/LICENSE.txt",
+  "tecnicas": {
+    "T1003.008": {
+      "mitigaciones": [
+        {
+          "codigo": "M1026",
+          "nombre": "Privileged Account Management",
+          "url": "https://attack.mitre.org/mitigations/M1026"
+        },
+        {
+          "codigo": "M1027",
+          "nombre": "Password Policies",
+          "url": "https://attack.mitre.org/mitigations/M1027"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0446",
+          "nombre": "Credential Access via /etc/passwd and /etc/shadow Parsing",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0446"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1234",
+          "componente": "File Access",
+          "fuente": "auditd:SYSCALL",
+          "canal": "open, read"
+        },
+        {
+          "analitica": "AN1234",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1007": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0483",
+          "nombre": "Detection of System Service Discovery Commands Across OS Platforms",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0483"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1326",
+          "componente": "Process Creation",
+          "fuente": "auditd:EXECVE",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1016": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0195",
+          "nombre": "Behavioral Detection of System Network Configuration Discovery",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0195"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0560",
+          "componente": "Process Creation",
+          "fuente": "auditd:EXECVE",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1016.001": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0357",
+          "nombre": "Behavioral Detection of Internet Connection Discovery",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0357"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1016",
+          "componente": "Network Connection Creation",
+          "fuente": "linux:syslog",
+          "canal": "network"
+        },
+        {
+          "analitica": "AN1016",
+          "componente": "Process Creation",
+          "fuente": "auditd:EXECVE",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1016.002": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0464",
+          "nombre": "Behavioral Detection of Wi-Fi Discovery Activity",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0464"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1281",
+          "componente": "File Access",
+          "fuente": "auditd:PATH",
+          "canal": "file read"
+        },
+        {
+          "analitica": "AN1281",
+          "componente": "Process Creation",
+          "fuente": "auditd:EXECVE",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1018": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0574",
+          "nombre": "Detection Strategy for Remote System Enumeration Behavior",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0574"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1584",
+          "componente": "Network Connection Creation",
+          "fuente": "linux:syslog",
+          "canal": "network"
+        },
+        {
+          "analitica": "AN1584",
+          "componente": "Process Creation",
+          "fuente": "auditd:EXECVE",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1033": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0093",
+          "nombre": "Behavioral Detection of User Discovery via Local and Remote Enumeration",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0093"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0255",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1040": {
+      "mitigaciones": [
+        {
+          "codigo": "M1018",
+          "nombre": "User Account Management",
+          "url": "https://attack.mitre.org/mitigations/M1018"
+        },
+        {
+          "codigo": "M1032",
+          "nombre": "Multi-factor Authentication",
+          "url": "https://attack.mitre.org/mitigations/M1032"
+        },
+        {
+          "codigo": "M1041",
+          "nombre": "Encrypt Sensitive Information",
+          "url": "https://attack.mitre.org/mitigations/M1041"
+        },
+        {
+          "codigo": "M1030",
+          "nombre": "Network Segmentation",
+          "url": "https://attack.mitre.org/mitigations/M1030"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0314",
+          "nombre": "Detection Strategy for Network Sniffing Across Platforms",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0314"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0876",
+          "componente": "Command Execution",
+          "fuente": "auditd:SYSCALL",
+          "canal": "promiscuous mode transitions (ioctl or ifconfig)"
+        },
+        {
+          "analitica": "AN0876",
+          "componente": "Network Traffic Content",
+          "fuente": "networkconfig ",
+          "canal": "interface flag PROMISC, netstat | ip link | ethtool"
+        },
+        {
+          "analitica": "AN0876",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve, setifflags"
+        }
+      ]
+    },
+    "T1046": {
+      "mitigaciones": [
+        {
+          "codigo": "M1042",
+          "nombre": "Disable or Remove Feature or Program",
+          "url": "https://attack.mitre.org/mitigations/M1042"
+        },
+        {
+          "codigo": "M1031",
+          "nombre": "Network Intrusion Prevention",
+          "url": "https://attack.mitre.org/mitigations/M1031"
+        },
+        {
+          "codigo": "M1030",
+          "nombre": "Network Segmentation",
+          "url": "https://attack.mitre.org/mitigations/M1030"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0376",
+          "nombre": "Behavioral Detection Strategy for Network Service Discovery Across Platforms",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0376"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1058",
+          "componente": "Network Traffic Flow",
+          "fuente": "NSM:Flow",
+          "canal": "Outbound TCP SYN or UDP to multiple ports/hosts"
+        },
+        {
+          "analitica": "AN1058",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1049": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0320",
+          "nombre": "Detection of System Network Connections Discovery Across Platforms",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0320"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0904",
+          "componente": "Command Execution",
+          "fuente": "linux:cli",
+          "canal": "command logging"
+        },
+        {
+          "analitica": "AN0904",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1053.002": {
+      "mitigaciones": [
+        {
+          "codigo": "M1028",
+          "nombre": "Operating System Configuration",
+          "url": "https://attack.mitre.org/mitigations/M1028"
+        },
+        {
+          "codigo": "M1047",
+          "nombre": "Audit",
+          "url": "https://attack.mitre.org/mitigations/M1047"
+        },
+        {
+          "codigo": "M1018",
+          "nombre": "User Account Management",
+          "url": "https://attack.mitre.org/mitigations/M1018"
+        },
+        {
+          "codigo": "M1026",
+          "nombre": "Privileged Account Management",
+          "url": "https://attack.mitre.org/mitigations/M1026"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0333",
+          "nombre": "Cross-Platform Detection of Scheduled Task/Job Abuse via `at` Utility",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0333"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0944",
+          "componente": "File Modification",
+          "fuente": "auditd:SYSCALL",
+          "canal": "write"
+        },
+        {
+          "analitica": "AN0944",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1053.003": {
+      "mitigaciones": [
+        {
+          "codigo": "M1047",
+          "nombre": "Audit",
+          "url": "https://attack.mitre.org/mitigations/M1047"
+        },
+        {
+          "codigo": "M1018",
+          "nombre": "User Account Management",
+          "url": "https://attack.mitre.org/mitigations/M1018"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0290",
+          "nombre": "Cross-Platform Detection of Cron Job Abuse for Persistence and Execution",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0290"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0805",
+          "componente": "File Modification",
+          "fuente": "auditd:SYSCALL",
+          "canal": "write"
+        },
+        {
+          "analitica": "AN0805",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1053.006": {
+      "mitigaciones": [
+        {
+          "codigo": "M1022",
+          "nombre": "Restrict File and Directory Permissions",
+          "url": "https://attack.mitre.org/mitigations/M1022"
+        },
+        {
+          "codigo": "M1018",
+          "nombre": "User Account Management",
+          "url": "https://attack.mitre.org/mitigations/M1018"
+        },
+        {
+          "codigo": "M1026",
+          "nombre": "Privileged Account Management",
+          "url": "https://attack.mitre.org/mitigations/M1026"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0231",
+          "nombre": "Behavioral Detection of Systemd Timer Abuse for Scheduled Execution",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0231"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0645",
+          "componente": "File Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "creat, open, write on /etc/systemd/system and /usr/lib/systemd/system"
+        },
+        {
+          "analitica": "AN0645",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve logging for /usr/bin/systemctl and systemd-run"
+        },
+        {
+          "analitica": "AN0645",
+          "componente": "Scheduled Job Creation",
+          "fuente": "linux:osquery",
+          "canal": "file_events"
+        }
+      ]
+    },
+    "T1057": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0034",
+          "nombre": "Detection of Adversarial Process Discovery Behavior",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0034"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0096",
+          "componente": "File Access",
+          "fuente": "auditd:SYSCALL",
+          "canal": "openat"
+        },
+        {
+          "analitica": "AN0096",
+          "componente": "Process Access",
+          "fuente": "linux:osquery",
+          "canal": "Process State"
+        },
+        {
+          "analitica": "AN0096",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1059.001": {
+      "mitigaciones": [
+        {
+          "codigo": "M1042",
+          "nombre": "Disable or Remove Feature or Program",
+          "url": "https://attack.mitre.org/mitigations/M1042"
+        },
+        {
+          "codigo": "M1049",
+          "nombre": "Antivirus/Antimalware",
+          "url": "https://attack.mitre.org/mitigations/M1049"
+        },
+        {
+          "codigo": "M1045",
+          "nombre": "Code Signing",
+          "url": "https://attack.mitre.org/mitigations/M1045"
+        },
+        {
+          "codigo": "M1026",
+          "nombre": "Privileged Account Management",
+          "url": "https://attack.mitre.org/mitigations/M1026"
+        },
+        {
+          "codigo": "M1038",
+          "nombre": "Execution Prevention",
+          "url": "https://attack.mitre.org/mitigations/M1038"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0455",
+          "nombre": "Abuse of PowerShell for Arbitrary Execution",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0455"
+        }
+      ],
+      "fuentes_linux": []
+    },
+    "T1059.004": {
+      "mitigaciones": [
+        {
+          "codigo": "M1038",
+          "nombre": "Execution Prevention",
+          "url": "https://attack.mitre.org/mitigations/M1038"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0384",
+          "nombre": "Behavioral Detection of Unix Shell Execution",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0384"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1081",
+          "componente": "Logon Session Creation",
+          "fuente": "linux:syslog",
+          "canal": "auth.log / secure.log"
+        },
+        {
+          "analitica": "AN1081",
+          "componente": "Network Traffic Flow",
+          "fuente": "linux:osquery",
+          "canal": "socket_events"
+        },
+        {
+          "analitica": "AN1081",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1059.006": {
+      "mitigaciones": [
+        {
+          "codigo": "M1047",
+          "nombre": "Audit",
+          "url": "https://attack.mitre.org/mitigations/M1047"
+        },
+        {
+          "codigo": "M1049",
+          "nombre": "Antivirus/Antimalware",
+          "url": "https://attack.mitre.org/mitigations/M1049"
+        },
+        {
+          "codigo": "M1033",
+          "nombre": "Limit Software Installation",
+          "url": "https://attack.mitre.org/mitigations/M1033"
+        },
+        {
+          "codigo": "M1038",
+          "nombre": "Execution Prevention",
+          "url": "https://attack.mitre.org/mitigations/M1038"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0063",
+          "nombre": "Cross-Platform Behavioral Detection of Python Execution",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0063"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0174",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve"
+        },
+        {
+          "analitica": "AN0174",
+          "componente": "Script Execution",
+          "fuente": "linux:syslog",
+          "canal": "/var/log/syslog"
+        }
+      ]
+    },
+    "T1059.007": {
+      "mitigaciones": [
+        {
+          "codigo": "M1040",
+          "nombre": "Behavior Prevention on Endpoint",
+          "url": "https://attack.mitre.org/mitigations/M1040"
+        },
+        {
+          "codigo": "M1038",
+          "nombre": "Execution Prevention",
+          "url": "https://attack.mitre.org/mitigations/M1038"
+        },
+        {
+          "codigo": "M1042",
+          "nombre": "Disable or Remove Feature or Program",
+          "url": "https://attack.mitre.org/mitigations/M1042"
+        },
+        {
+          "codigo": "M1021",
+          "nombre": "Restrict Web-Based Content",
+          "url": "https://attack.mitre.org/mitigations/M1021"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0264",
+          "nombre": "Cross-Platform Detection of JavaScript Execution Abuse",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0264"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0735",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve"
+        },
+        {
+          "analitica": "AN0735",
+          "componente": "Script Execution",
+          "fuente": "linux:syslog",
+          "canal": "/var/log/syslog"
+        }
+      ]
+    },
+    "T1059.011": {
+      "mitigaciones": [
+        {
+          "codigo": "M1033",
+          "nombre": "Limit Software Installation",
+          "url": "https://attack.mitre.org/mitigations/M1033"
+        },
+        {
+          "codigo": "M1047",
+          "nombre": "Audit",
+          "url": "https://attack.mitre.org/mitigations/M1047"
+        },
+        {
+          "codigo": "M1038",
+          "nombre": "Execution Prevention",
+          "url": "https://attack.mitre.org/mitigations/M1038"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0101",
+          "nombre": "Detection Strategy for Lua Scripting Abuse",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0101"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0279",
+          "componente": "File Metadata",
+          "fuente": "auditd:SYSCALL",
+          "canal": "PATH"
+        },
+        {
+          "analitica": "AN0279",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1069": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0179",
+          "nombre": "Behavioral Detection of Permission Groups Discovery",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0179"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0508",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1069.001": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0114",
+          "nombre": "Behavioral Detection of Local Group Enumeration Across OS Platforms",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0114"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0318",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1070.003": {
+      "mitigaciones": [
+        {
+          "codigo": "M1029",
+          "nombre": "Remote Data Storage",
+          "url": "https://attack.mitre.org/mitigations/M1029"
+        },
+        {
+          "codigo": "M1022",
+          "nombre": "Restrict File and Directory Permissions",
+          "url": "https://attack.mitre.org/mitigations/M1022"
+        },
+        {
+          "codigo": "M1039",
+          "nombre": "Environment Variable Permissions",
+          "url": "https://attack.mitre.org/mitigations/M1039"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0165",
+          "nombre": "Behavioral Detection of Command History Clearing",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0165"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0467",
+          "componente": "File Deletion",
+          "fuente": "auditd:SYSCALL",
+          "canal": "PATH"
+        },
+        {
+          "analitica": "AN0467",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1082": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0525",
+          "nombre": "System Discovery via Native and Remote Utilities",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0525"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1453",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1083": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0370",
+          "nombre": "Recursive Enumeration of Files and Directories Across Privilege Contexts",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0370"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1041",
+          "componente": "File Access",
+          "fuente": "auditd:PATH",
+          "canal": "PATH"
+        },
+        {
+          "analitica": "AN1041",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1087.001": {
+      "mitigaciones": [
+        {
+          "codigo": "M1028",
+          "nombre": "Operating System Configuration",
+          "url": "https://attack.mitre.org/mitigations/M1028"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0303",
+          "nombre": "Local Account Enumeration Across Host Platforms",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0303"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0847",
+          "componente": "File Access",
+          "fuente": "auditd:PATH",
+          "canal": "PATH"
+        },
+        {
+          "analitica": "AN0847",
+          "componente": "Process Creation",
+          "fuente": "linux:Sysmon",
+          "canal": "EventCode=1"
+        }
+      ]
+    },
+    "T1098.004": {
+      "mitigaciones": [
+        {
+          "codigo": "M1018",
+          "nombre": "User Account Management",
+          "url": "https://attack.mitre.org/mitigations/M1018"
+        },
+        {
+          "codigo": "M1022",
+          "nombre": "Restrict File and Directory Permissions",
+          "url": "https://attack.mitre.org/mitigations/M1022"
+        },
+        {
+          "codigo": "M1042",
+          "nombre": "Disable or Remove Feature or Program",
+          "url": "https://attack.mitre.org/mitigations/M1042"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0126",
+          "nombre": "Detection Strategy for SSH Key Injection in Authorized Keys",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0126"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0350",
+          "componente": "File Modification",
+          "fuente": "auditd:SYSCALL",
+          "canal": "write | PATH=/home/*/.ssh/authorized_keys"
+        },
+        {
+          "analitica": "AN0350",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1098.007": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0310",
+          "nombre": "Suspicious Addition to Local or Domain Groups",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0310"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0866",
+          "componente": "User Account Modification",
+          "fuente": "auditd:SYSCALL",
+          "canal": "SYSCALL for usermod or /etc/group file modification"
+        }
+      ]
+    },
+    "T1105": {
+      "mitigaciones": [
+        {
+          "codigo": "M1031",
+          "nombre": "Network Intrusion Prevention",
+          "url": "https://attack.mitre.org/mitigations/M1031"
+        },
+        {
+          "codigo": "M1037",
+          "nombre": "Filter Network Traffic",
+          "url": "https://attack.mitre.org/mitigations/M1037"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0060",
+          "nombre": "Detect Ingress Tool Transfers via Behavioral Chain",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0060"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0166",
+          "componente": "Command Execution",
+          "fuente": "auditd:SYSCALL",
+          "canal": "connect, execve, write"
+        },
+        {
+          "analitica": "AN0166",
+          "componente": "File Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "file creation/modification"
+        },
+        {
+          "analitica": "AN0166",
+          "componente": "Network Traffic Flow",
+          "fuente": "iptables:LOG",
+          "canal": "TCP connections"
+        }
+      ]
+    },
+    "T1110": {
+      "mitigaciones": [
+        {
+          "codigo": "M1018",
+          "nombre": "User Account Management",
+          "url": "https://attack.mitre.org/mitigations/M1018"
+        },
+        {
+          "codigo": "M1036",
+          "nombre": "Account Use Policies",
+          "url": "https://attack.mitre.org/mitigations/M1036"
+        },
+        {
+          "codigo": "M1032",
+          "nombre": "Multi-factor Authentication",
+          "url": "https://attack.mitre.org/mitigations/M1032"
+        },
+        {
+          "codigo": "M1027",
+          "nombre": "Password Policies",
+          "url": "https://attack.mitre.org/mitigations/M1027"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0463",
+          "nombre": "Brute Force Authentication Failures with Multi-Platform Log Correlation",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0463"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1276",
+          "componente": "User Account Authentication",
+          "fuente": "auditd:USER_LOGIN",
+          "canal": "USER_AUTH"
+        }
+      ]
+    },
+    "T1110.001": {
+      "mitigaciones": [
+        {
+          "codigo": "M1051",
+          "nombre": "Update Software",
+          "url": "https://attack.mitre.org/mitigations/M1051"
+        },
+        {
+          "codigo": "M1032",
+          "nombre": "Multi-factor Authentication",
+          "url": "https://attack.mitre.org/mitigations/M1032"
+        },
+        {
+          "codigo": "M1027",
+          "nombre": "Password Policies",
+          "url": "https://attack.mitre.org/mitigations/M1027"
+        },
+        {
+          "codigo": "M1036",
+          "nombre": "Account Use Policies",
+          "url": "https://attack.mitre.org/mitigations/M1036"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0551",
+          "nombre": "Password Guessing via Multi-Source Authentication Failure Correlation",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0551"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1522",
+          "componente": "User Account Authentication",
+          "fuente": "linux:syslog",
+          "canal": "sshd[pid]: Failed password"
+        }
+      ]
+    },
+    "T1110.003": {
+      "mitigaciones": [
+        {
+          "codigo": "M1032",
+          "nombre": "Multi-factor Authentication",
+          "url": "https://attack.mitre.org/mitigations/M1032"
+        },
+        {
+          "codigo": "M1027",
+          "nombre": "Password Policies",
+          "url": "https://attack.mitre.org/mitigations/M1027"
+        },
+        {
+          "codigo": "M1036",
+          "nombre": "Account Use Policies",
+          "url": "https://attack.mitre.org/mitigations/M1036"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0487",
+          "nombre": "Distributed Password Spraying via Authentication Failures Across Multiple Accounts",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0487"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1337",
+          "componente": "User Account Authentication",
+          "fuente": "linux:syslog",
+          "canal": "Failed password for invalid user"
+        }
+      ]
+    },
+    "T1120": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0491",
+          "nombre": "Peripheral Device Enumeration via System Utilities and API Calls",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0491"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1354",
+          "componente": "Drive Access",
+          "fuente": "linux:osquery",
+          "canal": "hardware_events"
+        },
+        {
+          "analitica": "AN1354",
+          "componente": "File Access",
+          "fuente": "auditd:SYSCALL",
+          "canal": "open/read"
+        },
+        {
+          "analitica": "AN1354",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1124": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0151",
+          "nombre": "Behavior-chain, platform-aware detection strategy for T1124 System Time Discovery",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0151"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0431",
+          "componente": "OS API Execution",
+          "fuente": "auditd:SYSCALL",
+          "canal": "Rules capturing clock_gettime, time, gettimeofday syscalls when enabled"
+        },
+        {
+          "analitica": "AN0431",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "type=EXECVE or SYSCALL for /bin/date, /usr/bin/timedatectl, /sbin/hwclock, /bin/cat /etc/timezone, /bin/cat /proc/uptime"
+        },
+        {
+          "analitica": "AN0431",
+          "componente": "Scheduled Job Metadata",
+          "fuente": "linux:cron",
+          "canal": "cron activity"
+        },
+        {
+          "analitica": "AN0431",
+          "componente": "User Account Authentication",
+          "fuente": "linux:syslog",
+          "canal": "sudo/date/timedatectl execution by non-standard users"
+        }
+      ]
+    },
+    "T1135": {
+      "mitigaciones": [
+        {
+          "codigo": "M1028",
+          "nombre": "Operating System Configuration",
+          "url": "https://attack.mitre.org/mitigations/M1028"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0182",
+          "nombre": "Behavior-chain detection for T1135 Network Share Discovery across Windows, Linux, and macOS",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0182"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0514",
+          "componente": "Network Connection Creation",
+          "fuente": "NSM:Flow",
+          "canal": "connection: TCP connections to ports 139/445 to multiple hosts"
+        },
+        {
+          "analitica": "AN0514",
+          "componente": "OS API Execution",
+          "fuente": "NSM:Flow",
+          "canal": "smb_command: TreeConnectAndX to \\\\*\\IPC$ / srvsvc or Trans2/NT_CREATE for listing shares"
+        },
+        {
+          "analitica": "AN0514",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve of smbclient, smbmap, rpcclient, nmblookup, crackmapexec smb"
+        }
+      ]
+    },
+    "T1136.001": {
+      "mitigaciones": [
+        {
+          "codigo": "M1032",
+          "nombre": "Multi-factor Authentication",
+          "url": "https://attack.mitre.org/mitigations/M1032"
+        },
+        {
+          "codigo": "M1026",
+          "nombre": "Privileged Account Management",
+          "url": "https://attack.mitre.org/mitigations/M1026"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0447",
+          "nombre": "T1136.001 Detection Strategy - Local Account Creation Across Platforms",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0447"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1236",
+          "componente": "File Modification",
+          "fuente": "auditd:SYSCALL",
+          "canal": "write operation on /etc/passwd or /etc/shadow"
+        },
+        {
+          "analitica": "AN1236",
+          "componente": "User Account Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "useradd or adduser executed"
+        }
+      ]
+    },
+    "T1201": {
+      "mitigaciones": [
+        {
+          "codigo": "M1027",
+          "nombre": "Password Policies",
+          "url": "https://attack.mitre.org/mitigations/M1027"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0161",
+          "nombre": "Password Policy Discovery – cross-platform behavior-chain analytics",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0161"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0456",
+          "componente": "Command Execution",
+          "fuente": "linux:syslog",
+          "canal": "sudo chage|grep pam_pwquality|cat /etc/login.defs"
+        },
+        {
+          "analitica": "AN0456",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve"
+        },
+        {
+          "analitica": "AN0456",
+          "componente": "User Account Metadata",
+          "fuente": "auditd:SYSCALL",
+          "canal": "open,openat,read"
+        }
+      ]
+    },
+    "T1222.002": {
+      "mitigaciones": [
+        {
+          "codigo": "M1022",
+          "nombre": "Restrict File and Directory Permissions",
+          "url": "https://attack.mitre.org/mitigations/M1022"
+        },
+        {
+          "codigo": "M1026",
+          "nombre": "Privileged Account Management",
+          "url": "https://attack.mitre.org/mitigations/M1026"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0351",
+          "nombre": "Unix-like File Permission Manipulation Behavioral Chain Detection Strategy",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0351"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0998",
+          "componente": "Command Execution",
+          "fuente": "auditd:PROCTITLE",
+          "canal": "proctitle contains chmod, chown, chgrp, setfacl, or attr with suspicious parameters (777, 755, +x, -R)"
+        },
+        {
+          "analitica": "AN0998",
+          "componente": "File Metadata",
+          "fuente": "auditd:SYSCALL",
+          "canal": "syscall in (chmod, fchmod, fchmodat, chown, fchown, fchownat, lchown, setxattr, lsetxattr, fsetxattr, removexattr, lremovexattr, fremovexattr)"
+        },
+        {
+          "analitica": "AN0998",
+          "componente": "Process Creation",
+          "fuente": "linux:osquery",
+          "canal": "process execution events for permission modification utilities with command-line analysis"
+        }
+      ]
+    },
+    "T1489": {
+      "mitigaciones": [
+        {
+          "codigo": "M1030",
+          "nombre": "Network Segmentation",
+          "url": "https://attack.mitre.org/mitigations/M1030"
+        },
+        {
+          "codigo": "M1018",
+          "nombre": "User Account Management",
+          "url": "https://attack.mitre.org/mitigations/M1018"
+        },
+        {
+          "codigo": "M1060",
+          "nombre": "Out-of-Band Communications Channel",
+          "url": "https://attack.mitre.org/mitigations/M1060"
+        },
+        {
+          "codigo": "M1024",
+          "nombre": "Restrict Registry Permissions",
+          "url": "https://attack.mitre.org/mitigations/M1024"
+        },
+        {
+          "codigo": "M1022",
+          "nombre": "Restrict File and Directory Permissions",
+          "url": "https://attack.mitre.org/mitigations/M1022"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0021",
+          "nombre": "Behavioral Detection for Service Stop across Platforms",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0021"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0062",
+          "componente": "File Deletion",
+          "fuente": "auditd:SYSCALL",
+          "canal": "unlink/unlinkat on service binaries or data targets"
+        },
+        {
+          "analitica": "AN0062",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve of systemctl or service stop"
+        },
+        {
+          "analitica": "AN0062",
+          "componente": "Service Metadata",
+          "fuente": "linux:syslog",
+          "canal": "service stopped messages"
+        }
+      ]
+    },
+    "T1518": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0392",
+          "nombre": "Multi-Platform Software Discovery Behavior Chain",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0392"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1101",
+          "componente": "Command Execution",
+          "fuente": "linux:shell",
+          "canal": "Manual invocation of software enumeration commands via interactive shell"
+        },
+        {
+          "analitica": "AN1101",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "Execution of dpkg, rpm, or other package manager with list flag"
+        }
+      ]
+    },
+    "T1518.001": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0016",
+          "nombre": "Security Software Discovery Across Platforms",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0016"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0049",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1518.002": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0088",
+          "nombre": "Backup Software Discovery via CLI, Registry, and Process Inspection (T1518.002)",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0088"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0241",
+          "componente": "File Access",
+          "fuente": "auditd:PATH",
+          "canal": "Read access to known backup software configuration files (e.g., /etc/rsnapshot.conf, /opt/veeam/config.ini)"
+        },
+        {
+          "analitica": "AN0241",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve: Execution of discovery commands targeting backup binaries, processes, or config paths"
+        }
+      ]
+    },
+    "T1529": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0559",
+          "nombre": "Multi-Platform Shutdown or Reboot Detection via Execution and Host Status Events",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0559"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1539",
+          "componente": "Command Execution",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve=/sbin/shutdown or /sbin/reboot"
+        },
+        {
+          "analitica": "AN1539",
+          "componente": "Host Status",
+          "fuente": "linux:syslog",
+          "canal": "system is powering down"
+        }
+      ]
+    },
+    "T1531": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0120",
+          "nombre": "Account Access Removal via Multi-Platform Audit Correlation",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0120"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0335",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "SYSCALL record where exe contains passwd/userdel/chage and auid != root"
+        },
+        {
+          "analitica": "AN0335",
+          "componente": "User Account Authentication",
+          "fuente": "NSM:Connections",
+          "canal": "Accepted password or publickey for user from remote IP"
+        }
+      ]
+    },
+    "T1543.002": {
+      "mitigaciones": [
+        {
+          "codigo": "M1018",
+          "nombre": "User Account Management",
+          "url": "https://attack.mitre.org/mitigations/M1018"
+        },
+        {
+          "codigo": "M1022",
+          "nombre": "Restrict File and Directory Permissions",
+          "url": "https://attack.mitre.org/mitigations/M1022"
+        },
+        {
+          "codigo": "M1026",
+          "nombre": "Privileged Account Management",
+          "url": "https://attack.mitre.org/mitigations/M1026"
+        },
+        {
+          "codigo": "M1033",
+          "nombre": "Limit Software Installation",
+          "url": "https://attack.mitre.org/mitigations/M1033"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0253",
+          "nombre": "Detection of Systemd Service Creation or Modification on Linux",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0253"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0701",
+          "componente": "Command Execution",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execution of systemctl or service with enable/start parameters"
+        },
+        {
+          "analitica": "AN0701",
+          "componente": "File Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "write, open, or rename to /etc/systemd/system/*.service"
+        },
+        {
+          "analitica": "AN0701",
+          "componente": "File Modification",
+          "fuente": "auditd:SYSCALL",
+          "canal": "modification of existing .service file"
+        },
+        {
+          "analitica": "AN0701",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "fork/exec of service via PID 1 (systemd)"
+        },
+        {
+          "analitica": "AN0701",
+          "componente": "Service Creation",
+          "fuente": "linux:osquery",
+          "canal": "newly registered unit file with ExecStart pointing to unknown binary"
+        }
+      ]
+    },
+    "T1552.003": {
+      "mitigaciones": [
+        {
+          "codigo": "M1028",
+          "nombre": "Operating System Configuration",
+          "url": "https://attack.mitre.org/mitigations/M1028"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0385",
+          "nombre": "Detect Access and Parsing of .bash_history Files for Credential Harvesting",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0385"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1085",
+          "componente": "File Access",
+          "fuente": "auditd:SYSCALL",
+          "canal": "open/read access to ~/.bash_history"
+        },
+        {
+          "analitica": "AN1085",
+          "componente": "File Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "write or create file after .bash_history access"
+        },
+        {
+          "analitica": "AN1085",
+          "componente": "Process Creation",
+          "fuente": "auditd:EXECVE",
+          "canal": "cat|less|grep accessing .bash_history from a non-shell process"
+        }
+      ]
+    },
+    "T1552.004": {
+      "mitigaciones": [
+        {
+          "codigo": "M1027",
+          "nombre": "Password Policies",
+          "url": "https://attack.mitre.org/mitigations/M1027"
+        },
+        {
+          "codigo": "M1022",
+          "nombre": "Restrict File and Directory Permissions",
+          "url": "https://attack.mitre.org/mitigations/M1022"
+        },
+        {
+          "codigo": "M1047",
+          "nombre": "Audit",
+          "url": "https://attack.mitre.org/mitigations/M1047"
+        },
+        {
+          "codigo": "M1041",
+          "nombre": "Encrypt Sensitive Information",
+          "url": "https://attack.mitre.org/mitigations/M1041"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0549",
+          "nombre": "Detect Suspicious Access to Private Key Files and Export Attempts Across Platforms",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0549"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1517",
+          "componente": "File Access",
+          "fuente": "auditd:SYSCALL",
+          "canal": "openat"
+        },
+        {
+          "analitica": "AN1517",
+          "componente": "Process Creation",
+          "fuente": "auditd:EXECVE",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1560.001": {
+      "mitigaciones": [
+        {
+          "codigo": "M1047",
+          "nombre": "Audit",
+          "url": "https://attack.mitre.org/mitigations/M1047"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0298",
+          "nombre": "Detect Archiving via Utility (T1560.001)",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0298"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0832",
+          "componente": "Command Execution",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve: Execution of tar, gzip, bzip2, xz, zip, or openssl with compression/encryption arguments"
+        },
+        {
+          "analitica": "AN0832",
+          "componente": "File Creation",
+          "fuente": "auditd:FILE",
+          "canal": "create: Creation of archive files in /tmp, /var/tmp, or user home directories"
+        }
+      ]
+    },
+    "T1572": {
+      "mitigaciones": [
+        {
+          "codigo": "M1037",
+          "nombre": "Filter Network Traffic",
+          "url": "https://attack.mitre.org/mitigations/M1037"
+        },
+        {
+          "codigo": "M1031",
+          "nombre": "Network Intrusion Prevention",
+          "url": "https://attack.mitre.org/mitigations/M1031"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0538",
+          "nombre": "Detection Strategy for Protocol Tunneling accross OS platforms.",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0538"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1484",
+          "componente": "Application Log Content",
+          "fuente": "linux:syslog",
+          "canal": "sshd sessions with unusual port forwarding parameters"
+        },
+        {
+          "analitica": "AN1484",
+          "componente": "Network Connection Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "socket/connect calls showing SSH processes forwarding arbitrary ports"
+        },
+        {
+          "analitica": "AN1484",
+          "componente": "Process Creation",
+          "fuente": "linux:osquery",
+          "canal": "socat, ssh, or nc processes opening unexpected ports"
+        }
+      ]
+    },
+    "T1614.001": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0565",
+          "nombre": "Detection Strategy for System Language Discovery",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0565"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1562",
+          "componente": "Command Execution",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve calls to /usr/bin/locale or shell execution of $LANG"
+        },
+        {
+          "analitica": "AN1562",
+          "componente": "Process Creation",
+          "fuente": "linux:Sysmon",
+          "canal": "EventCode=1"
+        }
+      ]
+    },
+    "T1652": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0579",
+          "nombre": "Detection Strategy for Device Driver Discovery",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0579"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1596",
+          "componente": "Command Execution",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve: Execution of lsmod, modinfo, or cat /proc/modules"
+        },
+        {
+          "analitica": "AN1596",
+          "componente": "File Access",
+          "fuente": "auditd:FS",
+          "canal": "read: File access to /proc/modules or /sys/module/"
+        }
+      ]
+    },
+    "T1654": {
+      "mitigaciones": [
+        {
+          "codigo": "M1018",
+          "nombre": "User Account Management",
+          "url": "https://attack.mitre.org/mitigations/M1018"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0255",
+          "nombre": "Detection Strategy for Log Enumeration",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0255"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0706",
+          "componente": "Command Execution",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve: Execution of cat, less, grep, journalctl targeting log directories (/var/log/)"
+        },
+        {
+          "analitica": "AN0706",
+          "componente": "File Access",
+          "fuente": "auditd:PATH",
+          "canal": "open: Access to sensitive log files (/var/log/auth.log, /var/log/secure, /var/log/syslog)"
+        }
+      ]
+    },
+    "T1673": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0199",
+          "nombre": "Detection Strategy for Virtual Machine Discovery",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0199"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0573",
+          "componente": "Command Execution",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve: process_name IN (\"virsh\", \"VBoxManage\", \"qemu-img\") AND command IN (\"list\", \"info\")"
+        }
+      ]
+    },
+    "T1680": {
+      "mitigaciones": [],
+      "estrategias": [
+        {
+          "codigo": "DET0188",
+          "nombre": "Local Storage Discovery via Drive Enumeration and Filesystem Probing",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0188"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN0537",
+          "componente": "Command Execution",
+          "fuente": "auditd:EXECVE",
+          "canal": "command line arguments containing lsblk, fdisk, parted"
+        },
+        {
+          "analitica": "AN0537",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve call with argv matching known disk enumeration commands (lsblk, parted, fdisk)"
+        }
+      ]
+    },
+    "T1685.006": {
+      "mitigaciones": [
+        {
+          "codigo": "M1022",
+          "nombre": "Restrict File and Directory Permissions",
+          "url": "https://attack.mitre.org/mitigations/M1022"
+        },
+        {
+          "codigo": "M1029",
+          "nombre": "Remote Data Storage",
+          "url": "https://attack.mitre.org/mitigations/M1029"
+        },
+        {
+          "codigo": "M1041",
+          "nombre": "Encrypt Sensitive Information",
+          "url": "https://attack.mitre.org/mitigations/M1041"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0520",
+          "nombre": "Behavioral Detection of Log File Clearing on Linux and macOS",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0520"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1438",
+          "componente": "File Deletion",
+          "fuente": "auditd:SYSCALL",
+          "canal": "PATH"
+        },
+        {
+          "analitica": "AN1438",
+          "componente": "Process Creation",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve"
+        }
+      ]
+    },
+    "T1690": {
+      "mitigaciones": [
+        {
+          "codigo": "M1039",
+          "nombre": "Environment Variable Permissions",
+          "url": "https://attack.mitre.org/mitigations/M1039"
+        },
+        {
+          "codigo": "M1028",
+          "nombre": "Operating System Configuration",
+          "url": "https://attack.mitre.org/mitigations/M1028"
+        }
+      ],
+      "estrategias": [
+        {
+          "codigo": "DET0563",
+          "nombre": "Detection Strategy for Defense Impairment via Prevent Command History Logging across OS platforms.",
+          "url": "https://attack.mitre.org/detectionstrategies/DET0563"
+        }
+      ],
+      "fuentes_linux": [
+        {
+          "analitica": "AN1555",
+          "componente": "Command Execution",
+          "fuente": "auditd:SYSCALL",
+          "canal": "execve calls modifying HISTFILE or HISTCONTROL via unset/export"
+        },
+        {
+          "analitica": "AN1555",
+          "componente": "Process Creation",
+          "fuente": "linux:osquery",
+          "canal": "processes modifying environment variables related to history logging"
+        }
+      ]
+    }
+  }
+}

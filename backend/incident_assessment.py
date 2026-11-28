@@ -1,16 +1,16 @@
 """Versioned triage criteria for Cowrie evidence and accountable human decisions."""
-import hashlib
-import json
 from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, Field, StrictInt, field_validator
 
+from .analysis_state import evidence_snapshot
+
 METHODOLOGY = "tacticlens-triaje-1"
 REFERENCE = "https://csrc.nist.gov/pubs/sp/800/61/r3/final"
 
 
-def assess(events):
+def assess(events, evaluation=None, impact=None):
     """Describe telemetry coverage without inferring organizational compromise."""
     criteria = [
         ("autenticacion_fallida", "Intentos de autenticación fallidos", {"cowrie.login.failed"}),
@@ -25,21 +25,42 @@ def assess(events):
     active = {item["criterio"] for item in findings if item["cumplido"]}
     priority = "media" if active.intersection({"interaccion_shell", "transferencia"}) else "baja"
     classification = "actividad_por_evaluar" if active else "evento_observado"
-    snapshot = [{"id": str(event.id_evento), "tipo": event.tipo_evento,
-                 "fecha": event.fecha_hora.isoformat(), "datos": event.datos_originales} for event in events]
-    digest = hashlib.sha256(json.dumps(snapshot, sort_keys=True, default=str).encode()).hexdigest()
-    return {"version": 1, "metodologia": METHODOLOGY, "referencia": REFERENCE,
-            "generado_en": datetime.now(timezone.utc).isoformat(), "snapshot_sha256": digest,
-            "eventos_evaluados": len(events), "eventos": [str(event.id_evento) for event in events], "clasificacion": classification,
+    snapshot = evidence_snapshot(events)
+    assessment = {"version": 1, "metodologia": METHODOLOGY, "referencia": REFERENCE,
+            "generado_en": datetime.now(timezone.utc).isoformat(), "snapshot_sha256": snapshot["eventos_sha256"],
+            "eventos_evaluados": len(events), "eventos": snapshot["eventos"], "clasificacion": classification,
             "estado": "pendiente_revision", "prioridad_triaje": priority,
-            "fundamento_prioridad": "La interacción y las transferencias requieren revisión prioritaria del señuelo."
-                if priority == "media" else "La captura requiere comprobar el contexto y la finalidad de la conexión.",
+            "fundamento_prioridad": ("Revisar " + " y ".join(description for criterion, description in (
+                ("interaccion_shell", "las órdenes registradas"), ("transferencia", "los eventos de transferencia registrados")
+            ) if criterion in active) + "." if priority == "media"
+                else "Contrastar el contexto y la finalidad de la actividad registrada."),
             "criterios": findings, "severidad": "por_determinar",
             "impacto": {"confidencialidad": "sin_determinar", "integridad": "sin_determinar",
                         "disponibilidad": "sin_determinar", "alcance": "Telemetría de una sesión del honeypot Cowrie"},
             "limitaciones": ["La emulación requiere corroboración de efectos en sistemas reales.",
                              "La intención, autorización e impacto organizacional requieren evaluación humana."],
             "revisiones": []}
+    if evaluation:
+        level = evaluation["codigo_severidad"]
+        decision = {
+            "S0": ("evento_observado", "Correlacionar con otros registros solo si aparece actividad adicional."),
+            "S1": ("actividad_de_alcance_limitado", "Contrastar autenticación y órdenes con el registro de sesiones autorizado."),
+            "S2": ("actividad_sospechosa_sustentada", "Preservar las citas y comprobar el alcance sobre el recurso objetivo."),
+            "S3": ("actividad_de_alta_relevancia", "Preservar evidencias y corroborar el estado del recurso en el activo objetivo."),
+            "S4": ("afectacion_critica_documentada", "Escalar la revisión del alcance y activar el procedimiento de respuesta aplicable."),
+        }
+        classification, next_step = decision.get(level, ("evaluacion_limitada", "Verificar cobertura y procedencia antes de clasificar."))
+        assessment.update(clasificacion=classification, severidad=level,
+                          prioridad_triaje=evaluation["prioridad_investigacion"],
+                          fundamento_prioridad=evaluation["fundamento_prioridad"])
+        assessment["automatica"] = {
+            "clasificacion":classification, "severidad":level, "prioridad":evaluation["prioridad_investigacion"],
+            "fundamento":evaluation["fundamento_severidad"], "decision_recomendada":next_step,
+            "impacto_potencial":evaluation["nivel_impacto_potencial"],
+            "recursos":impact["recursos_en_riesgo"], "eventos":evaluation["eventos"],
+            "factores_agravantes":evaluation["factores_agravantes"], "factores_limitantes":evaluation["factores_limitantes"],
+        }
+    return assessment
 
 
 class IncidentDecision(BaseModel):

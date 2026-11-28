@@ -3,6 +3,7 @@
 from contextlib import closing
 import ctypes
 import os
+from pathlib import Path
 import select
 import signal
 import struct
@@ -15,16 +16,23 @@ except ImportError:
 
 
 class LogWatch:
-    def __init__(self, directory):
+    def __init__(self, paths):
         libc = ctypes.CDLL(None, use_errno=True)
         libc.inotify_init1.argtypes = [ctypes.c_int]
         libc.inotify_add_watch.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
         self.fd = libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
         if self.fd < 0:
             raise OSError(ctypes.get_errno(), 'inotify_init1')
-        if libc.inotify_add_watch(self.fd, os.fsencode(directory), 0x00000FCA) < 0:
+        self.names = {}
+        try:
+            for path in paths:
+                descriptor = libc.inotify_add_watch(self.fd, os.fsencode(path.parent), 0x00000FCA)
+                if descriptor < 0:
+                    raise OSError(ctypes.get_errno(), 'inotify_add_watch')
+                self.names.setdefault(descriptor, set()).add(os.fsencode(path.name))
+        except BaseException:
             os.close(self.fd)
-            raise OSError(ctypes.get_errno(), 'inotify_add_watch')
+            raise
 
     def wait(self, timeout):
         if not select.select([self.fd], [], [], timeout)[0]:
@@ -37,13 +45,16 @@ class LogWatch:
                 break
             offset = 0
             while offset < len(chunk):
-                _, mask, _, length = struct.unpack_from('iIII', chunk, offset)
+                descriptor, mask, _, length = struct.unpack_from('iIII', chunk, offset)
                 name = chunk[offset + 16:offset + 16 + length].split(b'\0')[0]
                 offset += 16 + length
                 if mask & (0x8000 | 0x400 | 0x800):
                     raise RuntimeError('Directorio vigilado movido o eliminado; systemd recuperara la vigilancia')
                 # Overflow forces a full durable-cursor rescan. Rotation names included.
-                changed |= bool(mask & 0x4000) or name.startswith(b'cowrie.json')
+                changed |= bool(mask & 0x4000) or any(
+                    name == base or name.startswith((base + b'.', base + b'-'))
+                    for base in self.names.get(descriptor, ())
+                )
         return changed
 
     def close(self):
@@ -63,25 +74,28 @@ def run():
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    log = exporter.log_path(config)
-    extra_logs = [exporter.Path(value.strip()) for value in config.get('TACTICLENS_EXTRA_LOGS', '').split(',') if value.strip()]
-    logs = [log, *extra_logs]
-    if len({str(path) for path in logs}) != len(logs):
+    sources = exporter.log_sources(config)
+    extras = [Path(item.strip()) for item in config.get('TACTICLENS_EXTRA_LOGS', '').split(',') if item.strip()]
+    logs = [*sources.values(), *extras]
+    if len({path.resolve() for path in logs}) != len(logs):
         raise ValueError('Rutas de Cowrie duplicadas')
+    max_pending = int(config.get('TACTICLENS_MAX_PENDING', '50000'))
     # Watch BEFORE the initial scan, eliminating the scan/subscribe race.
-    from contextlib import ExitStack
-    with exporter.delivery.sender_lock(exporter.DB), ExitStack() as stack, closing(exporter.delivery.connect(exporter.DB)) as conn:
-        watches = [stack.enter_context(closing(LogWatch(path.parent))) for path in logs]
+    with exporter.delivery.sender_lock(exporter.DB), closing(LogWatch(logs)) as watch, closing(exporter.delivery.connect(exporter.DB)) as conn:
         mapping = exporter.mapping(conn)
         if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='tacticlens_captura_origen'").fetchone():
             raise RuntimeError('La cola debe estar previamente preparada; no se migra automaticamente')
+        exporter.register_sources(conn,sources)
         dirty, heartbeat_at = True, 0
         while not stopping:
             if dirty:
-                dirty = False
-                for source_log in logs:
-                    result = exporter.ingest(conn, log=source_log, max_pending=int(config.get('TACTICLENS_MAX_PENDING', '50000')))
-                    dirty |= result['limite_pendientes']
+                result = exporter.ingest_sources(conn,sources,max_pending)
+                dirty = result['limite_pendientes']
+                for path in extras:
+                    if dirty:
+                        break
+                    dirty = exporter.ingest(conn, log=path, max_pending=max_pending,
+                                            update_legacy_cursor=False)['limite_pendientes']
             size = max(1, min(200, int(config.get('TACTICLENS_BATCH_SIZE', '50'))))
             # Drain backlog fairly; kernel changes remain queued while HTTP is running.
             sent = 0
@@ -101,15 +115,7 @@ def run():
                 timeout = min(timeout, max(0.1, retry - time.time()))
             if (dirty and sent > 0) or sent == size:
                 timeout = 0.1
-            if len(watches) == 1:
-                dirty = watches[0].wait(timeout) or dirty
-            else:
-                ready, _, _ = select.select([watch.fd for watch in watches], [], [], timeout)
-                changed = False
-                for watch in watches:
-                    if watch.fd in ready:
-                        changed = watch.wait(0) or changed
-                dirty = changed or dirty
+            dirty = watch.wait(timeout) or dirty
 
 
 if __name__ == '__main__':

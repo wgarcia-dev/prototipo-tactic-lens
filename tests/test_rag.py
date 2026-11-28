@@ -201,7 +201,7 @@ class ValidationTests(unittest.TestCase):
         self.assertTrue(validate(r,values,context)[0])
         child=local_context(values,'T1110.001','Password Guessing','TA0006')
         r=result(values,[proposal('T1110.001','TA0006',eventos=[1,2,3])])
-        self.assertTrue(validate(r,values,child)[0])
+        self.assertFalse(validate(r,values,child)[0])
         for change in ({'password':'1'},{'username':'another'}):
             split=[*values[:2],event(3,kind='cowrie.login.failed',**({'src_ip':'10.0.0.2','username':'fixture','password':'3'}|change))]
             r=result(split,[proposal('T1110','TA0006',eventos=[1,2,3])])
@@ -270,6 +270,189 @@ class RagIntegrationTests(fixtures.AuthFixture):
         self.assertEqual(row[evidence],f'#{ids[1]}')
         self.assertNotEqual(row[evidence],f'#{ids[0]}')
 
+    def test_versioned_evaluation_shared_by_api_and_reports(self):
+        self.enroll(786, admin=True)
+        sid, _ = self.session_with(["uname -a", "history -c"])
+        session_table = app.state.tables["sesion"]
+        self.connection.execute(session_table.update().where(session_table.c.id_sesion == sid)
+                                .values(ip_origen="192.0.2.15", puerto_destino=2223))
+        e = app.state.tables["evento"]
+        ids = list(self.connection.scalars(select(e.c.id_evento).where(e.c.id_sesion == sid)
+                                          .order_by(e.c.fecha_hora)))
+        with self.llm(ids, []):
+            posted = self.client.post(f"/api/sesiones/{sid}/analizar")
+        self.assertEqual(posted.status_code, 200, posted.text)
+        aid = posted.json()["id_analisis"]
+        detail = self.client.get(f"/api/analisis/{aid}").json()
+        stored = detail["resultado_estructurado"]
+        self.assertEqual(stored["version_esquema"], 1)
+        self.assertEqual(stored["evaluacion_amenaza"]["codigo_severidad"], "S3")
+        self.assertEqual(stored["evaluacion_incidente"]["automatica"]["severidad"], "S3")
+        self.assertEqual(stored["contexto_observado"]["modalidad"], "desconocido")
+        self.assertEqual(stored["evaluacion_impacto"]["integridad"]["estado_observado"], "IO02")
+        self.assertEqual(stored["evaluacion_impacto"]["integridad"]["nivel_potencial"], "alto")
+        self.assertEqual(detail["acciones"][0]["mitre"], [])
+        report = self.client.get(f"/api/sesiones/{sid}/informe", params={"id_analisis":aid})
+        self.assertEqual(report.status_code, 200, report.text)
+        sections = report.json()["sections"]
+        self.assertEqual(sections[0]["paragraphs"], [detail["resumen"]])
+        self.assertIn("Evaluación técnica", {item["title"] for item in detail["presentacion_analitica"]})
+        self.assertEqual(next(item for item in sections if item["title"]=="Impacto CIA"),
+                         next(item for item in detail["presentacion_analitica"] if item["title"]=="Impacto CIA"))
+        word = self.client.get(f"/api/sesiones/{sid}/informe", params={"id_analisis":aid, "formato":"docx"})
+        self.assertEqual(word.status_code, 200, word.text if word.status_code != 200 else "")
+        doc = Document(BytesIO(word.content))
+        self.assertIn(detail["resumen"], [para.text for para in doc.paragraphs])
+        removed = {"Riesgo técnico","Riesgo organizacional","Evidencia de terminal y límites de cobertura",
+                   "Evaluación automática de incidente"}
+        self.assertTrue(removed.isdisjoint(para.text for para in doc.paragraphs))
+        self.assertTrue(removed.isdisjoint(item["title"] for item in sections))
+        for card in detail["salvaguardas"]:
+            self.assertTrue(any(section["rows"]==card["rows"] for section in sections))
+        pdf = self.client.get(f"/api/sesiones/{sid}/informe", params={"id_analisis":aid, "formato":"pdf"})
+        self.assertEqual(pdf.status_code, 200, pdf.text if pdf.status_code != 200 else "")
+        self.assertTrue(pdf.content.startswith(b"%PDF-"))
+        self.assertGreater(len(pdf.content), 1000)
+
+    def test_safeguard_lifecycle_deduplication_and_authorization(self):
+        from fastapi.testclient import TestClient
+        from backend.safeguards import backfill
+        def separate_client():
+            client = TestClient(app, client=("127.0.0.1", 51000))
+            self.addCleanup(client.close)
+            client.headers["origin"] = "http://127.0.0.1:5173"
+            client.headers["x-csrf-token"] = client.get("/api/auth/csrf").json()["csrf_token"]
+            return client
+        self.client = owner = separate_client()
+        assigned,*_ = self.enroll(787)
+        self.client = stranger = separate_client()
+        unassigned,*_ = self.enroll(788)
+        self.client = admin = separate_client()
+        self.enroll(789,admin=True)
+        sid, ids = self.session_with(["uname -a"])
+        endpoint = f"/api/sesiones/{sid}/analizar"
+        with self.llm(ids, []):
+            first = self.client.post(endpoint)
+            self.assertEqual(first.status_code,200,first.text)
+            a1 = first.json()["id_analisis"]
+        items = self.client.get("/api/salvaguardas",params={"id_sesion":str(sid)}).json()["items"]
+        self.assertTrue(items)
+        item = items[0]
+        path = "/api/salvaguardas/"+item["id_salvaguarda"]
+        proposals = self.client.get("/api/propuestas-salvaguardas", params={"id_analisis": a1})
+        self.assertEqual(proposals.status_code, 200, proposals.text)
+        linked = next(row for row in proposals.json() if row["id_salvaguarda"] == item["id_salvaguarda"])
+        revision = self.client.post(f"/api/analisis/{a1}/salvaguardas/{linked['codigo']}/revision", json={
+            "estado": "aprobada", "revision_esperada": 0, "responsable": "Equipo de laboratorio",
+            "motivo": "Esta propuesta ya se gestiona en el tablero",
+        })
+        self.assertEqual(revision.status_code, 409, revision.text)
+        self.assertEqual(self.client.get("/api/salvaguardas",params={"q":item["codigo"]}).json()["total"],1)
+        self.assertEqual(self.client.post(path+"/estado",json={"estado":"en_desarrollo"}).status_code,422)
+        with patch.dict("os.environ",{"LLM_MODEL":"another-safeguard-fixture"}),self.llm(ids,[]):
+            second = self.client.post(endpoint,params={"actualizar_informe":"true","actualizar_rag":"true"})
+        self.assertEqual(second.status_code,200,second.text)
+        self.assertNotEqual(second.json()["id_analisis"],a1)
+        backfill(self.connection,app.state.tables,(app.state.honeypot_id,))
+        updated = self.client.get("/api/salvaguardas",params={"id_sesion":str(sid)}).json()["items"]
+        self.assertEqual({x["codigo"] for x in items},{x["codigo"] for x in updated})
+        self.assertEqual(len({x["id_analisis"] for x in self.client.get(path).json()["origenes"]}),2)
+        user = app.state.tables["usuario"]
+        self.connection.execute(user.update().where(user.c.id_usuario==unassigned).values(activo=False))
+        self.assertEqual(self.client.post(path+"/asignacion",json={"responsable":str(unassigned)}).status_code,422)
+        self.assertNotIn(str(unassigned),{row["id_usuario"] for row in self.client.get("/api/salvaguardas/analistas").json()})
+        self.connection.execute(user.update().where(user.c.id_usuario==unassigned).values(activo=True))
+        self.assertEqual(self.client.post(path+"/asignacion",json={"responsable":str(unassigned),"vence_en":"2025-01-01"}).status_code,200)
+        self.assertEqual(self.client.post(path+"/asignacion",json={"responsable":str(assigned)}).status_code,200)
+        self.assertGreaterEqual(self.client.get("/api/salvaguardas/indicadores").json()["vencidas"],1)
+        self.client = stranger
+        self.assertEqual(self.client.get(path).status_code,200)
+        self.assertEqual(self.client.post(path+"/estado",json={"estado":"en_desarrollo"}).status_code,403)
+        self.client = owner
+        self.assertGreaterEqual(self.client.get("/api/salvaguardas",params={"mias":"true"}).json()["total"],1)
+        self.assertEqual(self.client.post(path+"/asignacion",json={"responsable":str(assigned)}).status_code,403)
+        self.assertEqual(self.client.post(path+"/estado",json={"estado":"en_desarrollo"}).status_code,200)
+        self.assertEqual(self.client.post(path+"/avance",json={"observacion":"Contraste de registros en curso"}).status_code,200)
+        self.assertEqual(self.client.post(path+"/evidencia",json={"evidencia":"Referencia a auditoría verificada"}).status_code,200)
+        self.assertEqual(self.client.post(path+"/estado",json={"estado":"realizada"}).status_code,422)
+        self.assertEqual(self.client.post(path+"/estado",json={"estado":"realizada","resultado":"Registro contrastado",
+            "evidencia":"Auditoría adjunta de la sesión","criterio_aplicado":"Se recuperó la auditoría asociada"}).status_code,200)
+        self.assertIsNotNone(self.client.get(path).json()["finalizado_en"])
+        self.assertEqual(self.client.post(path+"/reapertura",json={"observacion":"Se requieren registros adicionales"}).status_code,403)
+        self.client = admin
+        self.assertEqual(self.client.post(path+"/reapertura",json={"observacion":"Se requieren registros adicionales"}).status_code,200)
+        self.assertEqual([row["operacion"] for row in self.client.get(path+"/historial").json()],
+                         ["asignacion","asignacion","estado","avance","evidencia","estado","reapertura"])
+
+    def test_board_wip_is_global_admin_configurable_and_rolls_back_rejected_start(self):
+        from fastapi.testclient import TestClient
+
+        admin = self.client
+        self.enroll(790, admin=True)
+        from contextlib import closing
+
+        with closing(TestClient(app, client=("127.0.0.1", 51000))) as analyst:
+            analyst.headers["origin"] = "http://127.0.0.1:5173"
+            analyst.headers["x-csrf-token"] = analyst.get("/api/auth/csrf").json()["csrf_token"]
+            self.client = analyst
+            owner, *_ = self.enroll(791)
+            self.client = admin
+            config = "/api/salvaguardas/configuracion"
+            self.assertEqual(admin.get(config).json()["limite_wip"], 5)
+            limited = {"wip_activo": True, "limite_wip": 1}
+            self.assertEqual(analyst.put(config, json=limited).status_code, 403)
+            self.assertEqual(admin.put(config, json=limited).json()["disponibles"], 1)
+
+            paths = []
+            for command in ("uname -a", "whoami"):
+                sid, ids = self.session_with([command])
+                with self.llm(ids, []):
+                    analysis = admin.post(f"/api/sesiones/{sid}/analizar")
+                self.assertEqual(analysis.status_code, 200, analysis.text)
+                results = admin.get("/api/salvaguardas", params={"id_sesion": str(sid), "orden": "riesgo", "limite": 1}).json()
+                paths.append("/api/salvaguardas/" + results["items"][0]["id_salvaguarda"])
+            first, second = paths
+            start = {"estado": "en_desarrollo", "responsable": str(owner)}
+            self.assertEqual(admin.post(first+"/estado", json=start).status_code, 200)
+            rejected = admin.post(second+"/estado", json=start)
+            self.assertEqual(rejected.status_code, 409)
+            self.assertIn("1/1", rejected.json()["detail"])
+            self.assertEqual(admin.get(second).json()["estado"], "pendiente")
+            self.assertIsNone(admin.get(second).json()["id_responsable"])
+            self.assertEqual(admin.get(second+"/historial").json(), [])
+
+            self.assertIsNone(admin.put(config, json={**limited, "wip_activo": False}).json()["disponibles"])
+            self.assertEqual(admin.post(second+"/estado", json=start).status_code, 200)
+            self.assertEqual(admin.put(config, json=limited).json()["en_desarrollo"], 2)
+            finish = {"estado": "realizada", "resultado": "Se contrastó el acceso", "evidencia": "Auditoría del sensor archivada",
+                      "criterio_aplicado": "Se verificó el registro de acceso", "observacion": "Evidencia vinculada al informe"}
+            self.assertEqual(analyst.post(first+"/estado", json=finish).status_code, 200)
+            self.assertEqual(admin.get(config).json()["disponibles"], 0)
+            reason = {"observacion": "Corroborar la auditoría con la evidencia restante"}
+            self.assertEqual(admin.post(first+"/reapertura", json=reason).status_code, 409)
+            self.assertEqual(analyst.post(first+"/reapertura", json={**reason, "estado": "pendiente"}).status_code, 403)
+            self.assertEqual(admin.post(first+"/reapertura", json={**reason, "estado": "pendiente"}).status_code, 200)
+            self.assertEqual(admin.get("/api/salvaguardas/indicadores").json()["wip"]["en_desarrollo"], 1)
+            self.assertEqual(admin.post(first+"/estado", json=start).status_code, 409)
+
+            from datetime import date
+            from uuid import UUID
+
+            first_id, second_id = (UUID(path.rsplit("/",1)[-1]) for path in paths)
+            tasks = app.state.tables["salvaguarda"]
+            for task_id, priority, risk, due, created in (
+                (first_id,"baja","alto",date(2027,1,1),self.clock),
+                (second_id,"alta","bajo",date(2027,2,1),self.clock+timedelta(seconds=1)),
+            ):
+                self.connection.execute(tasks.update().where(tasks.c.id_salvaguarda==task_id).values(
+                    prioridad=priority,nivel_riesgo=risk,vence_en=due,creado_en=created))
+            for order, expected in (("prioridad",second_id),("riesgo",first_id),
+                                     ("vencimiento",first_id),("creacion",second_id)):
+                ordered = admin.get("/api/salvaguardas",params={"orden":order}).json()["items"]
+                pair = [row["id_salvaguarda"] for row in ordered if row["id_salvaguarda"] in {str(first_id),str(second_id)}]
+                self.assertEqual(len(pair),2)
+                self.assertEqual(pair[0],str(expected),order)
+
     def session_with(self,commands,instance=None):
         sid='rag-test-'+uuid4().hex
         raw=[{'session':sid,'eventid':'cowrie.command.input','timestamp':(self.clock+timedelta(seconds=i)).isoformat(),'input':command,'_collector':{'source_id':sid+':'+str(i)}} for i,command in enumerate(commands)]
@@ -286,7 +469,7 @@ class RagIntegrationTests(fixtures.AuthFixture):
         data={'resumen':'Acciones registradas en Cowrie; solo intencion observada.','informe':report,
               'acciones':[{'tipo':'comando','descripcion':'Intento registrado por Cowrie','confianza':0.9,'eventos':ids,'mitre':proposals}]}
         response=Mock();response.json.return_value={'choices':[{'finish_reason':'stop','message':{'content':json.dumps(data)}}]}
-        return patch('backend.routes.httpx.post',return_value=response)
+        return patch('backend.routes.post_provider',return_value=response)
 
     def test_full_rag_analysis_duplicate_review_and_provider_are_preserved(self):
         self.enroll(701,admin=True);sid,ids=self.session_with(['wget https://example.org/a'])
@@ -301,10 +484,10 @@ class RagIntegrationTests(fixtures.AuthFixture):
         maps=detail['acciones'][0]['mitre'];self.assertEqual(len(maps),1)
         self.assertEqual(maps[0]['estado_revision'],'pendiente')
         self.assertEqual(maps[0]['rag_procedencia']['modelo_llm']['modelo'],'deepseek-fixture')
-        reviewed=self.client.patch('/api/inteligencia/mitre/'+maps[0]['id_mapeo']+'/revision',json={'estado':'descartado','motivo':'Revision humana de un caso sintetico de laboratorio'})
+        reviewed=self.client.patch('/api/inteligencia/mitre/'+maps[0]['id_mapeo']+'/revision',json={'estado':'descartado','motivo':'Revision humana de un caso sintetico de laboratorio','revision_esperada':None})
         self.assertEqual(reviewed.status_code,200,reviewed.text)
         self.assertEqual(self.client.get('/api/analisis/'+aid).json()['acciones'][0]['mitre'][0]['estado_revision'],'descartado')
-        with patch.dict('os.environ',{'LLM_MODEL':'deepseek-fixture','LLM_PROVIDER':'deepseek'}),patch('backend.routes.httpx.post',side_effect=AssertionError('must reuse stored analysis')):
+        with patch.dict('os.environ',{'LLM_MODEL':'deepseek-fixture','LLM_PROVIDER':'deepseek'}),patch('backend.routes.post_provider',side_effect=AssertionError('must reuse stored analysis')):
             reused=self.client.post('/api/sesiones/'+str(sid)+'/analizar')
         self.assertTrue(reused.json()['reutilizado'])
 
@@ -337,7 +520,7 @@ class RagIntegrationTests(fixtures.AuthFixture):
                 response=self.client.post(f'/api/sesiones/{sid}/analizar')
             self.assertEqual(response.status_code,200,response.text)
             prompt=json.loads(provider.call_args.kwargs['json']['messages'][1]['content'])
-            self.assertIn(diagnostic['codigo_tecnica'],{c['codigo_tecnica'] for c in prompt['tecnicas_mitre_permitidas']})
+            self.assertNotIn(diagnostic['codigo_tecnica'],{c['codigo_tecnica'] for c in prompt['tecnicas_mitre_permitidas']})
             detail=self.client.get('/api/analisis/'+response.json()['id_analisis']).json()
             results={m['codigo_tecnica']:m for m in detail['acciones'][0]['mitre']}
             self.assertEqual(set(results),{'T1018','T1046','T1098.004'})
@@ -390,14 +573,14 @@ class RagIntegrationTests(fixtures.AuthFixture):
         refs=', '.join(f'#{eid}' for eid in citations)
         self.assertEqual(table['rows'][0][3],refs)
         self.assertNotIn(f'#{ids[0]}',table['rows'][0])
-        docx=self.client.get(report+'&formato=docx')
+        docx=self.client.get(report+'&formato=docx',params={'snapshot':body['snapshot']})
         self.assertEqual(docx.status_code,200,docx.text if docx.status_code != 200 else '')
         self.assertIn(refs,[cell.text for grid in Document(BytesIO(docx.content)).tables for row in grid.rows for cell in row.cells])
         with patch('backend.report_export.render_pdf',return_value=b'%PDF-fixture') as renderer:
-            self.assertEqual(self.client.get(report+'&formato=pdf').content,b'%PDF-fixture')
+            self.assertEqual(self.client.get(report+'&formato=pdf',params={'snapshot':body['snapshot']}).content,b'%PDF-fixture')
         pdf_table=next(section for section in renderer.call_args.args[0]['sections'] if section['title']=='Mapeos MITRE ATT&CK')
         self.assertEqual(pdf_table,table)
-        with patch('backend.routes.httpx.post',side_effect=AssertionError('Should reuse matching evidence')):
+        with patch('backend.routes.post_provider',side_effect=AssertionError('Should reuse matching evidence')):
             reused=self.client.post(uri).json()
         self.assertEqual(reused['id_analisis'],first['id_analisis'])
         self.assertTrue(reused['reutilizado'])
@@ -446,9 +629,42 @@ class RagIntegrationTests(fixtures.AuthFixture):
                     self.assertEqual(mapping['grado_evidencia'],'resultado_en_honeypot')
                 else:
                     self.assertEqual(response.json()['clasificacion_mitre']['estado'],'no_determinada')
-                    self.assertTrue(prompt['tecnicas_mitre_permitidas'])
-                    self.assertFalse(any(c['observabilidad']=='intento_evaluable' for c in prompt['tecnicas_mitre_permitidas']))
+                    self.assertEqual(prompt['tecnicas_mitre_permitidas'], [])
                     self.assertFalse(detail['acciones'][0]['mitre'])
+
+    def test_registered_modalities_preserve_command_evidence_in_persisted_views_and_reports(self):
+        self.enroll(711,admin=True)
+        modes={name:uuid4() for name in ('cowrie_shell','cowrie_proxy','cowrie_llm')}
+        sensors=app.state.tables['honeypot']
+        self.connection.execute(sensors.insert(),[{'id_honeypot':identifier,'nombre':name,'host':'loopback'}
+                                                 for name,identifier in modes.items()])
+        code, tactic = 'T1007', 'TA0007'
+        with patch.object(app.state,'instances',modes):
+            for mode in modes:
+                with self.subTest(mode=mode):
+                    sid,ids=self.session_with(['systemctl list-units --type=service'],instance=mode)
+                    candidates=self.client.post(f'/api/sesiones/{sid}/mitre/candidatos').json()['candidatos']
+                    self.assertTrue(any(row['codigo_tecnica']==code and row['observabilidad']=='intento_evaluable'
+                                        for row in candidates))
+                    with self.llm(ids,[proposal(code,tactic,eventos=ids).model_dump()]) as provider:
+                        response=self.client.post(f'/api/sesiones/{sid}/analizar')
+                    self.assertEqual(response.status_code,200,response.text)
+                    self.assertEqual(provider.call_count,1)
+                    aid=response.json()['id_analisis']
+                    detail=self.client.get(f'/api/analisis/{aid}').json()
+                    mapping,=detail['acciones'][0]['mitre']
+                    self.assertEqual(mapping['grado_evidencia'],'intento')
+                    self.assertEqual([citation['id_evento'] for citation in mapping['eventos']],list(map(str,ids)))
+                    provenance=mapping['rag_procedencia']
+                    self.assertEqual((provenance['contrato_evidencia'],provenance['modalidad']),(code,mode))
+                    self.assertIn('alcance_sensor',provenance)
+                    report=self.client.get(f'/api/sesiones/{sid}/informe',params={'id_analisis':aid}).json()
+                    rows=next(section['rows'] for section in report['sections'] if section['title']=='Mapeos MITRE ATT&CK')
+                    self.assertTrue(any(row[0].startswith(code) and mode in row[2] and f'#{ids[0]}' == row[3]
+                                        for row in rows))
+                    matrix=self.client.get('/api/mitre/matriz',params={'modalidad':mode})
+                    self.assertEqual(matrix.status_code,200,matrix.text)
+                    self.assertIn(code,matrix.text)
 
     def test_official_import_is_idempotent_and_preserves_vectors_and_history(self):
         from backend.rag import catalog
@@ -464,7 +680,7 @@ class RagIntegrationTests(fixtures.AuthFixture):
     def test_bad_llm_response_is_atomic(self):
         self.enroll(705);sid,ids=self.session_with(['ls -la'])
         response=Mock();response.json.return_value={'choices':[{'finish_reason':'stop','message':{'content':'{"acciones":"wrong"}'}}]}
-        with patch('backend.routes.httpx.post',return_value=response):result=self.client.post('/api/sesiones/'+str(sid)+'/analizar')
+        with patch('backend.routes.post_provider',return_value=response):result=self.client.post('/api/sesiones/'+str(sid)+'/analizar')
         self.assertEqual(result.status_code,502)
         self.assertEqual(self.connection.scalar(text('SELECT count(*) FROM honeypot.accion_identificada a JOIN honeypot.analisis_llm l USING(id_analisis) WHERE l.id_sesion=:id'),{'id':sid}),0)
 

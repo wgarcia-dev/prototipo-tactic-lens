@@ -46,7 +46,7 @@ El despliegue combina tres capas (React, FastAPI, PostgreSQL) en Windows con Cow
 flowchart LR
   A[Cliente SSH en PowerShell] -->|SSH 2222| C[Cowrie en Ubuntu VM]
   C --> J[cowrie.json / JSONL]
-  J --> R[collector.py y systemd]
+  J --> R[exportar_eventos.py, SQLite y systemd]
   R -->|HTTP POST con X-API-Key| B[FastAPI en Windows]
   F[React y Vite en Windows] -->|API y proxy Vite| B
   B --> P[(PostgreSQL / esquema honeypot)]
@@ -64,7 +64,8 @@ tactic-lens/
 │   ├── analysis_state.py       # estado vigente por sesión
 │   ├── db.py                   # conexión compartida con migraciones
 │   └── auth/                   # autenticación, sesiones, MFA, roles y correo
-├── collector/collector.py      # lee el JSONL en Ubuntu
+├── collector/exportar_eventos.py # captura durable JSONL → SQLite
+├── collector/event_watch.py      # orquesta captura y entrega con inotify
 ├── deploy/cowrie-ingest.service
 ├── database/honeypot_schema.sql # esquema SQL, sin datos
 ├── database/migrations/         # migraciones aditivas versionadas
@@ -163,7 +164,7 @@ Clone el repositorio y ejecute los comandos en su **raíz**, donde están `backe
 git clone URL_DEL_REPOSITORIO
 cd CARPETA_CLONADA
 Test-Path .\backend\api.py
-Test-Path .\collector\collector.py
+Test-Path .\collector\exportar_eventos.py
 Test-Path .\deploy\cowrie-ingest.service
 ```
 
@@ -222,44 +223,44 @@ Configure `VITE_API_PROXY_TARGET=http://192.168.56.1:8000` si usa la red origina
 
 ## 5. Recolector automático en Ubuntu
 
-Desde **PowerShell en la raíz del repositorio**, transfiera los dos archivos **antes** de abrir SSH:
+Para una instalación nueva, use Python 3 y systemd en Linux. El observador inotify ejecuta el exportador SQLite desde `/opt/tacticlens-cowrie`. Para una instalación existente, conserve su cola y configuración, y actualice exclusivamente el servicio que ya opera. Consulte el [procedimiento del despliegue existente](docs/DEMO_LAPTOPS.md).
+
+Desde PowerShell, transfiera los archivos a Ubuntu y después abra SSH. Sustituya el usuario y la dirección por los del laboratorio.
 
 ```powershell
-scp .\collector\collector.py .\deploy\cowrie-ingest.service william@192.168.56.101:/home/william/
-ssh william@192.168.56.101
+scp .\collector\exportar_eventos.py .\collector\sqlite_sender.py .\collector\event_watch.py .\collector\event_status.py .\deploy\cowrie-ingest.service .\deploy\cowrie-ingest.env.example usuario@UBUNTU:~/
+ssh usuario@UBUNTU
 ```
 
-En Ubuntu real compruebe `whoami`, `hostname` y `ls -l /home/william/collector.py /home/william/cowrie-ingest.service`. Ambos deben existir. Como `william`, instálelos:
+En Ubuntu, compruebe que `cowrie` puede leer el JSONL y su directorio, incluidas las rotaciones. Detenga el servicio anterior y su timer si existen antes de cambiar la unidad. El archivo distribuido se instala con el nombre vigente `tacticlens-exportador.service`.
 
 ```bash
-sudo install -o cowrie -g cowrie -m 0700 -d /home/cowrie/.config
-sudo install -o cowrie -g cowrie -m 0644 /home/william/collector.py /home/cowrie/collector.py
-sudo install -o root -g root -m 0644 /home/william/cowrie-ingest.service /etc/systemd/system/cowrie-ingest.service
-sudo nano /home/cowrie/.config/cowrie-ingest.env
+sudo install -d -o root -g root -m 0755 /opt/tacticlens-cowrie
+sudo install -o root -g root -m 0644 ~/exportar_eventos.py ~/sqlite_sender.py ~/event_watch.py ~/event_status.py /opt/tacticlens-cowrie/
+sudo install -d -o root -g cowrie -m 0750 /etc/tacticlens-cowrie
+sudo install -d -o cowrie -g cowrie -m 0700 /var/lib/tacticlens-cowrie
+sudo install -o root -g root -m 0644 ~/cowrie-ingest.service /etc/systemd/system/tacticlens-exportador.service
 ```
 
-En el editor coloque los valores propios, usando [deploy/cowrie-ingest.env.example](deploy/cowrie-ingest.env.example) como referencia:
-
-```dotenv
-INGEST_URL=http://192.168.56.1:8000/api/ingesta/eventos
-INGEST_API_KEY=LA_MISMA_CLAVE_DE_WINDOWS
-COWRIE_LOG=/home/cowrie/my-honeypot/var/log/cowrie/cowrie.json
-COLLECTOR_STATE=/home/cowrie/.config/cowrie-ingest-state.json
-```
-
-`INGEST_URL` y `INGEST_API_KEY` son obligatorios. No copie `LLM_API_KEY` a Ubuntu. Proteja el archivo y active el servicio:
+En una instalación nueva, instale el [ejemplo de configuración](deploy/cowrie-ingest.env.example) como `/etc/tacticlens-cowrie/exportador.env` con propietario `root:cowrie` y modo `0640`. Configure `TACTICLENS_URL`, `TACTICLENS_TOKEN`, `TACTICLENS_TRANSPORT` y la ruta absoluta `COWRIE_LOG`. Use la misma clave de ingesta que en FastAPI y mantenga las credenciales LLM en el backend. Use `ssh-loopback` para el túnel o `demo-http` con la red privada autorizada.
 
 ```bash
-sudo chown cowrie:cowrie /home/cowrie/.config/cowrie-ingest.env
-sudo chmod 600 /home/cowrie/.config/cowrie-ingest.env
-sudo -u cowrie test -r /home/cowrie/my-honeypot/var/log/cowrie/cowrie.json
+sudo install -o root -g cowrie -m 0640 ~/cowrie-ingest.env.example /etc/tacticlens-cowrie/exportador.env
+sudoedit /etc/tacticlens-cowrie/exportador.env
+sudo -u cowrie /usr/bin/python3 /opt/tacticlens-cowrie/exportar_eventos.py --initialize
+```
+
+`--initialize` se usa solo cuando aún no existe `/var/lib/tacticlens-cowrie/cola.sqlite3`. Si una cola anterior necesita preparación, ejecute `--prepare` con el emisor detenido. Genera un respaldo SQLite consistente y conserva la identidad y las filas. En una actualización, conserve los permisos y valores de la configuración existente. Si hay un recolector `cowrie-ingest.service` anterior o un timer `tacticlens-exportador.timer`, deshabilítelos antes de habilitar el servicio vigente.
+
+```bash
+sudo systemd-analyze verify /etc/systemd/system/tacticlens-exportador.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now cowrie-ingest
-sudo systemctl status cowrie-ingest --no-pager
-sudo journalctl -u cowrie-ingest -n 30 --no-pager
+sudo systemctl enable --now tacticlens-exportador.service
+sudo systemctl status tacticlens-exportador.service --no-pager
+sudo -u cowrie /usr/bin/python3 /opt/tacticlens-cowrie/exportar_eventos.py --status
 ```
 
-El servicio debe quedar `active (running)`. El recolector sigue el archivo JSONL por desplazamiento, envía lotes de hasta 100 eventos con `X-API-Key`, persiste su posición tras una respuesta correcta y emite un latido cada 20 segundos. La API deduplica eventos reintentados. No ejecute dos recolectores con el mismo archivo de estado. Si necesita ejecutarlo manualmente para diagnóstico, primero detenga el servicio: `sudo systemctl stop cowrie-ingest`; después `sudo -u cowrie env INGEST_URL=... INGEST_API_KEY=... python3 /home/cowrie/collector.py`. Vuelva a iniciar el servicio con `sudo systemctl start cowrie-ingest`.
+El servicio conserva el cursor de captura y la cola en SQLite. Ante una interrupción HTTP mantiene los pendientes y reintenta con espera progresiva. El envío solo se confirma al validar el recibo de persistencia por evento. El bloqueo exclusivo por cola protege contra dos emisores con los mismos datos. Para diagnóstico use `--status`, que no necesita detener el servicio. El emisor retirado `collector.py` permanece en el repositorio para consultas de compatibilidad.
 
 ## 6. DeepSeek y análisis histórico
 
@@ -291,7 +292,7 @@ credenciales. Cada exportación indica los límites de filas cuando corresponde.
 ## 7. Prueba del flujo completo
 
 1. Inicie PostgreSQL, FastAPI y React como arriba. Inicie sesión con correo verificado, autorización y Google Authenticator; use Administrador para importar archivos manualmente.
-2. En Ubuntu real confirme Cowrie con `ss -lnt | grep ':2222'` y el recolector con `sudo systemctl status cowrie-ingest --no-pager`.
+2. En Ubuntu real confirme Cowrie con `ss -lnt | grep ':2222'` y el recolector con `sudo systemctl status tacticlens-exportador.service --no-pager`.
 3. Desde Ubuntu real ejecute `curl -i http://192.168.56.1:8000/api/health`. El campo `collector_last_seen` debe actualizarse; `null` significa que todavía no ha llegado un latido.
 4. Desde **otra** PowerShell conecte `ssh -p 2222 root@192.168.56.101`. En `root@svr04` ejecute `whoami`, `pwd` y `uname -a`; luego `exit`.
 5. En la interfaz abra **Sesiones y eventos**, busque la sesión nueva y revise la cronología. Compare fechas recientes también en PostgreSQL:
@@ -314,16 +315,16 @@ FROM honeypot.evento ORDER BY fecha_hora DESC LIMIT 20;
 | `Connection refused` en `2222` | En Ubuntu real: `ss -lnt | grep ':2222'` y `cowrie status` como usuario `cowrie`. Inicie Cowrie desde su directorio y revise su log. |
 | Aparece `root@svr04` al instalar archivos | Está en el shell simulado de Cowrie, puerto 2222. Salga y entre por `ssh william@192.168.56.101` (puerto 22). |
 | `sudo` falla para `cowrie` o `Permission denied` | Salga al usuario administrador `william` y haga allí los `sudo install`. Verifique `whoami` y permisos en `/home/cowrie`. |
-| `stat local ./collector.py` o `Could not resolve hostname c:` | Ejecute `scp` desde PowerShell en la raíz del proyecto, antes de `ssh`. Las rutas `C:\...` no existen en Ubuntu. |
-| `Unit cowrie-ingest.service not found` | Confirme `ls -l /home/william/cowrie-ingest.service`, instálelo en `/etc/systemd/system/` y ejecute `sudo systemctl daemon-reload`. |
+| `stat local ./exportar_eventos.py` o `Could not resolve hostname c:` | Ejecute `scp` desde PowerShell en la raíz del proyecto, antes de `ssh`. Las rutas `C:\...` no existen en Ubuntu. |
+| `Unit tacticlens-exportador.service not found` | Instale `deploy/cowrie-ingest.service` como `/etc/systemd/system/tacticlens-exportador.service` según la sección de instalación y ejecute `sudo systemctl daemon-reload`. |
 | `Exec format error` al usar `install` | Compruebe el prompt: en `root@svr04` sigue dentro de Cowrie simulado. |
 | `No module named backend` | Regrese a la raíz y ejecute `python -m uvicorn backend.api:app ...`. |
 | `WinError 10048` | Ya hay otro proceso en el puerto 8000. Pruebe `Invoke-RestMethod http://192.168.56.1:8000/api/health`; cierre el proceso anterior con Ctrl+C en su terminal. |
 | FastAPI inaccesible desde Ubuntu | Revise IP Host-only con `Get-NetIPAddress`, `ip -br a`, firewall y que Uvicorn escuche en esa IP. Use `http://`, no `https://`. |
 | `.env` ausente o PostgreSQL falla | Copie `.env.example` y complete las variables. Revise `Get-Service postgresql*`, la base, usuario, contraseña y `HONEYPOT_ID`. |
-| API responde 401 al recolector | `INGEST_API_KEY` debe ser idéntica en Windows y Ubuntu. Reinicie Uvicorn y `sudo systemctl restart cowrie-ingest` tras cambiarla. |
+| API responde 401 al recolector | Iguale `INGEST_API_KEY` de FastAPI y `TACTICLENS_TOKEN` del exportador. Reinicie Uvicorn y ejecute `sudo systemctl restart tacticlens-exportador.service` tras el cambio. |
 | `Ya existe un recolector usando este estado` | Hay otra instancia; use solo el servicio systemd o deténgalo antes de ejecutar el script manualmente. |
-| Cowrie registra eventos pero la web no | Revise `sudo journalctl -u cowrie-ingest -n 30 --no-pager`, `collector_last_seen`, peticiones POST en Uvicorn y nuevas filas en PostgreSQL. Eventos viejos no prueban la ingesta actual. |
+| Cowrie registra eventos pero la web no | Revise `sudo journalctl -u tacticlens-exportador.service -n 30 --no-pager`, `collector_last_seen`, peticiones POST en Uvicorn y nuevas filas en PostgreSQL. |
 | Análisis devuelve error | Verifique `LLM_API_KEY`, `LLM_MODEL`, conectividad, límite/saldo de DeepSeek y el mensaje del intento en la sesión. Pulse **Reintentar** tras corregirlo. |
 
 ## 9. Validación y seguridad

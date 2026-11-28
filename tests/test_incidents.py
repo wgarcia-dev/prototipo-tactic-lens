@@ -5,7 +5,7 @@ from unittest import TestCase, skipUnless
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 import httpx
 
 from backend.analysis_state import evidence_snapshot
@@ -87,6 +87,92 @@ class IncidentsTests(AuthFixture):
         reply = self.client.post("/api/incidentes", json={"id_analisis":str(aid),"motivo":REASON})
         self.assertEqual(reply.status_code,status,reply.text)
         return reply.json()
+
+    def historical_source(self, mode, severity="S1", *, obsolete=False, invalid_receipt=False):
+        marker = {"cowrie_shell":"a3", "cowrie_proxy":"b4", "cowrie_llm":"c5"}[mode]*32
+        sid, eid = self.telemetry(mode, start=self.clock-timedelta(days=9), marker=marker)
+        aid = self.saved_analysis(sid, severity)
+        tables = app.state.tables
+        analysis, action, links, origin = (tables[key] for key in (
+            "analisis_llm", "accion_identificada", "accion_evento", "evento_origen"))
+        payload = self.connection.scalar(select(analysis.c.resultado_estructurado).where(analysis.c.id_analisis==aid))
+        if obsolete:
+            payload["vigencia_snapshot"]["eventos_sha256"] = "0"*64
+        self.connection.execute(analysis.update().where(analysis.c.id_analisis==aid)
+                                .values(resultado_estructurado=payload, fecha_fin=func.clock_timestamp()))
+        action_id = self.connection.scalar(action.insert().values(id_analisis=aid, tipo_accion="Transferencia",
+            descripcion="Registro sintético verificado en Cowrie").returning(action.c.id_accion))
+        self.connection.execute(links.insert().values(id_accion=action_id,id_evento=eid,evidencia="Cita sintética"))
+        if invalid_receipt:
+            self.connection.execute(origin.update().where(origin.c.id_evento==eid).values(contenido_sha256="1"*64))
+        return sid, eid, aid
+
+    def test_historical_recovery_previews_dates_requires_review_and_replays_safely(self):
+        self.enroll(7941, admin=True)
+        endpoint = "/api/incidentes/retrospectiva"
+        sid_a, _, exact = self.historical_source("cowrie_shell")
+        sid_b, eid_b, rebuilt = self.historical_source("cowrie_proxy", "S2", obsolete=True)
+        _, _, invalid = self.historical_source("cowrie_llm", obsolete=True, invalid_receipt=True)
+        tables = app.state.tables
+        analysis = tables["analisis_llm"]
+        payload = self.connection.scalar(select(analysis.c.resultado_estructurado).where(analysis.c.id_analisis==rebuilt))
+        payload["informe"] = {"recomendaciones": [{"salvaguarda":"Verificar transferencia de prueba",
+            "objetivo":"Corroborar alcance del registro", "validacion":"Comprobar la evidencia del laboratorio",
+            "eventos":[str(eid_b)]}]}
+        self.connection.execute(analysis.update().where(analysis.c.id_analisis==rebuilt).values(resultado_estructurado=payload))
+        task, origin = tables["salvaguarda"], tables["salvaguarda_origen"]
+        old_task = self.connection.scalar(task.insert().values(id_sesion=sid_b, nombre="Verificación sintética",
+            nivel_riesgo="medio", huella="2"*64).returning(task.c.id_salvaguarda))
+        self.connection.execute(origin.insert().values(id_analisis=rebuilt, posicion=1, id_salvaguarda=old_task,
+                                                       recomendacion={}, valoracion={}))
+        # A second usable result of the same session must not create a second candidate.
+        related = self.saved_analysis(sid_a)
+        with patch("backend.routes.real_result", side_effect=AssertionError("No provider requests allowed")):
+            response = self.client.get(endpoint)
+            self.assertEqual(response.status_code, 200, response.text)
+            first = response.json()
+            candidates = {row["id_sesion"]:row for row in first["seleccion"]}
+            self.assertEqual(first["resumen"]["recuperable_directamente"], 1)
+            self.assertEqual(first["resumen"]["recuperable_con_revision"], 1)
+            self.assertEqual(first["resumen"]["requiere_reevaluacion"], 1)
+            self.assertEqual(first["resumen"]["salvaguardas_con_citas_compatibles"], 1)
+            self.assertIn(candidates[str(sid_a)]["id_analisis"], {str(related), str(exact)})
+            self.assertEqual(candidates[str(sid_b)]["salvaguardas"][0]["id_salvaguarda"], str(old_task))
+            self.assertEqual(next(row["estado"] for row in first["analisis"] if row["id_analisis"]==str(invalid)),
+                             "requiere_reevaluacion")
+            self.assertEqual(self.client.get("/api/incidentes").json()["items"], [])
+            body = {"revision_vista_previa":first["revision_vista_previa"], "motivo":REASON}
+            self.connection.execute(analysis.update().where(analysis.c.id_analisis==rebuilt)
+                                    .values(resultado_estructurado={**payload,"marcador_fixture":True}))
+            self.assertEqual(self.client.post(endpoint,json=body).status_code, 409)
+            current = self.client.get(endpoint).json()
+            body["revision_vista_previa"] = current["revision_vista_previa"]
+            result = self.client.post(endpoint,json=body)
+            self.assertEqual(result.status_code, 201, result.text)
+            ids = result.json()["sesiones_registradas"]
+            self.assertEqual(len(result.json()["incidentes"]), 2)
+            self.assertEqual(self.client.post(endpoint,json=body).status_code, 409)
+            self.assertEqual(self.client.get(endpoint).json()["seleccion"], [])
+        path = "/api/incidentes/" + ids[str(sid_b)]
+        historical = self.client.get(path).json()
+        entry, = historical["detalle"]["retrospectiva"]
+        self.assertEqual(entry["base_evidencia"], "recibos_y_citas")
+        self.assertLess(entry["actividad_desde"], historical["registrado_en"])
+        self.assertEqual(historical["decision"], "actividad_sospechosa")
+        self.assertIsNone(historical["severidad"])
+        self.assertEqual(historical["detalle"]["analisis"][0]["severidad"], "S2")
+        self.assertEqual(historical["eventos"][0]["id_evento"], str(eid_b))
+        self.assertFalse(self.client.get(path+"/respuesta").json()["elegible"])
+        self.review(historical)
+        self.assertTrue(self.client.get(path+"/respuesta").json()["elegible"])
+        self.assertTrue(self.client.get(path+"/respuesta/antecedentes").json()["items"][0]["importable"])
+        self.assertEqual(self.connection.scalar(select(task.c.estado).where(task.c.id_salvaguarda==old_task)), "pendiente")
+
+    def test_historical_recovery_requires_administrator(self):
+        self.enroll(7942)
+        endpoint = "/api/incidentes/retrospectiva"
+        self.assertEqual(self.client.get(endpoint).status_code, 403)
+        self.assertEqual(self.client.post(endpoint,json={"revision_vista_previa":"0"*64,"motivo":REASON}).status_code, 403)
 
     def review(self, case, *, expected=None, decision="incidente_confirmado", status=201, **overrides):
         data = {"revision_esperada":case["revision_evaluacion"] if expected is None else expected,

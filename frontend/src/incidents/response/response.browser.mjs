@@ -9,6 +9,10 @@ const build=resolve('frontend/dist')
 const origin='http://respuesta-tacticlens.invalid'
 const incident='00000000-0000-4000-8000-000000000011'
 const id='00000000-0000-4000-8000-000000000012'
+const historicalId='00000000-0000-4000-8000-000000000013'
+const historicalAnalysis='00000000-0000-4000-8000-000000000014'
+const historicalSession='00000000-0000-4000-8000-000000000015'
+const previewRevision='b4'.repeat(32)
 const base='/incidentes/'+incident+'/respuesta'
 const auth={csrf_token:'fixture',usuario:{id_usuario:'fixture',nombres:'Analista',apellidos:'Demo',
   nombre_usuario:'analista',correo:'test@example.invalid',rol:'administrador'},etapa:'completa'}
@@ -28,6 +32,7 @@ const history={items:[{id_cambio:'1',operacion:'aprobar',motivo:'Motivo sintéti
 const pages=[]
 const errors=[]
 let transitions=0
+let recoveries=0
 try {
   async function newPage(){
     const page=await browser.newPage()
@@ -61,8 +66,26 @@ try {
       if(path==='/api/auth/me'||path==='/api/auth/csrf')value=auth
       if(path==='/api/incidentes')value={items:[{...evaluation,id_incidente:incident,modalidades:['cowrie_shell'],
         actualizado_en:evaluation.evaluado_en}],cursor:null}
-      if(path==='/api/incidentes/resumen')value={total:1,distribucion:[{decision:evaluation.decision,total:1}]}
+      if(path==='/api/incidentes/resumen')value={total:1,distribucion:[{decision:evaluation.decision,total:1}],retrospectiva_disponible:true}
+      if(path==='/api/incidentes/retrospectiva'){
+        if(req.method()==='POST'){
+          assert.equal(req.headers()['x-csrf-token'],'fixture')
+          assert.equal(JSON.parse(req.postData()).revision_vista_previa,previewRevision)
+          recoveries+=1
+          value={incidentes:[historicalId]}
+        }else{
+          value={revision_vista_previa:previewRevision,resumen:{analisis_revisados:2,sesiones_revisadas:2,
+            recuperable_directamente:0,recuperable_con_revision:1,requiere_reevaluacion:1,sesion_ya_registrada:0,
+            sin_indicios_suficientes:0,salvaguardas_con_citas_compatibles:1},sesiones:[],seleccion:[{
+            id_analisis:historicalAnalysis,id_sesion:historicalSession,actividad_desde:'2026-11-22T08:00:00Z',
+            modalidad:'cowrie_shell',estado:'recuperable_con_revision',salvaguardas:[]}]}
+        }
+      }
       if(path==='/api/incidentes/'+incident)value={...evaluation,id_incidente:incident}
+      if(path==='/api/incidentes/'+historicalId)value={...evaluation,id_incidente:historicalId,
+        decision:'actividad_sospechosa',titulo:'Actividad histórica de prueba',registrado_en:'2026-11-28T12:00:00Z',
+        detalle:{retrospectiva:[{id_analisis:historicalAnalysis,base_evidencia:'recibos_y_citas',
+          actividad_desde:'2026-11-22T08:00:00Z',actividad_hasta:'2026-11-22T08:10:00Z'}]}}
       if(path==='/api'+base){
         if(req.method()==='POST'){
           assert.equal(req.headers()['x-csrf-token'],'fixture')
@@ -132,8 +155,23 @@ try {
   await click(first,'Confirmar aprobar')
   await wait(second,'[aria-label="Tarjetas de Aprobadas"]',action.medida)
   assert.equal(transitions,1)
+  await first.goto(origin+'/incidentes')
+  await wait(first,'main','Recuperar actividad histórica')
+  await first.evaluate(()=>Array.from(document.querySelectorAll('summary')).find(n=>n.innerText==='Recuperar actividad histórica').click())
+  await click(first,'Generar vista previa')
+  await wait(first,'table[aria-label="Candidatos históricos"]',historicalAnalysis)
+  await wait(first,'main','1 pendientes de reevaluación')
+  assert.equal(recoveries,0)
+  await first.type('details[open] textarea[name=motivo]','Recuperación histórica sintética')
+  await click(first,'Registrar candidatos de esta vista previa')
+  await first.waitForSelector('a[href="/incidentes/'+historicalId+'"]')
+  assert.equal(recoveries,1)
+  await first.click('a[href="/incidentes/'+historicalId+'"]')
+  await wait(first,'main','Actividad original')
+  await wait(first,'main','Registro del incidente')
+  assert.equal(await first.$('a[href="/incidentes/'+historicalId+'/respuesta"]'),null)
   assert.deepEqual(errors,[])
-  console.log('Respuesta comprobada en Chromium: apertura, Kanban por teclado, aprobación y segundo cliente sincronizado.')
+  console.log('Chromium: apertura, Kanban, segundo cliente, vista previa histórica y registro sin confirmación automática.')
 } finally {
   await browser.close()
 }

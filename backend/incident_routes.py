@@ -10,8 +10,9 @@ from .api import local_only, sensor_ids
 from .auth.store import audit, require_admin
 from .correlation import mapping_query
 from .cowrie_provenance import event_mode
+from .incident_retrospective import preview
 from .incidents import (MAX_EVIDENCE, SEVERITIES, evaluation_view, get_incident_for_response,
-                        lock_incident, publish, register_analysis, scoped, seal_events)
+                        lock_incident, lock_registration, publish, register_analysis, register_candidate, scoped, seal_events)
 from .sensitive import session_redactors
 
 Decision = Literal["incidente_confirmado", "actividad_sospechosa", "actividad_autorizada", "evidencia_insuficiente"]
@@ -116,7 +117,47 @@ def dashboard(request: Request):
         rows = conn.execute(select(base.c.decision, base.c.severidad, func.count().label("total"))
                             .group_by(base.c.decision, base.c.severidad).order_by(base.c.decision, base.c.severidad)).mappings()
         data = [dict(row) for row in rows]
-    return {"total": sum(row["total"] for row in data), "distribucion": data, "poblacion": "Evaluaciones vigentes, sensores autorizados"}
+    return {"total": sum(row["total"] for row in data), "distribucion": data,
+            "poblacion": "Evaluaciones vigentes, sensores autorizados", "retrospectiva_disponible": True}
+
+
+@router.get("/retrospectiva")
+def retrospective_preview(request: Request):
+    tables = tables_from(request)
+    with request.app.state.engine.connect() as conn:
+        if not conn.in_transaction():
+            conn.execution_options(isolation_level="REPEATABLE READ")
+        require_admin(conn, request)
+        result, _ = preview(conn, tables, sensor_ids(), request.app.state.instances)
+    return result
+
+
+class RecoverHistorical(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision_vista_previa: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+    motivo: Reason
+
+
+@router.post("/retrospectiva", status_code=201)
+def recover_historical(body: RecoverHistorical, request: Request):
+    tables = tables_from(request)
+    sensors, modes = sensor_ids(), request.app.state.instances
+    with request.app.state.engine.begin() as conn:
+        _, actor = require_admin(conn, request)
+        lock_registration(conn)
+        result, plans = preview(conn, tables, sensors, modes)
+        if result["revision_vista_previa"] != body.revision_vista_previa:
+            raise HTTPException(409, "La evidencia o el alcance cambiaron. Genere otra vista previa.")
+        cases = {}
+        for source, assessment, events, history in plans:
+            incident_id = register_candidate(conn, tables, sensors, modes, source, assessment, events,
+                                             manual=True, reason=body.motivo, retrospective=history)
+            cases[str(source.id_sesion)] = str(incident_id)
+        if cases:
+            audit(conn, request, "incidente_recuperacion_historica", actor=actor.id_usuario,
+                  referencia_hash=body.revision_vista_previa,
+                  resultado={"sesiones": len(cases), "incidentes": len(set(cases.values()))})
+    return {"incidentes": sorted(set(cases.values())), "sesiones_registradas": cases}
 
 
 def read(request, conn, id_incidente, revision=None):

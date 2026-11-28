@@ -13,11 +13,13 @@ export type Citation={id_evento:string;id_sesion:string;id_analisis:string|null;
   procedencia:{modalidad:Mode;sensor:string|null;estado:string}}
 export type Evaluation={id_incidente:string;titulo:string;resumen:string;clasificacion:string;decision:Decision;
   severidad:string|null;prioridad:Priority;revision_evaluacion:number;revision_actual:number;validado_por?:string;
-  evaluado_en:string;evidencia_sha256:string;evidencia_verificable:boolean;evidencias:Citation[];
+  evaluado_en:string;registrado_en?:string;evidencia_sha256:string;evidencia_verificable:boolean;evidencias:Citation[];
   alcance:{sesiones:string[];recursos_confirmados:string[]};
   detalle:{motivo?:string;impacto_confirmado?:string|null;corroboracion?:string|null;origen:string;
     analisis?:{id_analisis:string;id_sesion:string;modalidad_al_analizar:Mode;
       severidad:string|null;impacto_tecnico:Record<string,unknown>}[];
+    retrospectiva?:{id_analisis:string;base_evidencia:string;snapshot_historico:string;
+      actividad_desde:string;actividad_hasta:string;analizado_en:string}[];
     evidencias_incluidas:number;evidencias_disponibles:number};
   correlaciones:{id_sesion:string;metodo:string;eventos?:string[];sha256?:string;limitacion?:string}[]}
 export type Incident=Evaluation & {

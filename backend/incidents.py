@@ -65,7 +65,8 @@ def evaluation_view(conn, tables, incident, revision, *, supports_check=True):
         "version_contrato": 1, "id_incidente": str(row.id_incidente), "revision_evaluacion": row.revision_evaluacion,
         "revision_actual": incident.revision_actual, "decision": row.decision, "severidad": row.severidad,
         "prioridad": row.prioridad, "clasificacion": row.clasificacion, "titulo": row.titulo, "resumen": row.resumen,
-        "evaluado_en": row.evaluado_en.isoformat(), "id_actor": str(row.id_actor) if row.id_actor else None,
+        "evaluado_en": row.evaluado_en.isoformat(), "registrado_en": incident.creado_en.isoformat(),
+        "id_actor": str(row.id_actor) if row.id_actor else None,
         "evidencia_sha256": row.evidencia_sha256, "evidencia_verificable": valid,
         "alcance": {"sesiones": [str(sid) for sid in ids], "recursos_confirmados": row.detalle.get("recursos_confirmados", [])},
         "evidencias": [{"id_evento": str(c.id_evento), "id_sesion": str(c.id_sesion),
@@ -191,35 +192,22 @@ def _automatic_projection(payload, analysis_id, mode):
     }
 
 
-def register_analysis(conn, tables, sensors, modes, analysis_id, *, manual=False, actor=None, reason=None):
-    """Identify cases from a completed, already-paid analysis without new provider calls."""
-    if "incidente" not in tables:
-        return None
-    analyses, sessions, event, links, joined, incident = (tables[k] for k in (
-        "analisis_llm", "sesion", "evento", "incidente_sesion", "incidente_analisis", "incidente"))
-    query = (select(analyses.c.resultado_estructurado, analyses.c.resumen, sessions,
-                    session_mode(sessions, event, modes).label("modalidad"))
-             .join_from(analyses, sessions, analyses.c.id_sesion == sessions.c.id_sesion)
-             .where(analyses.c.id_analisis == analysis_id, analyses.c.estado == "completado",
-                    sessions.c.id_honeypot.in_(sensors)))
-    source = conn.execute(query).mappings().first()
-    if not source:
-        if manual:
-            raise HTTPException(404, "Análisis completado no encontrado")
-        return None
-    payload = source.resultado_estructurado or {}
+def analysis_source(tables, sensors, modes):
+    analyses, sessions, event = (tables[key] for key in ("analisis_llm", "sesion", "evento"))
+    return (select(analyses.c.id_analisis, analyses.c.estado, analyses.c.resultado_estructurado, analyses.c.resumen,
+                   func.coalesce(analyses.c.fecha_fin, analyses.c.fecha_inicio, analyses.c.creado_en).label("analizado_en"),
+                   sessions, session_mode(sessions, event, modes).label("modalidad"))
+            .join_from(analyses, sessions, analyses.c.id_sesion == sessions.c.id_sesion)
+            .where(sessions.c.id_honeypot.in_(sensors)))
+
+
+def saved_evidence(conn, event, source, payload):
     triage = payload.get("evaluacion_incidente") or {}
     snapshot = payload.get("vigencia_snapshot") or {}
-    assessment = _automatic_projection(payload, analysis_id, source.modalidad)
-    if not manual and not (set(assessment["criterios"]) & RELEVANT or assessment["severidad"] in SEVERITIES[2:]):
-        if not conn.scalar(select(links.c.id_incidente).where(links.c.id_sesion == source.id_sesion)):
-            return None
     saved_ids = snapshot.get("eventos") or triage.get("eventos") or []
     expected = snapshot.get("eventos_sha256") or triage.get("snapshot_sha256")
     if not expected or not saved_ids:
-        if manual:
-            raise HTTPException(422, "El análisis histórico carece de un snapshot de evidencia verificable")
-        return None
+        return (), "sin_snapshot"
     # Compare the exact saved set rather than expanding it to events ingested later.
     try:
         stored_ids = {int(value) for value in saved_ids}
@@ -228,12 +216,53 @@ def register_analysis(conn, tables, sensors, modes, analysis_id, *, manual=False
     originals = conn.execute(select(event).where(event.c.id_sesion == source.id_sesion,
                                                 event.c.id_evento.in_(stored_ids))).all()
     if not originals or len(originals) != len(stored_ids) or evidence_snapshot(originals)["eventos_sha256"] != expected:
+        return (), "snapshot_divergente"
+    return originals, "snapshot_verificado"
+
+
+def register_analysis(conn, tables, sensors, modes, analysis_id, *, manual=False, actor=None, reason=None):
+    """Identify cases from a completed, already-paid analysis without new provider calls."""
+    if "incidente" not in tables:
+        return None
+    analyses, event, links = (tables[k] for k in ("analisis_llm", "evento", "incidente_sesion"))
+    query = analysis_source(tables, sensors, modes).where(
+        analyses.c.id_analisis == analysis_id, analyses.c.estado == "completado")
+    source = conn.execute(query).mappings().first()
+    if not source:
         if manual:
+            raise HTTPException(404, "Análisis completado no encontrado")
+        return None
+    payload = source.resultado_estructurado or {}
+    assessment = _automatic_projection(payload, analysis_id, source.modalidad)
+    if not manual and not (set(assessment["criterios"]) & RELEVANT or assessment["severidad"] in SEVERITIES[2:]):
+        if not conn.scalar(select(links.c.id_incidente).where(links.c.id_sesion == source.id_sesion)):
+            return None
+    originals, verification = saved_evidence(conn, event, source, payload)
+    if not originals:
+        if manual:
+            if verification == "sin_snapshot":
+                raise HTTPException(422, "El análisis histórico carece de un snapshot de evidencia verificable")
             raise HTTPException(409, "Los eventos citados ya no coinciden con el análisis guardado")
         return None
-    selected = sorted(originals, key=lambda row: (grade(row) == "observacion", row.fecha_hora, row.id_evento))[:MAX_EVIDENCE]
-    citations = seal_events(conn, tables, modes, [source.id_sesion], {row.id_evento: analysis_id for row in selected})
+    return register_candidate(conn, tables, sensors, modes, source, assessment, originals,
+                              manual=manual, actor=actor, reason=reason)
+
+
+def selected_events(originals):
+    return sorted(originals, key=lambda row: (grade(row) == "observacion", row.fecha_hora, row.id_evento))[:MAX_EVIDENCE]
+
+
+def lock_registration(conn):
     conn.execute(text("SELECT pg_advisory_xact_lock(724610916)"))
+
+
+def register_candidate(conn, tables, sensors, modes, source, assessment, originals, *, manual=False,
+                       actor=None, reason=None, retrospective=None):
+    analysis_id = source.id_analisis
+    event, links, joined, incident = (tables[key] for key in ("evento", "incidente_sesion", "incidente_analisis", "incidente"))
+    selected = selected_events(originals)
+    citations = seal_events(conn, tables, modes, [source.id_sesion], {row.id_evento: analysis_id for row in selected})
+    lock_registration(conn)
     published = conn.scalar(select(joined.c.id_incidente).where(joined.c.id_analisis == analysis_id))
     if published:
         return published
@@ -273,8 +302,11 @@ def register_analysis(conn, tables, sensors, modes, analysis_id, *, manual=False
     carried = [{"id_evento": eid, "id_sesion": UUID(c["id_sesion"]), "id_analisis": UUID(c["id_analisis"]) if c["id_analisis"] else None,
                 "grado": c["grado"], "procedencia": c["procedencia"]} for eid, c in prior_refs.items()]
     evidence = (citations + carried)[:MAX_EVIDENCE]
-    strongest = max(analytic, key=lambda item: SEVERITIES.index(item["severidad"]) if item["severidad"] in SEVERITIES else -1)
-    priority = max(analytic, key=lambda item: PRIORITIES.index(item["prioridad"]) if item["prioridad"] in PRIORITIES else -1)
+    trusted = [item for item in analytic if item.get("base_evidencia") != "recibos_y_citas"]
+    strongest = max(trusted, key=lambda item: SEVERITIES.index(item["severidad"]) if item["severidad"] in SEVERITIES else -1,
+                    default={"severidad": None, "clasificacion": "actividad_por_evaluar"})
+    priority = max(trusted, key=lambda item: PRIORITIES.index(item["prioridad"]) if item["prioridad"] in PRIORITIES else -1,
+                   default={"prioridad": "por_determinar"})
     fields = {
         "decision": "actividad_sospechosa", "severidad": strongest["severidad"], "clasificacion": strongest["clasificacion"],
         "prioridad": priority["prioridad"], "titulo": f"Actividad Cowrie · {source.cowrie_session_id}"[:200],
@@ -284,6 +316,14 @@ def register_analysis(conn, tables, sensors, modes, analysis_id, *, manual=False
             set(item["modalidad_al_analizar"] for item in analytic)), "recursos_confirmados": [],
             "impacto_confirmado": None, "evidencias_disponibles": len(originals), "evidencias_incluidas": len(evidence)},
     }
+    historical = list(prior["detalle"].get("retrospectiva", [])) if prior else []
+    if retrospective:
+        historical.append(retrospective)
+        fields["detalle"]["origen"] = "recuperacion_historica"
+        if retrospective["base_evidencia"] == "recibos_y_citas":
+            fields["resumen"] = "Actividad documentada en Cowrie con respaldo de recibos y citas. Requiere revisión humana."
+    if historical:
+        fields["detalle"]["retrospectiva"] = historical
     for redactor in session_redactors(conn, event, sids).values():
         fields = redactor.payload(fields)
     publish(conn, tables, incident_id, revision, fields, evidence, sids)

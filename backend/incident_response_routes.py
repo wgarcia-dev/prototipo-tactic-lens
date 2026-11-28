@@ -14,6 +14,7 @@ from .incident_response import (ResponseContext, action_transition, active_plan,
 from .incident_response_models import (ActionInput, ActionState, ActionTransition, BoardConfig, Change,
                                        ImportProposal, PlanInput, PlanReview, PlanTransition, Proposal)
 from .realtime import notify_change
+from .safeguard_risk import recommendation_references
 
 
 def response_schema(request: Request):
@@ -177,16 +178,7 @@ def source_proposals(ctx):
         select(origin).where(origin.c.id_analisis.in_(by_analysis)))}
     proposals = []
     for row in ctx.conn.execute(query.order_by(analysis.c.id_analisis)):
-        payload = row.resultado_estructurado
-        report = payload.get("informe") if isinstance(payload, dict) else None
-        suggestions = report.get("recomendaciones") if isinstance(report, dict) else None
-        if not isinstance(suggestions, list):
-            continue
-        for position, item in enumerate(suggestions, 1):
-            if not isinstance(item, dict):
-                continue
-            source_events = item.get("eventos")
-            events = [str(value) for value in source_events] if isinstance(source_events, list) else []
+        for position, item, events in recommendation_references(row.resultado_estructurado):
             proposals.append({"id_analisis": row.id_analisis, "posicion": position, "id_salvaguarda":
                 origins.get((row.id_analisis, position)), "recomendacion": item,
                 "importable": bool(events) and set(events) <= by_analysis[row.id_analisis]})

@@ -12,6 +12,16 @@ def evidence_ids(values):
                    and int(value) <= 9223372036854775807}, key=int)
 
 
+def recommendation_references(payload):
+    report = payload.get("informe") if isinstance(payload, dict) else None
+    suggestions = report.get("recomendaciones") if isinstance(report, dict) else None
+    if isinstance(suggestions, list):
+        for position, recommendation in enumerate(suggestions, 1):
+            if isinstance(recommendation, dict):
+                events = recommendation.get("eventos")
+                yield position, recommendation, [str(value) for value in events] if isinstance(events, list) else []
+
+
 def assess_safeguard(item, payload):
     ids = evidence_ids(item.get("eventos"))
     unsupported = {"nivel":None,"eventos":ids,"confianza":"insuficiente","condiciones":[],

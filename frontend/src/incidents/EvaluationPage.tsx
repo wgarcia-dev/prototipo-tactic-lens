@@ -9,6 +9,8 @@ import {dateTime,decisions,evidencePath,modes,priorities,responseEligible,severi
 const domain=['incidentes'] as const
 const input='input w-full mt-1'
 const picker=(values:Record<string,string>)=>Object.entries(values).map(([value,label])=><option key={value} value={value}>{label}</option>)
+const historicalLabels:Record<string,string>={recuperable_directamente:'Evidencia histórica verificada',
+  recuperable_con_revision:'Citas y recibos verificados',requiere_reevaluacion:'Pendiente de reevaluación'}
 
 function Save({children,onSave,label}:{children:ReactNode;onSave:(data:FormData)=>Promise<void>;label:string}) {
   const [busy,setBusy]=useState(false),[error,setError]=useState('')
@@ -25,11 +27,66 @@ function Save({children,onSave,label}:{children:ReactNode;onSave:(data:FormData)
   </form>
 }
 
+type HistoricalPreview={revision_vista_previa:string;
+  resumen:{analisis_revisados:number;sesiones_revisadas:number;recuperable_directamente:number;recuperable_con_revision:number;
+    requiere_reevaluacion:number;sesion_ya_registrada:number;sin_indicios_suficientes:number;salvaguardas_con_citas_compatibles:number};
+  seleccion:{id_analisis:string;id_sesion:string;actividad_desde:string;estado:string;modalidad:keyof typeof modes;
+    salvaguardas:{citas_compatibles:boolean}[]}[];
+  sesiones:{id_analisis:string;id_sesion:string;estado:string}[]}
+
+function HistoricalRecovery({onSaved}:{onSaved:()=>void}) {
+  const [preview,setPreview]=useState<HistoricalPreview>()
+  const [registered,setRegistered]=useState<string[]>([])
+  const [busy,setBusy]=useState(false),[error,setError]=useState('')
+  async function load() {
+    setBusy(true);setError('');setPreview(undefined);setRegistered([])
+    try {setPreview(await api<HistoricalPreview>('/incidentes/retrospectiva'))}
+    catch(failure){setError((failure as Error).message)}
+    finally{setBusy(false)}
+  }
+  return <details className="panel p-4">
+    <summary className="font-semibold cursor-pointer">Recuperar actividad histórica</summary>
+    <div className="mt-3 space-y-3">
+      <button type="button" className="btn-secondary" disabled={busy} onClick={()=>void load()}>{busy?'Preparando…':'Generar vista previa'}</button>
+      {error&&<p role="alert">{error}</p>}
+      {!!registered.length&&<div role="status"><p>Se registraron {registered.length} candidatos.</p>{registered.map(id=>
+        <Link className="accent underline block" key={id} to={'/incidentes/'+id}>{id}</Link>)}</div>}
+      {preview&&<>
+        <p>{preview.resumen.analisis_revisados} análisis en {preview.resumen.sesiones_revisadas} sesiones.</p>
+        <ul className="list-disc pl-5 text-sm">
+          <li>{preview.resumen.recuperable_directamente} con evidencia histórica verificada</li>
+          <li>{preview.resumen.recuperable_con_revision} con citas y recibos verificados que requieren contrastar el análisis</li>
+          <li>{preview.resumen.requiere_reevaluacion} pendientes de reevaluación</li>
+          <li>{preview.resumen.sesion_ya_registrada} ya registradas y {preview.resumen.sin_indicios_suficientes} sin indicios suficientes</li>
+          <li>{preview.resumen.salvaguardas_con_citas_compatibles} salvaguardas con citas compatibles para revisión posterior</li>
+        </ul>
+        {!!preview.seleccion.length&&<div className="overflow-auto max-h-64"><table className="w-full text-sm text-left" aria-label="Candidatos históricos">
+          <thead><tr>{['Análisis','Actividad original','Modalidad','Evidencia'].map(col=><th className="p-2" scope="col" key={col}>{col}</th>)}</tr></thead>
+          <tbody>{preview.seleccion.map(row=><tr className="border-t line" key={row.id_sesion}>
+            <td className="p-2"><Link className="accent underline" to={'/sesiones/'+row.id_sesion+'?analisis='+row.id_analisis}>{row.id_analisis}</Link></td>
+            <td className="p-2 whitespace-nowrap">{dateTime(row.actividad_desde)}</td><td className="p-2">{modes[row.modalidad]}</td>
+            <td className="p-2">{historicalLabels[row.estado]}</td></tr>)}</tbody>
+        </table></div>}
+        {preview.resumen.requiere_reevaluacion>0&&<details><summary>Sesiones pendientes de reevaluación</summary>
+          {preview.sesiones.filter(row=>row.estado==='requiere_reevaluacion').map(row=><Link key={row.id_sesion}
+            className="accent underline block" to={'/sesiones/'+row.id_sesion+'?analisis='+row.id_analisis}>{row.id_analisis}</Link>)}</details>}
+        {!!preview.seleccion.length&&<Save key={preview.revision_vista_previa} label="Registrar candidatos de esta vista previa" onSave={async data=>{
+          const result=await mutate<{incidentes:string[]}>('/incidentes/retrospectiva',{
+            revision_vista_previa:preview.revision_vista_previa,motivo:data.get('motivo')})
+          setRegistered(result.incidentes);setPreview(undefined);onSaved()
+        }}><p className="muted text-sm">Los candidatos requieren revisión humana para habilitar un plan de respuesta.</p>
+          <label className="block">Motivo de la recuperación<textarea className={input} name="motivo" minLength={12} maxLength={2000} required/></label>
+        </Save>}
+      </>}
+    </div>
+  </details>
+}
+
 export function IncidentListPage() {
   const {session}=useAuth()
   const [params,setParams]=useSearchParams()
   const [page,setPage]=useState<Page>({items:[],cursor:null}),[extra,setExtra]=useState<Page>()
-  const [summary,setSummary]=useState<{total:number;distribucion:{decision:Decision;total:number}[]}>()
+  const [summary,setSummary]=useState<{total:number;distribucion:{decision:Decision;total:number}[];retrospectiva_disponible?:boolean}>()
   const [newCase,setNewCase]=useState(''),[error,setError]=useState(''),[loading,setLoading]=useState(true)
   const [busy,setBusy]=useState(false),[retry,reload]=useState(0)
   const key=params.toString()
@@ -86,6 +143,7 @@ export function IncidentListPage() {
         <label className="block">Motivo<textarea className={input} name="motivo" minLength={12} maxLength={2000} required/></label>
       </Save>{newCase&&<Link className="accent underline" to={'/incidentes/'+newCase}>Abrir incidente registrado</Link>}</div>
     </details>}
+    {session?.usuario.rol==='administrador'&&summary?.retrospectiva_disponible&&<HistoricalRecovery onSaved={()=>reload(n=>n+1)}/>}
     <form key={key} onSubmit={submit} className="panel p-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <label>Buscar<input className={input} name="q" maxLength={100} defaultValue={params.get('q')??''} placeholder="Título, ID o sesión"/></label>
       <label>Decisión<select className={input} name="decision" defaultValue={params.get('decision')??''}><option value="">Todas</option>{picker(decisions)}</select></label>
@@ -191,6 +249,15 @@ function IncidentDetail({id}:{id:string}) {
         <p>{view.resumen}</p><p className="muted">{dateTime(view.evaluado_en)} · {view.clasificacion.replaceAll('_',' ')}</p>
         <p className="text-sm">{decisions[view.decision]} · {view.severidad??'Por determinar'} · {priorities[view.prioridad]}</p>
         {view.detalle.motivo&&<p>{view.detalle.motivo}</p>}
+        {!!view.detalle.retrospectiva?.length&&<div className="text-sm space-y-1">
+          {view.registrado_en&&<p>Registro del incidente · {dateTime(view.registrado_en)}</p>}
+          {view.detalle.retrospectiva.map(entry=><div key={entry.id_analisis} className="border-t line pt-1">
+            <p>Actividad original · {dateTime(entry.actividad_desde)} – {dateTime(entry.actividad_hasta)}</p>
+            <p className="muted">{entry.base_evidencia==='recibos_y_citas'?
+              'Citas y recibos verificados. La huella completa del análisis original sigue sin verificación.':
+              'Evidencia histórica verificada mediante la huella guardada.'}</p>
+          </div>)}
+        </div>}
         {view.detalle.impacto_confirmado?<p>Impacto corroborado · {view.detalle.impacto_confirmado}</p>:
           <p className="muted">Impacto organizacional sin corroboración independiente.</p>}
         {view.detalle.corroboracion&&<p className="break-words">Referencia · {view.detalle.corroboracion}</p>}

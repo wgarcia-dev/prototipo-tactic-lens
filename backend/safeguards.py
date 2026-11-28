@@ -1,7 +1,9 @@
 """Persist recommendations and maintain a separate, authorized execution history."""
 from datetime import date, datetime, timezone
 from hashlib import sha256
+from importlib.util import find_spec
 import json
+import os
 import unicodedata
 from typing import Annotated, Literal
 from uuid import UUID
@@ -19,6 +21,16 @@ from .sensitive import session_redactors
 
 router = APIRouter(prefix="/api/salvaguardas", dependencies=[Depends(local_only)])
 STATES = ("pendiente", "en_desarrollo", "realizada")
+
+
+def legacy_archive(app):
+    return (os.getenv("INCIDENT_RESPONSE_ARCHIVE_SAFEGUARDS", "").lower() == "true"
+            and "incidente_respuesta" in app.state.tables and find_spec("backend.incidents") is not None)
+
+
+def require_legacy_writes(request):
+    if legacy_archive(request.app):
+        raise HTTPException(409, "Salvaguardas está en modo histórico. Gestione la acción desde Respuesta a Incidentes.")
 
 
 def capacity(conn, tables, *, lock=False, require_space=False):
@@ -162,6 +174,7 @@ def board_config(request: Request):
 
 @router.put("/configuracion")
 def configure_board(body: BoardConfig, request: Request):
+    require_legacy_writes(request)
     tables = request.app.state.tables
     config = tables["salvaguarda_config"]
     with request.app.state.engine.begin() as conn:
@@ -237,6 +250,7 @@ class Change(BaseModel):
 @router.post("/{task_id}/{operation}")
 def change(task_id: UUID, operation: Literal["asignacion","estado","avance","evidencia","reapertura"],
            body: Change, request: Request):
+    require_legacy_writes(request)
     tables = request.app.state.tables
     task, log = tables["salvaguarda"], tables["salvaguarda_historial"]
     with request.app.state.engine.begin() as conn:

@@ -11,14 +11,14 @@ from uuid import UUID
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import MetaData, Table, String, and_, cast, create_engine, or_, select, func
+from sqlalchemy import MetaData, Table, String, and_, cast, create_engine, inspect, or_, select, func
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import URL
 from sqlalchemy.exc import SQLAlchemyError
 from pgvector.sqlalchemy import VECTOR  # registers pgvector type for reflection
 from .analysis_state import current_inputs, public_state, states_for_sessions
 from .db import database_engine
-from .db_access import RUNTIME_GRANTS, verify_runtime_access
+from .db_access import runtime_grants, verify_runtime_access
 from .sensitive import Redactor, redact as safe, session_redactors
 from .auth.config import Settings
 
@@ -76,8 +76,9 @@ async def lifespan(app: FastAPI):
     with engine.connect() as conn:
         if app.state.auth_settings.production or os.getenv("DATABASE_ENFORCE_RUNTIME_ROLE", "").lower() == "true":
             verify_runtime_access(conn, conn.scalar(select(func.current_user())))
+        grants = runtime_grants(inspect(conn).get_table_names(schema="honeypot"))
     tables = {name: Table(name, meta, schema="honeypot", autoload_with=engine)
-              for name in RUNTIME_GRANTS if name != "schema_migration"}
+              for name in grants if name != "schema_migration"}
     expected = {"sesion": {"id_sesion", "id_honeypot", "cowrie_session_id", "fecha_inicio", "ip_origen", "puerto_origen", "puerto_destino", "protocolo", "fecha_fin", "revision_eventos"}, "evento": {"id_evento", "id_sesion", "numero_secuencia", "tipo_evento", "fecha_hora", "datos_originales"}}
     expected.update(observacion_ioc={"detalles"}, deteccion_ioc={"id_observacion"})
     for name, columns in expected.items():
@@ -87,9 +88,10 @@ async def lifespan(app: FastAPI):
         if set(conn.scalars(select(tables["honeypot"].c.id_honeypot).where(tables["honeypot"].c.id_honeypot.in_(sensor_ids())))) != set(sensor_ids()):
             raise RuntimeError("HONEYPOT_ID no existe")
     app.state.engine, app.state.tables = engine, tables
-    from .safeguards import backfill
-    with engine.begin() as conn:
-        backfill(conn, tables, sensor_ids())
+    from .safeguards import backfill, legacy_archive
+    if not legacy_archive(app):
+        with engine.begin() as conn:
+            backfill(conn, tables, sensor_ids())
     from .monitoring import SnapshotCache
     app.state.dashboard_cache = SnapshotCache()
     from .realtime import MonitorHub, PostgresMonitor
@@ -207,6 +209,7 @@ def events(id: UUID, request: Request, limit: int = Query(200, ge=1, le=500), of
 
 from . import routes  # noqa: E402,F401 - registers extended routes
 from .safeguards import router as safeguards_router
+from .incident_response_routes import router as incident_response_router, board as incident_response_board
 from .auth.routes import router as auth_router
 from .auth.middleware import AuthMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -214,6 +217,8 @@ from fastapi.responses import JSONResponse
 
 app.include_router(auth_router)
 app.include_router(safeguards_router)
+app.include_router(incident_response_router)
+app.include_router(incident_response_board)
 from .auth.onboarding import router as onboarding_router
 app.include_router(onboarding_router)
 from .auth.recovery import router as recovery_router

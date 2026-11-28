@@ -18,7 +18,7 @@ PROTOCOL = 'tacticlens.monitor.v1'
 HEARTBEAT_SECONDS = 15
 CLIENT_IDLE_SECONDS = 40
 CHANNEL = 'tacticlens_monitor_v1'
-DOMAINS = ('sesiones', 'analisis', 'iocs', 'mitre', 'salvaguardas', 'panel')
+DOMAINS = ('sesiones', 'analisis', 'iocs', 'mitre', 'salvaguardas', 'respuesta_incidentes', 'panel')
 logger = logging.getLogger(__name__)
 
 
@@ -67,6 +67,8 @@ class PostgresMonitor:
             if not isinstance(sensors, list) or not isinstance(domains, list) or not self.sensors.intersection(sensors):
                 return None
             domains = [domain for domain in DOMAINS if domain in domains]
+            if 'respuesta_incidentes' in domains and not set(sensors) <= self.sensors:
+                domains.remove('respuesta_incidentes')
             if not domains:
                 return None
             notice = {'dominios': domains}

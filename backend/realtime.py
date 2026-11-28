@@ -18,15 +18,17 @@ PROTOCOL = 'tacticlens.monitor.v1'
 HEARTBEAT_SECONDS = 15
 CLIENT_IDLE_SECONDS = 40
 CHANNEL = 'tacticlens_monitor_v1'
-DOMAINS = ('sesiones', 'analisis', 'iocs', 'mitre', 'salvaguardas', 'incidentes', 'respuesta_incidentes', 'panel')
+DOMAINS = ('sesiones', 'analisis', 'iocs', 'mitre', 'salvaguardas', 'incidentes', 'respuesta_incidentes', 'avisos_incidentes', 'panel')
 logger = logging.getLogger(__name__)
 
 
-def notify_change(conn, sensors, *domains, events=(), received_at=None):
+def notify_change(conn, sensors, *domains, events=(), received_at=None, recipients=None):
     """Register a small invalidation on the write transaction itself."""
     payload = {'sensores': sorted({str(sensor) for sensor in sensors}), 'dominios': sorted(set(domains)),
                'eventos': [event for event in events[:100] if type(event) is int],
                'recibido_api': received_at}
+    if recipients is not None:
+        payload['destinatarios'] = sorted({str(user) for user in recipients})
     conn.execute(text('SELECT pg_notify(:channel, :payload)'),
                  {'channel': CHANNEL, 'payload': json.dumps(payload, separators=(',', ':'))})
 
@@ -68,10 +70,15 @@ class PostgresMonitor:
                 return None
             domains = [domain for domain in DOMAINS if domain in domains]
             if not set(sensors) <= self.sensors:
-                domains = [domain for domain in domains if domain not in ("incidentes", "respuesta_incidentes")]
+                domains = [domain for domain in domains if domain not in ("incidentes", "respuesta_incidentes", "avisos_incidentes")]
             if not domains:
                 return None
             notice = {'dominios': domains}
+            if 'avisos_incidentes' in domains:
+                recipient_ids = value.get('destinatarios')
+                if not isinstance(recipient_ids, list) or not recipient_ids:
+                    return None
+                notice['destinatarios'] = recipient_ids
             if 'sesiones' in domains:
                 events = value.get('eventos') or []
                 if isinstance(events, list):
@@ -114,8 +121,12 @@ class MonitorHub:
 
     def _broadcast(self, notice):
         self.revision += 1
-        notice = {**notice, 'revision': self.revision, 'epoca': self.epoch}
-        for _, queue in tuple(self.clients.values()):
+        recipients = notice.get('destinatarios')
+        notice = {**{key: value for key, value in notice.items() if key != 'destinatarios'},
+                  'revision': self.revision, 'epoca': self.epoch}
+        for user, queue in tuple(self.clients.values()):
+            if recipients is not None and user not in recipients:
+                continue
             # Coalesce invalidations, never durable events. Slow tabs resync SQL.
             if queue.full():
                 previous = queue.get_nowait()

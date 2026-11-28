@@ -235,6 +235,8 @@ function IncidentDetail({id}:{id:string}) {
       <h1 className="text-2xl font-bold">{current.titulo}</h1>
       <p className="muted">{decisions[current.decision]} · {current.severidad??'Por determinar'} · {priorities[current.prioridad]}</p>
       {responseEligible(current)&&<Link className="btn inline-flex" to={path+'/respuesta'}>Abrir plan de respuesta</Link>}
+      {!responseEligible(current)&&current.decision==='actividad_sospechosa'&&
+        <Link className="btn-secondary inline-flex" to={path+'/respuesta'}>Consultar borradores de respuesta</Link>}
     </header>
     {error&&<p role="alert">{error}</p>}{historyError&&<p role="alert">{historyError}</p>}
     <section className="panel p-4 space-y-3">

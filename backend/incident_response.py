@@ -1,6 +1,8 @@
 """Transactional response operations. The incident aggregate belongs to D1."""
 from importlib import import_module
+from datetime import datetime
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -8,6 +10,7 @@ from sqlalchemy import func, null, select
 
 from .auth.store import approved, audit, identity, session
 from .incident_response_models import Evaluation
+from .incident_notices import response_notice
 from .realtime import notify_change
 from .sensitive import session_redactors
 
@@ -128,7 +131,9 @@ class ResponseContext:
                 "eventos": [item.id_evento for item in self.evaluation.evidencias[:20]],
             }
         return self.safe({**(dict(self.plan) if self.plan else {}), **self.header(), "borrador": draft,
-                          "elegible": self.eligible, "evaluacion": self.evaluation.model_dump(mode="json")})
+                          "automatizacion_disponible": "incidente_borrador" in self.tables,
+                          "progreso": response_progress(self), "elegible": self.eligible,
+                          "evaluacion": self.evaluation.model_dump(mode="json")})
 
     def has_plan(self):
         if self.plan is None:
@@ -229,6 +234,31 @@ def open_plan(ctx, body):
     return ctx.view()
 
 
+def today_local():
+    return datetime.now(ZoneInfo("America/Guayaquil")).date()
+
+
+def response_progress(ctx):
+    incident = ctx.tables.get("incidente")
+    created = ctx.conn.scalar(select(incident.c.creado_en).where(
+        incident.c.id_incidente == ctx.id_incidente)) if incident is not None else None
+    age = max(0, int((datetime.now(created.tzinfo) - created).total_seconds())) if created else None
+    if not ctx.plan:
+        return {"segundos_desde_identificacion": age}
+    action = ctx.tables["incidente_accion"]
+    due = ((action.c.vence_en < today_local()) & action.c.estado.in_(("aprobada", "en_curso")))
+    rows = ctx.conn.execute(select(action.c.estado, func.count(), func.count().filter(due))
+        .where(action.c.id_respuesta == ctx.plan.id_respuesta).group_by(action.c.estado)).all()
+    counts = {state: count for state, count, _ in rows}
+    total = sum(counts.values())
+    finished = sum(counts.get(state, 0) for state in TERMINAL)
+    current = ctx.eligible and not ctx.header()["desactualizada"]
+    return {"total": total, "estados": counts, "vencidas": sum(n for _, _, n in rows),
+            "porcentaje_finalizado": round(100 * finished / total) if total else 0,
+            "segundos_desde_identificacion": age, "listo_resolver": current and ctx.plan.estado == "en_respuesta" and finished == total,
+            "listo_cerrar": current and ctx.plan.estado == "resuelto" and bool(ctx.plan.resolucion)}
+
+
 def add_action(ctx, proposal, reason, *, origin="manual", key=None, provenance=None, reference=None):
     citations = ctx.citations(proposal.eventos)
     if not citations and not reference:
@@ -236,12 +266,16 @@ def add_action(ctx, proposal, reason, *, origin="manual", key=None, provenance=N
     if proposal.fase in ctx.plan.fases_no_aplicables:
         raise HTTPException(422, "La fase está marcada como no aplicable en el plan")
     actions = ctx.tables["incidente_accion"]
+    if "prioridad" not in actions.c and proposal.fase in {"investigacion", "mitigacion"}:
+        raise HTTPException(422, "Esta fase requiere la migración 018")
     if key:
         previous = ctx.conn.execute(select(actions).where(actions.c.id_respuesta == ctx.plan.id_respuesta,
                                                           actions.c.clave_origen == key)).mappings().first()
         if previous:
             return previous
     fields = proposal.model_dump(include={"fase", "medida", "objetivo", "justificacion", "criterio_verificacion"})
+    if "prioridad" in actions.c:
+        fields["prioridad"] = getattr(proposal, "prioridad", "media")
     action = ctx.conn.execute(actions.insert().values(
         **ctx.safe(fields), origen=origin, clave_origen=key, procedencia=ctx.safe(provenance or {}),
         id_respuesta=ctx.plan.id_respuesta, id_incidente=ctx.id_incidente, revision_origen=ctx.revision,
@@ -263,9 +297,10 @@ def update_action(ctx, row, **values):
                                     actualizado_en=func.clock_timestamp()).returning(actions)).mappings().one()
 
 
-def wip_available(conn, tables):
+def wip_available(conn, tables, *, lock=True):
     config, actions = (tables[name] for name in ("incidente_respuesta_config", "incidente_accion"))
-    wip = conn.execute(select(config).with_for_update()).mappings().one()
+    query = select(config)
+    wip = conn.execute(query.with_for_update() if lock else query).mappings().one()
     return not wip.wip_activo or conn.scalar(select(func.count()).select_from(actions)
                                             .where(actions.c.estado == "en_curso")) < wip.limite_wip
 
@@ -304,6 +339,9 @@ def action_transition(ctx, row, body):
         raise HTTPException(422, "Documente las actuaciones realizadas antes de cancelar")
     if operation == "iniciar":
         eligible_assignee(ctx.conn, ctx.request, row.id_responsable)
+        related = (row.procedencia or {}).get("dependencias", [])
+        if any(ctx.action(UUID(value)).estado != "verificada" for value in related):
+            ctx.conflict("Verifique las acciones predecesoras antes de iniciar", row)
         if not wip_available(ctx.conn, ctx.tables):
             ctx.conflict("Se alcanzó el límite WIP", row)
     citations = ctx.citations(body.eventos)
@@ -316,6 +354,7 @@ def action_transition(ctx, row, body):
                "responsable_anterior": str(row.id_responsable) if row.id_responsable else None,
                "responsable": str(updated.id_responsable) if updated.id_responsable else None},
                updated.id_accion)
+    response_notice(ctx, operation, updated, row)
     return ctx.safe(dict(updated))
 
 
@@ -388,4 +427,5 @@ def transition_plan(ctx, body):
     ctx.change_plan(**values)
     ctx.record(op, body.motivo, {"estado_anterior": prior, "estado": target, "resolucion_anterior": prior_resolution,
                                "resultado": body.resultado, "referencia": body.referencia}, advance=False)
+    response_notice(ctx, op)
     return ctx.view()

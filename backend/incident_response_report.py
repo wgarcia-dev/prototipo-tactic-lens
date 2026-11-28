@@ -23,6 +23,7 @@ def limited(conn, query, order):
 def assemble(ctx):
     ctx.has_plan()
     plan = ctx.plan
+    draft = plan.get("detalle_plan", {})
     evaluation = ctx.read_evaluation(plan.revision_plan) if ctx.revision != plan.revision_plan else ctx.evaluation
     action, evidence, history, users = (ctx.tables[name] for name in (
         "incidente_accion", "incidente_accion_evidencia", "incidente_respuesta_historial", "usuario"))
@@ -49,11 +50,14 @@ def assemble(ctx):
                      f"{c.procedencia.get('sensor') or 'Origen sin verificar'} · {c.grado}")
                     for c in evaluation.evidencias[:LIMIT]]),
         section("Plan y criterio de cierre",
-                [plan.objetivo, plan.alcance, plan.criterio_cierre, f"Responsable: {names.get(plan.id_responsable, 'Sin asignar')}"],
+                [plan.objetivo, plan.alcance, plan.criterio_cierre, f"Responsable: {names.get(plan.id_responsable, 'Sin asignar')}",
+                 *[str(draft[key]) for key in ("titulo", "resumen", "estrategia", "resultado_esperado", "criterio_resolucion") if draft.get(key)],
+                 f"Origen: {plan.get('origen', 'manual')}"],
                 ("Fase no aplicable", "Motivo"), sorted(plan.fases_no_aplicables.items())),
         section("Acciones", [] if actions else ["No hay acciones registradas."],
                 ("Acción", "Fase y estado", "Responsable", "Criterio de verificación"),
-                [(f"{a.medida}\n{a.id_accion}\n{a.justificacion}", f"{a.fase} · {a.estado}",
+                [(f"{a.medida}\n{a.id_accion}\n{a.justificacion}\n{a.procedencia.get('resultado_esperado', '')}",
+                  f"{a.fase} · {a.estado} · {a.get('prioridad', 'media')} · {a.vence_en or 'Sin plazo'}",
                   names.get(a.id_responsable, "Sin asignar"), a.criterio_verificacion) for a in actions]),
         section("Evidencia y resultados", [] if citations else ["No hay evidencia de actuaciones."],
                 ("Acción", "Tipo", "Cita o referencia", "Revisión"),

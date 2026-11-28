@@ -1,5 +1,7 @@
-export const phases = {contencion:'Contención', erradicacion:'Erradicación',
-  recuperacion:'Recuperación', verificacion:'Verificación'} as const
+export const phases = {investigacion:'Investigación', contencion:'Contención', erradicacion:'Erradicación',
+  recuperacion:'Recuperación', mitigacion:'Mitigación', verificacion:'Verificación'} as const
+export const priorities={baja:'Baja',media:'Media',alta:'Alta',inmediata:'Inmediata'} as const
+export const origins={manual:'Manual',llm:'IA',historica:'Histórica'} as const
 export const actionStates = {propuesta:'Propuesta', aprobada:'Aprobada', rechazada:'Rechazada',
   en_curso:'En curso', ejecutada:'Ejecutada', verificada:'Verificada', cancelada:'Cancelada'} as const
 export const planStates = {sin_respuesta:'Sin respuesta', en_respuesta:'En respuesta',
@@ -29,6 +31,9 @@ export type Plan = {
   objetivo?:string;alcance?:string;criterio_cierre?:string;id_responsable?:string|null;
   borrador?:{objetivo:string;alcance:string;criterio_cierre:string;eventos:string[]}|null;
   fases_no_aplicables?:Partial<Record<Phase,string>>;resolucion?:Record<string,string|null>|null;
+  automatizacion_disponible?:boolean;origen?:keyof typeof origins;detalle_plan?:Record<string,string>;
+  progreso?:{total?:number;estados?:Partial<Record<ActionState,number>>;vencidas?:number;porcentaje_finalizado?:number;
+    segundos_desde_identificacion?:number|null;listo_resolver?:boolean;listo_cerrar?:boolean};
 }
 export type Evidence = {id_evidencia:string;id_evento:string|null;id_sesion:string|null;tipo:string;referencia:string|null}
 export type Action = {
@@ -36,12 +41,15 @@ export type Action = {
   justificacion:string;criterio_verificacion:string;id_responsable:string|null;responsable:string|null;vence_en:string|null;
   revision_accion:number;revision_validada:number;revision_evaluacion_actual:number;
   estado_respuesta:keyof typeof planStates;desactualizada:boolean;evidencia?:Evidence[];hay_mas_evidencia?:boolean;
+  codigo_incidente?:string;codigo_accion?:string;prioridad?:keyof typeof priorities;origen_plan?:keyof typeof origins;
+  vencida?:boolean;procedencia?:{descripcion?:string;resultado_esperado?:string;mitre?:string[];dependencias?:string[]};
 }
 export type History = {id_cambio:string;id_accion:string|null;operacion:string;motivo:string;actor:string;
   creado_en:string;revision_evaluacion:number;detalle:Record<string,unknown>}
-export type Person = {id_usuario:string;nombre_usuario:string}
+export type Person = {id_usuario:string;nombre_usuario:string;carga?:number;en_curso?:number}
 export type Page<T> = {items:T[];cursor:string|null}
-export type Config = {wip_activo:boolean;limite_wip:number;revision_config:number}
+export type Config = {wip_activo:boolean;limite_wip:number;revision_config:number;
+  automatizacion_disponible?:boolean;generacion_habilitada?:boolean}
 export type Lot = {id_lote:string;estado:string;error_codigo:string|null;resultado:{acciones:string[];abstencion:string|null}|null}
 export type Antecedent = {id_analisis:string;posicion:number;id_salvaguarda:string|null;
   importable:boolean;recomendacion:{salvaguarda?:string;objetivo?:string}}

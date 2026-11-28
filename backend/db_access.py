@@ -32,12 +32,18 @@ RESPONSE_GRANTS = {
                     ("SELECT", "INSERT")),
     "incidente_respuesta_config": ("SELECT", "UPDATE"),
 }
+RESPONSE_AUTOMATION_GRANTS = {
+    "incidente_borrador": ("SELECT", "INSERT", "UPDATE"),
+    "incidente_borrador_version": ("SELECT", "INSERT"),
+    "incidente_aviso": ("SELECT", "INSERT", "UPDATE"),
+}
 
 
 def runtime_grants(existing):
     existing = set(existing)
     grants = dict(RUNTIME_GRANTS)
-    for group, label in ((INCIDENT_GRANTS, "evaluación"), (RESPONSE_GRANTS, "respuesta")):
+    for group, label in ((INCIDENT_GRANTS, "evaluación"), (RESPONSE_GRANTS, "respuesta"),
+                         (RESPONSE_AUTOMATION_GRANTS, "automatización de respuesta")):
         present = existing & group.keys()
         if present and present != group.keys():
             raise RuntimeError(f"El esquema de {label} de incidentes está incompleto")
@@ -45,6 +51,8 @@ def runtime_grants(existing):
             grants.update(group)
     if existing & RESPONSE_GRANTS.keys() and not INCIDENT_GRANTS.keys() <= existing:
         raise RuntimeError("La respuesta requiere la evaluación de incidentes")
+    if existing & RESPONSE_AUTOMATION_GRANTS.keys() and not RESPONSE_GRANTS.keys() <= existing:
+        raise RuntimeError("La automatización requiere el esquema de respuesta")
     return grants
 
 

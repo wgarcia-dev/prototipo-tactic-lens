@@ -105,12 +105,15 @@ async def lifespan(app: FastAPI):
     from .auth.notifications import drain_outbox
     outbox = (asyncio.create_task(drain_outbox(app))
               if os.getenv("MAIL_OUTBOX_ENABLED", "true").lower() == "true" else None)
+    from .incident_automation import drain
+    automation = asyncio.create_task(drain(app)) if "incidente_borrador" in tables else None
     try:
         yield
     finally:
-        if outbox:
-            outbox.cancel()
-            await asyncio.gather(outbox, return_exceptions=True)
+        workers = [task for task in (outbox, automation) if task is not None]
+        for task in workers:
+            task.cancel()
+        await asyncio.gather(*workers, return_exceptions=True)
         await run_in_threadpool(monitor.close)
         engine.dispose()
 
@@ -219,6 +222,7 @@ from . import routes  # noqa: E402,F401 - registers extended routes
 from .safeguards import router as safeguards_router
 from .incident_routes import router as incidents_router
 from .incident_response_routes import router as incident_response_router, board as incident_response_board
+from .incident_automation_routes import router as incident_drafts, board as incident_automation_board
 from .auth.routes import router as auth_router
 from .auth.middleware import AuthMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -229,6 +233,8 @@ app.include_router(safeguards_router)
 app.include_router(incidents_router)
 app.include_router(incident_response_router)
 app.include_router(incident_response_board)
+app.include_router(incident_drafts)
+app.include_router(incident_automation_board)
 from .auth.onboarding import router as onboarding_router
 app.include_router(onboarding_router)
 from .auth.recovery import router as recovery_router

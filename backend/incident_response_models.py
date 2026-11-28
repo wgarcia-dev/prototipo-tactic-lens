@@ -8,7 +8,8 @@ ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=3
 Description = Annotated[str, StringConstraints(strip_whitespace=True, min_length=8, max_length=2000)]
 EventId = Annotated[str, StringConstraints(pattern=r"^[1-9][0-9]{0,18}$")]
 Revision = Annotated[int, Field(strict=True, ge=1, le=2147483647)]
-Phase = Literal["contencion", "erradicacion", "recuperacion", "verificacion"]
+Phase = Literal["investigacion", "contencion", "erradicacion", "recuperacion", "mitigacion", "verificacion"]
+Priority = Literal["baja", "media", "alta", "inmediata"]
 ActionState = Literal["propuesta", "aprobada", "en_curso", "ejecutada", "verificada", "rechazada", "cancelada"]
 
 
@@ -94,6 +95,7 @@ class Proposal(Model):
 
 class ActionInput(Proposal, Change):
     referencia: Description | None = None
+    prioridad: Priority = "media"
 
 
 class ActionTransition(Change):

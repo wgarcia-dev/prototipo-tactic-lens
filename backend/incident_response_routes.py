@@ -1,3 +1,4 @@
+from datetime import timedelta
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -9,10 +10,11 @@ from . import incident_response_recommendations as llm, incident_response_report
 from .api import local_only, sensor_ids
 from .auth.store import audit
 from .db_access import RESPONSE_GRANTS
+from .incident_notices import workload
 from .incident_response import (ResponseContext, action_transition, active_plan, add_action,
-                                eligible_actor, open_plan, require_admin, review_plan, transition_plan)
+                                eligible_actor, open_plan, require_admin, review_plan, today_local, transition_plan)
 from .incident_response_models import (ActionInput, ActionState, ActionTransition, BoardConfig, Change,
-                                       ImportProposal, PlanInput, PlanReview, PlanTransition, Proposal)
+                                       ImportProposal, PlanInput, PlanReview, PlanTransition, Priority, Proposal)
 from .realtime import notify_change
 from .safeguard_risk import recommendation_references
 
@@ -72,12 +74,19 @@ def user_names(conn, tables, ids):
 
 def action_view(ctx, row, names):
     item = {key: value for key, value in row.items() if key != "clave_origen"}
+    source = "historica" if row.origen in {"salvaguarda", "analisis"} else ctx.plan.get("origen", "manual")
+    if source != "historica" and row.origen == "llm":
+        source = "llm"
     return ctx.safe({**item, "orden": str(row.orden), "responsable": names.get(row.id_responsable),
+                     "codigo_incidente": "INC-" + str(row.id_incidente)[:8], "codigo_accion": f"AC-{row.orden}",
+                     "origen_plan": source, "vencida": bool(row.vence_en and row.vence_en < today_local() and
+                         row.estado in {"aprobada", "en_curso"}),
                      "incidente_titulo": ctx.evaluation.titulo, "estado_respuesta": ctx.plan.estado,
                      "revision_evaluacion_actual": ctx.revision, "desactualizada": ctx.header()["desactualizada"]})
 
 
-def list_actions(conn, request, id_incidente, estado, id_responsable, limite, cursor):
+def list_actions(conn, request, id_incidente, estado, id_responsable, limite, cursor, *, prioridad=None,
+                 vencimiento=None, origen=None, mias=False):
     tables = request.app.state.tables
     actions = tables["incidente_accion"]
     visible = {}
@@ -91,8 +100,30 @@ def list_actions(conn, request, id_incidente, estado, id_responsable, limite, cu
         query = query.where(actions.c.id_incidente == id_incidente)
     if estado:
         query = query.where(actions.c.estado.in_(estado))
+    if mias:
+        id_responsable = UUID(str(request.state.user["id_usuario"]))
     if id_responsable:
         query = query.where(actions.c.id_responsable == id_responsable)
+    if prioridad:
+        query = query.where(actions.c.prioridad == prioridad) if "prioridad" in actions.c else query.where(prioridad == "media")
+    if vencimiento:
+        today = today_local()
+        criteria = {"vencida": actions.c.vence_en < today, "proxima": actions.c.vence_en.between(today, today + timedelta(days=2)),
+                    "sin_fecha": actions.c.vence_en.is_(None)}
+        query = query.where(criteria[vencimiento])
+        if vencimiento != "sin_fecha":
+            query = query.where(actions.c.estado.in_(("aprobada", "en_curso")))
+    if origen:
+        plan = tables["incidente_respuesta"]
+        historical = actions.c.origen.in_(("salvaguarda", "analisis"))
+        generated = actions.c.origen == "llm"
+        if "origen" in plan.c:
+            past = select(plan.c.id_respuesta).where(plan.c.origen == "historica")
+            ai = select(plan.c.id_respuesta).where(plan.c.origen == "llm")
+            historical |= actions.c.id_respuesta.in_(past)
+            generated |= actions.c.id_respuesta.in_(ai)
+        query = query.where({"historica": historical, "llm": ~historical & generated,
+                             "manual": ~historical & ~generated}[origen])
     before = cursor_value(cursor)
     if before is not None:
         query = query.where(actions.c.orden < before)
@@ -128,9 +159,12 @@ def get_actions(id_incidente: UUID, request: Request, limite: Limit = 25, cursor
 
 @board.get("/acciones")
 def board_actions(request: Request, limite: Limit = 25, cursor: Cursor = None, id_incidente: UUID | None = None,
-                  estado: Annotated[list[ActionState] | None, Query(max_length=7)] = None, id_responsable: UUID | None = None):
+                  estado: Annotated[list[ActionState] | None, Query(max_length=7)] = None, id_responsable: UUID | None = None,
+                  prioridad: Priority | None = None, vencimiento: Literal["vencida", "proxima", "sin_fecha"] | None = None,
+                  origen: Literal["manual", "llm", "historica"] | None = None, mias: bool = False):
     with request.app.state.engine.connect() as conn:
-        return list_actions(conn, request, id_incidente, estado, id_responsable, limite, cursor)
+        return list_actions(conn, request, id_incidente, estado, id_responsable, limite, cursor, prioridad=prioridad,
+                            vencimiento=vencimiento, origen=origen, mias=mias)
 
 
 @router.post("/acciones", status_code=201)
@@ -217,6 +251,10 @@ def import_proposal(id_incidente: UUID, body: ImportProposal, request: Request):
             raise HTTPException(422, "La recomendación requiere revisión manual") from None
         provenance = {"id_analisis": str(source["id_analisis"]), "posicion": source["posicion"],
                       "id_salvaguarda": str(source["id_salvaguarda"]) if source["id_salvaguarda"] else None}
+        if from_legacy:
+            historical = ctx.tables["salvaguarda"]
+            provenance.update(estado_anterior=conn.scalar(select(historical.c.estado).where(
+                historical.c.id_salvaguarda == source["id_salvaguarda"])), eventos=proposal.eventos)
         key = ("salvaguarda:" + provenance["id_salvaguarda"] if provenance["id_salvaguarda"]
                else f"analisis:{provenance['id_analisis']}:{source['posicion']}")
         row = add_action(ctx, proposal, body.motivo, origin="salvaguarda" if from_legacy else "analisis",
@@ -296,7 +334,11 @@ def report(id_incidente: UUID, request: Request, formato: Literal["json", "pdf",
 
 @board.get("/responsables")
 def assignees(request: Request):
-    user, roles = (request.app.state.tables[name] for name in ("usuario", "rol"))
+    tables = request.app.state.tables
+    if "incidente_borrador" in tables and request.state.user["rol"] == "administrador":
+        with request.app.state.engine.connect() as conn:
+            return workload(conn, tables, sensor_ids())
+    user, roles = (tables[name] for name in ("usuario", "rol"))
     query = select(user.c.id_usuario, user.c.nombre_usuario).join(roles, user.c.id_rol == roles.c.id_rol).where(
         roles.c.codigo.in_(("analista", "administrador")), roles.c.activo, user.c.activo,
         func.coalesce(user.c.restriccion_acceso, "") == "", user.c.autorizacion == "aprobado",
@@ -307,9 +349,12 @@ def assignees(request: Request):
 
 @board.get("/configuracion")
 def get_config(request: Request):
-    config = request.app.state.tables["incidente_respuesta_config"]
+    from .incident_automation import enabled
+    tables = request.app.state.tables
+    config = tables["incidente_respuesta_config"]
     with request.app.state.engine.connect() as conn:
-        return dict(conn.execute(select(config)).mappings().one())
+        return {**conn.execute(select(config)).mappings().one(), "automatizacion_disponible": "incidente_borrador" in tables,
+                "generacion_habilitada": "incidente_borrador" in tables and enabled()}
 
 
 @board.put("/configuracion")

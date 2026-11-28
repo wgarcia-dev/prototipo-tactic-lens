@@ -142,6 +142,20 @@ def message_for(conn, request, row, recovery_id=None):
         event = conn.execute(select(a, u.c.nombre_usuario).outerjoin(u,a.c.id_usuario==u.c.id_usuario).where(a.c.id_auditoria==row.id_auditoria)).mappings().first()
         if not event:
             return None
+        if event.tipo == "incidente_aviso_correo":
+            from ..api import sensor_ids
+            from ..incident_notices import visible_notices
+            account = identity(conn, request, event.id_usuario)
+            if not approved(account) or account.correo != row.destinatario or "incidente_aviso" not in request.app.state.tables:
+                return None
+            notices = table(request, "incidente_aviso")
+            reference = event.metadatos.get("request_id")
+            if not reference or not conn.scalar(select(notices.c.id_aviso).where(
+                    notices.c.id_aviso == UUID(reference), *visible_notices(request.app.state.tables, sensor_ids(), account.id_usuario))):
+                return None
+            return account.id_usuario, "TacticLens · Actuación pendiente de consulta", (
+                "Tiene un aviso sobre sus actuaciones en TacticLens. Consulte la plataforma con su sesión habitual:\n"
+                + request.app.state.auth_settings.public_url + "/respuesta-incidentes"), None
         title = EVENTS.get(event.tipo, "Intentos reiterados de autenticación")
         if event.tipo == "autenticacion_limitada":
             title = "Acceso limitado temporalmente por intentos de autenticación"

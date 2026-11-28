@@ -7,10 +7,20 @@ from starlette.websockets import WebSocketDisconnect
 
 import test_auth as fixtures
 from backend.api import app
-from backend.realtime import MonitorHub, PROTOCOL
+from backend.realtime import MonitorHub, PROTOCOL, notify_change
 
 
 class HubTests(unittest.IsolatedAsyncioTestCase):
+    async def test_incident_notifications_stay_private_to_the_recipient(self):
+        hub = MonitorHub()
+        _, owner = hub.subscribe("authorized-user")
+        _, other = hub.subscribe("another-user")
+        hub._broadcast({"tipo": "cambio", "dominios": ["avisos_incidentes"], "destinatarios": ["authorized-user"]})
+        self.assertTrue(other.empty())
+        notice = owner.get_nowait()
+        self.assertEqual(notice["dominios"], ["avisos_incidentes"])
+        self.assertNotIn("destinatarios", notice)
+
     async def test_coalesces_slow_clients_and_releases_slots(self):
         hub = MonitorHub()
         key, queue = hub.subscribe('user')
@@ -42,23 +52,20 @@ class RealtimeTests(fixtures.AuthFixture):
         self.denied(protocol='other')
         self.denied(path='/api/monitor/ws?token=forbidden')
 
-    def test_committed_ingestion_notifies_once_duplicate_does_not_publish(self):
+    def test_ingestion_queues_only_one_invalidation_on_its_transaction(self):
         self.enroll(98)
         with self.ws() as ws:
             self.assertEqual(ws.receive_json()['tipo'],'listo')
             raw={'session':'ws-fixture','eventid':'cowrie.command.input','timestamp':self.clock.isoformat(),
                  'input':'echo websocket','_collector':{'source_id':'ws-fixture:1'}}
-            response=self.client.post('/api/ingesta/eventos',headers={'X-API-Key':app.state.api_key},json={'eventos':[raw]})
-            self.assertEqual(response.status_code,200)
-            notice=ws.receive_json()
-            self.assertEqual(notice['tipo'],'cambio')
-            self.assertEqual(notice['eventos'],[response.json()['confirmaciones'][0]['id_evento']])
-            self.assertIn('confirmado_api',notice)
-            self.assertNotIn('input',str(notice))
-            with patch.object(app.state.monitor_hub,'publish') as publish:
+            with patch('backend.realtime.notify_change', wraps=notify_change) as publish:
+                response=self.client.post('/api/ingesta/eventos',headers={'X-API-Key':app.state.api_key},json={'eventos':[raw]})
+                self.assertEqual(response.status_code,200)
                 duplicate=self.client.post('/api/ingesta/eventos',headers={'X-API-Key':app.state.api_key},json={'eventos':[raw]})
                 self.assertEqual(duplicate.json()['duplicados'],1)
-                publish.assert_not_called()
+                publish.assert_called_once()
+                self.assertEqual(list(publish.call_args.kwargs['events']), [response.json()['confirmaciones'][0]['id_evento']])
+                self.assertNotIn('input',str(publish.call_args.kwargs))
             self.assertEqual(len(app.state.monitor_hub.clients),1)
         self.assertEqual(len(app.state.monitor_hub.clients),0)
 
@@ -67,12 +74,13 @@ class RealtimeTests(fixtures.AuthFixture):
         with self.ws() as ws:
             ws.receive_json()
             self.post('/logout')
-            app.state.monitor_hub.publish({'confirmaciones':[{'estado':'insertado','id_evento':1}]},self.clock.isoformat())
+            app.state.monitor_hub.loop.call_soon_threadsafe(app.state.monitor_hub._broadcast,
+                {'tipo':'cambio','dominios':['avisos_incidentes']})
             with self.assertRaises(WebSocketDisconnect) as caught:ws.receive_json()
             self.assertEqual(caught.exception.code,4401)
 
     def test_failed_transaction_never_publishes(self):
-        with patch('backend.ingestion.persist',side_effect=RuntimeError('fixture')),patch.object(app.state.monitor_hub,'publish') as publish:
+        with patch('backend.ingestion.persist',side_effect=RuntimeError('fixture')),patch('backend.realtime.notify_change') as publish:
             with self.assertRaises(RuntimeError):
                 from backend.api import persist_events
                 persist_events([{}])

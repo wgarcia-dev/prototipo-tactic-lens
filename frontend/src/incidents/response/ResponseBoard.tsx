@@ -1,11 +1,11 @@
-import {useState,type FormEvent} from 'react'
+import {useEffect,useState,type FormEvent} from 'react'
 import {Link} from 'react-router-dom'
 import {useDraggable,useDroppable} from '@dnd-kit/core'
 import {BoardDrawer,KanbanInteraction} from '../../analysis/SafeguardBoard'
 import {api,mutate} from '../../auth/client'
 import {useAuth} from '../../auth/context'
 import {useMonitorQuery} from '../../monitoring/Realtime'
-import {actionStates,available,columns,dateTime,laneOf,lanes,laneStates,moves,operations,pathFor,phases,
+import {actionStates,available,columns,dateTime,laneOf,lanes,laneStates,moves,operations,origins,pathFor,phases,priorities,
   type Action,type Config,type History,type Lane,type Operation,type Page,type Person} from './model'
 
 const DOMAIN=['respuesta_incidentes'] as const
@@ -61,8 +61,11 @@ function Card({action,draggable,open}: {action:Action;draggable:boolean;open:()=
     <div className="kanban-card-head">
       <button className="kanban-card-main text-left" aria-haspopup="dialog" onClick={open}>
         <strong className="accent block break-words">{action.medida}</strong>
+        {action.codigo_accion&&<span className="kanban-card-meta">{action.codigo_incidente} · {action.codigo_accion}</span>}
         <span className="kanban-card-meta">{phases[action.fase]} · {actionStates[action.estado]}</span>
+        {action.prioridad&&<span className="kanban-card-meta">{priorities[action.prioridad]} · {origins[action.origen_plan??'manual']}</span>}
         <span className="kanban-card-meta muted">{action.responsable??'Sin asignar'}{action.vence_en&&' · Vence '+action.vence_en}</span>
+        {action.vencida&&<span className="badge warn">Vencida</span>}
       </button>
       {draggable&&<button className="kanban-grip" type="button" ref={drag.setActivatorNodeRef} {...drag.attributes}
         {...drag.listeners} aria-label={'Mover '+action.medida}>⠿</button>}
@@ -128,6 +131,10 @@ function ActionEditor({initial,requested,people,onClose,onSaved}:{
     <p className="text-sm muted">{phases[action.fase]} · {actionStates[action.estado]}</p>
     <p className="text-sm muted">Revisión de evaluación validada · {action.revision_validada}</p>
     <p>{action.objetivo}</p><p>{action.justificacion}</p>
+    {action.procedencia?.descripcion&&<p>{action.procedencia.descripcion}</p>}
+    {action.procedencia?.resultado_esperado&&<p><strong>Resultado esperado</strong> {action.procedencia.resultado_esperado}</p>}
+    {!!action.procedencia?.mitre?.length&&<p>MITRE {action.procedencia.mitre.join(', ')}</p>}
+    {!!action.procedencia?.dependencias?.length&&<p>Acciones predecesoras {action.procedencia.dependencias.length}</p>}
     <p><strong>Criterio de verificación</strong> {action.criterio_verificacion}</p>
     {action.desactualizada&&<p className="badge warn">Plan desactualizado</p>}
     {error&&<p role="alert">{error}</p>}
@@ -165,7 +172,31 @@ function ActionEditor({initial,requested,people,onClose,onSaved}:{
   </BoardDrawer>
 }
 
-export function ResponseBoard({incident,refresh=0,onChanged}:{incident?:string;refresh?:number;onChanged?:()=>void}) {
+function HistoricalDrafts({enabled}:{enabled:boolean}){
+  const [preview,setPreview]=useState<{id_incidente:string}[]>(),[queued,setQueued]=useState<number>(),
+    [error,setError]=useState(''),[busy,setBusy]=useState(false)
+  async function submit(vista_previa:boolean){
+    setBusy(true);setError('')
+    try {
+      const result=await mutate<{items:{id_incidente:string}[];total:number}>('/respuestas-incidentes/automatizacion/retrospectiva',
+        {limite:21,vista_previa})
+      if(vista_previa){setPreview(result.items);setQueued(undefined)}
+      else{setQueued(result.total);setPreview(undefined)}
+    }catch(failure){setError((failure as Error).message)}finally{setBusy(false)}
+  }
+  return <details className="panel p-3"><summary>Borradores para candidatos históricos</summary>
+    <div className="space-y-2 mt-2"><button className="btn-secondary" disabled={busy} onClick={()=>void submit(true)}>Previsualizar lote histórico</button>
+      {preview&&<p>{preview.length} candidatos con evidencia verificable y sin borrador.</p>}
+      {!!preview?.length&&<ul className="text-sm max-h-48 overflow-auto">{preview.map(item=><li key={item.id_incidente}>
+        <Link className="accent underline" to={pathFor(item.id_incidente)}>INC-{item.id_incidente.slice(0,8)}</Link></li>)}</ul>}
+      {!!preview?.length&&<button className="btn" disabled={!enabled||busy} onClick={()=>void submit(false)}>Encolar borradores en DeepSeek</button>}
+      {!enabled&&<p className="muted">La generación con DeepSeek está deshabilitada.</p>}
+      {queued!==undefined&&<p role="status">{queued} borradores encolados.</p>}
+      {error&&<p role="alert">{error}</p>}</div>
+  </details>
+}
+
+export function ResponseBoard({incident,actionId,refresh=0,onChanged}:{incident?:string;actionId?:string|null;refresh?:number;onChanged?:()=>void}) {
   const {session}=useAuth()
   const admin=session?.usuario.rol==='administrador', actor=session?.usuario.id_usuario
   const [pages,setPages]=useState(empty)
@@ -173,14 +204,24 @@ export function ResponseBoard({incident,refresh=0,onChanged}:{incident?:string;r
   const [people,setPeople]=useState<Person[]>([]), [config,setConfig]=useState<Config>()
   const [error,setError]=useState(''), [loading,setLoading]=useState(true), [saving,setSaving]=useState(false)
   const [refreshLocal,reload]=useState(0)
-  const [filter,setFilter]=useState({incident:incident??'',person:'',state:''})
+  const [filter,setFilter]=useState({incident:incident??'',person:'',state:'',prioridad:'',origen:'',vencimiento:'',mias:false})
   const [selected,setSelected]=useState<{action:Action;operation?:Operation}>()
+  useEffect(()=>{
+    if(!incident||!actionId)return
+    const controller=new AbortController()
+    api<Action>(pathFor(incident)+'/acciones/'+encodeURIComponent(actionId),{signal:controller.signal})
+      .then(action=>{if(!controller.signal.aborted)setSelected({action})})
+      .catch(failure=>{if(!controller.signal.aborted)setError(failure.message)})
+    return ()=>controller.abort()
+  },[incident,actionId])
   const boardPath='/respuestas-incidentes/acciones'
   function query(lane:Lane,cursor?:string) {
     const params=new URLSearchParams({limite:'12'})
     for(const state of laneStates[lane])if(!filter.state||filter.state===state)params.append('estado',state)
     if(filter.incident)params.set('id_incidente',filter.incident)
     if(filter.person)params.set('id_responsable',filter.person)
+    if(filter.mias)params.set('mias','true')
+    for(const key of ['prioridad','origen','vencimiento'] as const)if(filter[key])params.set(key,filter[key])
     if(cursor)params.set('cursor',cursor)
     return boardPath+'?'+params
   }
@@ -211,8 +252,9 @@ export function ResponseBoard({incident,refresh=0,onChanged}:{incident?:string;r
     event.preventDefault()
     const form=new FormData(event.currentTarget)
     setPages(empty);setDepths({});setLoading(true)
-    setFilter({incident:incident??String(form.get('incidente')??'').trim(),person:String(form.get('responsable')??''),
-      state:String(form.get('estado')??'')})
+    setFilter({...filter,incident:incident??String(form.get('incidente')??'').trim(),person:String(form.get('responsable')??''),
+      state:String(form.get('estado')??''),prioridad:String(form.get('prioridad')??''),origen:String(form.get('origen')??''),
+      vencimiento:String(form.get('vencimiento')??'')})
   }
   const allowed=(action:Action)=>Object.keys(moves(action,admin,actor)) as Lane[]
   async function saveConfig(event:FormEvent<HTMLFormElement>){
@@ -221,23 +263,37 @@ export function ResponseBoard({incident,refresh=0,onChanged}:{incident?:string;r
     const form=new FormData(event.currentTarget)
     setSaving(true)
     try {
-      setConfig(await mutate<Config>('/respuestas-incidentes/configuracion',{revision_esperada:config.revision_config,
-        wip_activo:form.has('activo'),limite_wip:Number(form.get('limite'))},'PUT'))
+      const saved=await mutate<Config>('/respuestas-incidentes/configuracion',{revision_esperada:config.revision_config,
+        wip_activo:form.has('activo'),limite_wip:Number(form.get('limite'))},'PUT')
+      setConfig({...config,...saved})
       setError('')
     } catch(failure) {setError((failure as Error).message)}
     finally {setSaving(false)}
   }
   return <section className="space-y-4">
-    <div className="flex justify-between flex-wrap gap-3"><h2 className="font-semibold text-xl">Tablero de respuesta</h2>
+    <div className="flex justify-between flex-wrap gap-3"><h2 className="font-semibold text-xl">{filter.mias?'Mis acciones':'Tablero de respuesta'}</h2>
+      <button className="btn-secondary" aria-pressed={filter.mias} onClick={()=>{
+        setLoading(true);setDepths({});setFilter({...filter,mias:!filter.mias})
+      }}>{filter.mias?'Todas las acciones':'Mis acciones'}</button>
       {config&&<span className="badge">{config.wip_activo?'Límite WIP '+config.limite_wip:'Sin límite WIP'}</span>}</div>
     <form onSubmit={change} className="panel p-3 flex flex-wrap items-end gap-3">
       {!incident&&<label>Incidente<input className={input} name="incidente" placeholder="Identificador UUID"/></label>}
-      <label>Responsable<select className={input} name="responsable"><option value="">Todos</option>
+      <label>Responsable<select className={input} name="responsable" disabled={filter.mias}><option value="">Todos</option>
         {people.map(person=><option value={person.id_usuario} key={person.id_usuario}>{person.nombre_usuario}</option>)}</select></label>
       <label>Estado<select className={input} name="estado"><option value="">Todos</option>
         {Object.entries(actionStates).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label>
+      <label>Prioridad<select className={input} name="prioridad"><option value="">Todas</option>
+        {Object.entries(priorities).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label>
+      <label>Procedencia<select className={input} name="origen"><option value="">Todas</option>
+        {Object.entries(origins).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label>
+      <label>Vencimiento<select className={input} name="vencimiento"><option value="">Todos</option>
+        <option value="vencida">Vencida</option><option value="proxima">Próxima</option><option value="sin_fecha">Sin fecha</option></select></label>
       <button className="btn-secondary" disabled={saving}>Aplicar filtros</button>
     </form>
+    {admin&&people.some(person=>person.carga!==undefined)&&<details className="panel p-3"><summary>Carga por responsable</summary>
+      <ul className="mt-2">{people.map(person=><li key={person.id_usuario}>{person.nombre_usuario} · {person.carga} abiertas · {person.en_curso} en curso</li>)}</ul>
+    </details>}
+    {admin&&!incident&&config?.automatizacion_disponible&&<HistoricalDrafts enabled={!!config.generacion_habilitada}/>}
     {admin&&config&&!incident&&<details className="panel p-3"><summary>Configurar límite WIP</summary>
       <form key={config.revision_config} onSubmit={saveConfig} className="flex flex-wrap items-end gap-3 mt-2">
         <label><input type="checkbox" name="activo" defaultChecked={config.wip_activo}/> Límite activo</label>

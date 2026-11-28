@@ -132,7 +132,11 @@ def publish(conn, tables, incident_id, revision, fields, evidence, sids):
         conn.execute(cites.insert(), [dict(row, id_incidente=incident_id, revision_evaluacion=revision) for row in evidence])
     conn.execute(incidents.update().where(incidents.c.id_incidente == incident_id).values(
         revision_actual=revision, actualizado_en=func.clock_timestamp()))
-    notify_change(conn, [row.id_honeypot for row in sensor_rows], "incidentes", "respuesta_incidentes")
+    sensors = {row.id_honeypot for row in sensor_rows}
+    notify_change(conn, sensors, "incidentes", "respuesta_incidentes")
+    if "incidente_aviso" in tables:
+        from .incident_automation import on_evaluation
+        on_evaluation(conn, tables, incident_id, revision, checksum, sensors, fields["decision"], bool(evidence), detail)
 
 
 def related_incident(conn, tables, sensors, modes, session, evidence):

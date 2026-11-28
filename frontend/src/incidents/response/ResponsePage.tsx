@@ -1,12 +1,13 @@
 import {useEffect,useRef,useState,type FormEvent,type ReactNode} from 'react'
-import {Link,useParams} from 'react-router-dom'
+import {Link,useParams,useSearchParams} from 'react-router-dom'
 import {api,mutate} from '../../auth/client'
 import {useAuth} from '../../auth/context'
 import {useMonitorQuery} from '../../monitoring/Realtime'
 import {EvidenceLink,eventsFrom,input,ResponseBoard,Timeline} from './ResponseBoard'
 import {ResponseReport} from './ResponseReport'
+import {DraftPanel} from './DraftPanel'
 import {useLegacySafeguards} from '../../analysis/legacySafeguards'
-import {actionStates,pathFor,phases,planStates,type Action,type Antecedent,type Lot,type Page,type Person,type Phase,type Plan} from './model'
+import {actionStates,origins,pathFor,phases,planStates,priorities,type Action,type Antecedent,type Lot,type Page,type Person,type Phase,type Plan} from './model'
 import './response.css'
 
 const DOMAIN=['respuesta_incidentes'] as const
@@ -18,10 +19,11 @@ function Field({name,label,value='',required=true,short=false}:{name:string;labe
   </label>
 }
 
-function PhaseSelect({excluded}:{excluded?:Plan['fases_no_aplicables']}) {
+function PhaseSelect({excluded,automation=false}:{excluded?:Plan['fases_no_aplicables'];automation?:boolean}) {
   return <label className="block">Fase<select className={input} name="fase" required defaultValue="">
     <option value="">Seleccione una fase</option>
-    {Object.entries(phases).map(([key,label])=>!excluded?.[key as Phase]&&<option key={key} value={key}>{label}</option>)}
+    {Object.entries(phases).map(([key,label])=>(automation||!['investigacion','mitigacion'].includes(key))&&
+      !excluded?.[key as Phase]&&<option key={key} value={key}>{label}</option>)}
   </select></label>
 }
 
@@ -106,10 +108,13 @@ function CreateAction({plan,path,done}:{plan:Plan;path:string;done:()=>void}) {
   return <SaveForm label="Registrar propuesta" onSaved={done} run={form=>mutate(path+'/acciones',{
     revision_evaluacion:plan.revision_evaluacion_actual,revision_esperada:plan.revision_respuesta,
     fase:form.get('fase'),medida:form.get('medida'),objetivo:form.get('objetivo'),justificacion:form.get('justificacion'),
+    ...(plan.automatizacion_disponible?{prioridad:form.get('prioridad')}:{}),
     criterio_verificacion:form.get('criterio_verificacion'),motivo:form.get('motivo'),
     eventos:eventsFrom(form.get('eventos')),referencia:form.get('referencia')||null,
   })}>
-    <PhaseSelect excluded={plan.fases_no_aplicables}/><Field name="medida" label="Medida propuesta" short/>
+    <PhaseSelect excluded={plan.fases_no_aplicables} automation={plan.automatizacion_disponible}/><Field name="medida" label="Medida propuesta" short/>
+    {plan.automatizacion_disponible&&<label>Prioridad<select className={input} name="prioridad" defaultValue="media">
+      {Object.entries(priorities).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label>}
     <Field name="objetivo" label="Objetivo"/><Field name="justificacion" label="Justificación"/>
     <Field name="criterio_verificacion" label="Criterio de verificación"/><Field name="motivo" label="Motivo de registro"/>
     <label className="block">IDs de eventos de la evaluación<input name="eventos" className={input} placeholder="Separados por coma"/></label>
@@ -228,6 +233,7 @@ export function IncidentResponsePage() {
 }
 
 function IncidentResponse({id}:{id:string}) {
+  const [search]=useSearchParams()
   const {session}=useAuth()
   const admin=session?.usuario.rol==='administrador'
   const path=pathFor(id)
@@ -257,12 +263,21 @@ function IncidentResponse({id}:{id:string}) {
       {plan.desactualizada&&<span className="badge warn">Evaluación actualizada</span>}</div>
       {!plan.elegible&&<p className="muted">La evaluación actual no habilita nuevas acciones.</p>}
       {plan.id_respuesta&&<dl className="grid gap-3 sm:grid-cols-2">
+        {plan.detalle_plan?.titulo&&<div><dt className="font-semibold">Título del plan</dt><dd>{plan.detalle_plan.titulo}</dd></div>}
+        {plan.origen&&<div><dt className="font-semibold">Procedencia</dt><dd>{origins[plan.origen]}</dd></div>}
         <div><dt className="font-semibold">Objetivo</dt><dd>{plan.objetivo}</dd></div>
         <div><dt className="font-semibold">Alcance</dt><dd>{plan.alcance}</dd></div>
         <div><dt className="font-semibold">Criterio de cierre</dt><dd>{plan.criterio_cierre}</dd></div>
         <div><dt className="font-semibold">Versiones</dt><dd>Plan {plan.revision_plan} · Respuesta {plan.revision_respuesta}</dd></div>
         {plan.resolucion?.resultado&&<div><dt className="font-semibold">Resolución</dt><dd>{plan.resolucion.resultado}</dd></div>}
       </dl>}
+      {plan.progreso?.total!==undefined&&<div className="space-y-2">
+        <p><strong>Progreso</strong> {plan.progreso.porcentaje_finalizado}% finalizado · {plan.progreso.vencidas} vencidas</p>
+        <p className="muted">{Object.entries(actionStates).map(([state,label])=>label+' '+(plan.progreso!.estados?.[state as Action['estado']]??0)).join(' · ')}</p>
+        {plan.progreso.listo_resolver&&<p>Acciones regularizadas. Revise las evidencias para resolver.</p>}
+        {plan.progreso.listo_cerrar&&<p>Resolución documentada. Revise el criterio para cerrar.</p>}
+      </div>}
+      {plan.progreso?.segundos_desde_identificacion!=null&&<p className="muted">Tiempo desde la identificación · {Math.floor(plan.progreso.segundos_desde_identificacion/3600)} h</p>}
       {plan.evaluacion.evidencias.length>0&&<details><summary>Evidencias de evaluación</summary><ul className="mt-2">
         {plan.evaluacion.evidencias.map(c=><li key={c.id_evento}><EvidenceLink event={c.id_evento} session={c.id_sesion}/> · {c.grado}</li>)}
       </ul></details>}
@@ -275,11 +290,12 @@ function IncidentResponse({id}:{id:string}) {
       {editor==='plan'&&plan.elegible&&<PlanEditor key={formKey} plan={plan} path={path} onSaved={done}/>}
       {editor==='accion'&&editable&&<CreateAction key={formKey} plan={plan} path={path} done={done}/>}
     </section>
+    {plan.automatizacion_disponible&&<DraftPanel path={path} plan={plan} admin={admin} onChanged={done}/>}
     {plan.id_respuesta&&<>
       {admin&&<Lifecycle key={formKey} plan={plan} path={path} done={done}/>}
       <Recommendations plan={plan} path={path} admin={admin} done={()=>reload(value=>value+1)}/>
       <Antecedents key={formKey} plan={plan} path={path} admin={admin} done={done}/>
-      <ResponseBoard incident={id} refresh={revision} onChanged={done}/>
+      <ResponseBoard incident={id} actionId={search.get('accion')} refresh={revision} onChanged={done}/>
       <section className="panel p-4"><h2 className="font-semibold">Historial de actuaciones</h2><Timeline path={path+'/historial'}/></section>
       <ResponseReport path={path}/>
     </>}

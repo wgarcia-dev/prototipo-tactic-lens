@@ -12,7 +12,7 @@ import test_auth as fixtures
 from backend.api import app
 from backend.session_report import report_snapshot
 from backend.intelligence import backfill_detections, persist_observables
-from backend.routes import AnalysisResult, Finding, IocProposal, MitreProposal, mitre_catalog
+from backend.routes import AnalysisResult, Finding, IocProposal, MitreProposal, ensure_model, mitre_catalog
 from scripts import migrate
 from scripts.seed_catalog import seed_catalog
 
@@ -228,7 +228,7 @@ class CollaborativeIntegrationTests(fixtures.AuthFixture):
         self.assertNotEqual(first['id_sesion'],second['id_sesion'])
         self.assertEqual((first['tipo'],first['valor_normalizado']),('URL',earlier['url']))
         self.assertEqual(first['datos_originales']['password'],'[REDACTED]')
-        self.assertEqual(first['detalles'][0]['valor_original'],raw['url'])
+        self.assertEqual(first['detalles'][0]['valor_original'],'https://Artifacts.Corp.Local/file?x=%2F&y=2')
         self.assertEqual(first['detalles'][0]['comportamiento'],'descarga_registrada')
         self.assertEqual(second['detalles'][0]['comportamiento'],'descarga_fallida')
         event = app.state.tables['evento']
@@ -246,7 +246,7 @@ class CollaborativeIntegrationTests(fixtures.AuthFixture):
         raw = self.event(input='printf bundles.zip')
         event_id = self.ingest([raw])['confirmaciones'][0]['id_evento']
         sid = self.connection.scalar(select(t['evento'].c.id_sesion).where(t['evento'].c.id_evento==event_id))
-        model_id = self.connection.scalar(select(t['modelo_llm'].c.id_modelo).limit(1))
+        model_id = ensure_model(self.connection)
         aid = self.connection.scalar(t['analisis_llm'].insert().values(
             id_sesion=sid,id_modelo=model_id,estado='en_proceso',fecha_inicio=self.clock)
             .returning(t['analisis_llm'].c.id_analisis))

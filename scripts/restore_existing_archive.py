@@ -11,7 +11,7 @@ import uuid
 
 from dotenv import set_key
 from psycopg import sql
-from scripts.historical_database import ROOT, connect, inspect, run
+from scripts.historical_database import ROOT, configure_restored_roles, connect, inspect, run
 from scripts.portability import sha256
 
 PRIVATE = ROOT / '.local/restauracion'
@@ -79,7 +79,7 @@ def restore(archive):
     admin = dict(DATABASE_NAME='postgres', DATABASE_USER='postgres', DATABASE_HOST='127.0.0.1',
                  DATABASE_PORT='5432', DATABASE_PASSWORD=os.environ.pop('TACTICLENS_PG_ADMIN_PASSWORD'))
     db = 'tacticlens_historico_'+uuid.uuid4().hex[:8]
-    role = db+'_app'
+    role = db+'_owner'
     password = secrets.token_urlsafe(36)
     with connect(admin, autocommit=True) as conn:
         target_version = int(conn.execute('SHOW server_version_num').fetchone()[0])
@@ -117,7 +117,8 @@ def restore(archive):
             local['HONEYPOT_ID'] = str(sensors[0][0])
         result['unvalidated_constraints'] = conn.execute("SELECT count(*) FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace WHERE n.nspname='honeypot' AND NOT convalidated").fetchone()[0]
         result['encrypted_mfa_factors'] = conn.execute('SELECT count(*) FROM honeypot.auth_factor').fetchone()[0]
-    # Only the new application role credential is persisted, never postgres password.
+    local = configure_restored_roles(admin, local, PRIVATE)
+    # The regular configuration only contains the runtime role.
     config_path.touch(exist_ok=False)
     for key, value in local.items():
         set_key(config_path, key, value)

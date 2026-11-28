@@ -33,8 +33,8 @@ try {
 }
 & icacls.exe "$root/.env" /inheritance:r /grant:r "*${sid}:F" '*S-1-5-18:F' '*S-1-5-32-544:F' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Revise permisos de .env' }
-& ./.venv/Scripts/python.exe -m scripts.migrate
-if ($LASTEXITCODE -ne 0) { throw 'Migraciones pendientes: no se inicia la aplicación.' }
+& ./.venv/Scripts/python.exe -m scripts.db_roles
+if ($LASTEXITCODE -ne 0) { throw 'Permisos operativos pendientes: no se inicia la aplicación.' }
 & ./.venv/Scripts/python.exe -m scripts.demo_status --database
 if ($LASTEXITCODE -ne 0) { throw 'Verificación pendiente' }
 Write-Host 'Restauración y migraciones verificadas. 008 no se ejecutó. Ya puede iniciar TacticLens.'

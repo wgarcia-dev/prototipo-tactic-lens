@@ -1,16 +1,15 @@
 """Administratively approved, single-use password links; no plaintext token persistence."""
 from datetime import timedelta
 import hmac
-import smtplib
 
 from fastapi import APIRouter, Query, Request
 from sqlalchemy import case, select
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from . import mailer
+from .notifications import enqueue, recovery_secret
 from .schemas import PasswordToken, RecoveryDecision
-from .security import fingerprint, now, opaque_token
-from .service import notify, reauthenticate
+from .security import fingerprint, now
+from .service import reauthenticate
 from .store import (AuthError, approved, audit, identity, rate, require_admin, table, transaction)
 
 router = APIRouter(prefix="/api/auth", tags=["Recuperación supervisada"])
@@ -59,41 +58,24 @@ def create_request(conn, request, user, origin="recuperacion"):
 
 
 def send_approved_link(conn, request, user, record, actor, reason):
-    """Hold user/request locks through synchronous SMTP. No queue contains the token.
-
-    A failure invalidates the attempt and leaves the request pending for an explicit retry.
-    SMTP acceptance and DB commit are not a distributed transaction; an accepted mail can
-    still contain a dead link if the final DB commit fails. Never auto-send it twice.
-    """
+    """Register approval, token digest and outbox reference atomically."""
     settings = request.app.state.auth_settings
     q, t = table(request, "auth_solicitud_password"), table(request, "auth_token")
-    token = opaque_token()
+    token_id = uuid4()
+    token = recovery_secret(settings, record.id_solicitud, token_id)
     expires = now() + timedelta(seconds=settings.reset_seconds)
     conn.execute(t.update().where(t.c.id_usuario == user.id_usuario, t.c.proposito == "password", t.c.usado_en.is_(None)).values(
         usado_en=now(), estado_registro="inactivo"))
-    token_id = conn.scalar(t.insert().values(id_usuario=user.id_usuario, id_solicitud=record.id_solicitud,
+    conn.execute(t.insert().values(id_token=token_id, id_usuario=user.id_usuario, id_solicitud=record.id_solicitud,
         proposito="password", token_hash=fingerprint(settings, "password", token), vence_en=expires,
-        creado_por=actor).returning(t.c.id_token))
-    link = settings.public_url + "/recuperar#token=" + token
-    subject = "Cuenta autorizada: defina su contraseña" if record.origen == "alta" else "Recuperación aprobada: restablezca su contraseña"
-    content = ("Un administrador de seguridad aprobó su solicitud. Para establecer su contraseña, abra este enlace personal:\n"
-        + link + f"\n\nEl enlace caduca en {settings.reset_seconds // 60} minutos y solo puede utilizarse una vez. "
-        "No lo comparta. Abrirlo no cambia la contraseña; debe confirmar una nueva. "
-        "Google Authenticator seguirá siendo obligatorio. Si no solicitó esta operación, contacte al administrador.")
-    try:
-        mailer.deliver(settings, user.correo, subject, content)
-    except (OSError, smtplib.SMTPException, RuntimeError, ValueError):
-        conn.execute(t.update().where(t.c.id_token == token_id).values(usado_en=now(), estado_registro="inactivo"))
-        conn.execute(q.update().where(q.c.id_solicitud == record.id_solicitud).values(notificacion_estado="fallida", modificado_por=actor))
-        audit(conn, request, "recuperacion_envio_fallido", user.id_usuario, actor,
-              request_id=str(record.id_solicitud), resultado="fallida")
-        return False
+        creado_por=actor))
     conn.execute(q.update().where(q.c.id_solicitud == record.id_solicitud).values(estado="aprobada", resuelto_por=actor,
-        resuelto_en=now(), motivo_decision=reason, enlace_vence_en=expires, notificacion_estado="enviada",
-        notificado_en=now(), modificado_por=actor))
-    audit(conn, request, "recuperacion_aprobada", user.id_usuario, actor,
-        request_id=str(record.id_solicitud), reason=reason, resultado="enviada")
-    return True
+        resuelto_en=now(), motivo_decision=reason, enlace_vence_en=expires, notificacion_estado="pendiente",
+        notificado_en=None, modificado_por=actor))
+    reference = audit(conn, request, "recuperacion_aprobada", user.id_usuario, actor,
+        request_id=str(record.id_solicitud), reason=reason, resultado="pendiente")
+    return enqueue(conn, request, kind="recuperacion_enlace", destination=user.correo, event_id=reference,
+                   actor=actor, logical_key=f"recuperacion_enlace:{record.id_solicitud}")
 
 
 def validated_token(conn, request, raw):
@@ -107,7 +89,7 @@ def validated_token(conn, request, raw):
     record = conn.execute(select(t).where(t.c.id_token == record.id_token).with_for_update()).mappings().one()
     if (not approved(user) or record.usado_en or record.estado_registro != "vigente" or record.vence_en <= now()
         or not recovery or recovery.estado != "aprobada" or not recovery.enlace_vence_en
-        or recovery.enlace_vence_en <= now() or recovery.notificacion_estado != "enviada"
+        or recovery.enlace_vence_en <= now() or recovery.notificacion_estado not in {"enviada", "en_proceso", "incierto"}
         or not hmac.compare_digest(record.token_hash, hashed)):
         raise AuthError(400, INVALID_LINK)
     return user, record, recovery
@@ -139,7 +121,6 @@ def list_requests(request: Request, estado: str | None = None, limit: int = Quer
 @router.post("/admin/recuperaciones/{request_id}/resolver")
 def resolve_request(request_id: UUID, payload: RecoveryDecision, request: Request):
     from sqlalchemy import text
-    target, rejected = None, False
     with transaction(request) as conn:
         conn.execute(text("SELECT pg_advisory_xact_lock(724610902)"))
         _, actor = require_admin(conn, request)
@@ -160,19 +141,12 @@ def resolve_request(request_id: UUID, payload: RecoveryDecision, request: Reques
             raise AuthError(403, "Otro administrador debe resolver su recuperación")
         reauthenticate(conn, request, actor, payload)
         if payload.decision == "aprobar":
-            if not send_approved_link(conn, request, target, row, actor.id_usuario, payload.motivo.strip()):
-                raise AuthError(503, "No se pudo enviar el enlace. La solicitud sigue pendiente; puede volver a intentarlo.")
+            send_approved_link(conn, request, target, row, actor.id_usuario, payload.motivo.strip())
         else:
             conn.execute(q.update().where(q.c.id_solicitud == request_id).values(estado="rechazada", resuelto_por=actor.id_usuario,
                 resuelto_en=now(), motivo_decision=payload.motivo.strip(), estado_registro="inactivo", modificado_por=actor.id_usuario))
-            audit(conn, request, "recuperacion_rechazada", target.id_usuario, actor.id_usuario,
+            reference = audit(conn, request, "recuperacion_rechazada", target.id_usuario, actor.id_usuario,
                   request_id=str(request_id), reason=payload.motivo.strip(), resultado="rechazada")
-            rejected = True
-    delivered = True
-    if rejected:
-        delivered = notify(request, target.id_usuario, (target.correo, "Solicitud de recuperación rechazada",
-            "Un administrador no autorizó su solicitud de recuperación. No se emitió ningún enlace. Contacte al administrador por un canal conocido para revisar su caso."))
-        with transaction(request) as conn:
-            conn.execute(table(request, "auth_solicitud_password").update().where(q.c.id_solicitud == request_id).values(
-                notificacion_estado="enviada" if delivered else "fallida", notificado_en=now() if delivered else None))
-    return {"mensaje": "Solicitud resuelta", "notificacion_enviada": delivered}
+            enqueue(conn, request, kind="recuperacion_rechazo", destination=target.correo, event_id=reference,
+                    actor=actor.id_usuario, logical_key=f"recuperacion_rechazo:{request_id}")
+    return {"mensaje": "Solicitud resuelta", "notificacion_enviada": False, "notificacion_estado": "pendiente"}

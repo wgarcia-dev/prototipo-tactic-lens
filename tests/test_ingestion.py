@@ -31,12 +31,26 @@ class IngestionTests(fixtures.AuthFixture):
         self.connection.execute(app.state.tables['honeypot'].insert().values(
             id_honeypot=shell_id, nombre='shell-test', host='loopback'))
         with patch.object(app.state, 'instances', {'cowrie_shell': shell_id}):
-            result = self.ingest([event('port-routing-1', session='port-routing-test')])
-            self.assertEqual(result['insertados'], 1)
+            explicit = event('port-routing-explicit', session='port-routing-explicit', dst_port=2223)
+            explicit['_collector']['instance_id'] = 'cowrie_shell'
+            invalid = event('port-routing-invalid', session='port-routing-invalid')
+            invalid['_collector']['instance_id'] = None
+            self.ingest([invalid], status=422)
+            result = self.ingest([
+                event('port-routing-1', session='port-routing-test', dst_port='2222'),
+                explicit,
+                event('port-routing-unregistered', session='port-routing-unregistered', dst_port=2223),
+            ])
+            self.assertEqual(result['insertados'], 3)
             rows = self.client.get('/api/sesiones', params={'q': 'port-routing-test',
                 'modalidad': 'cowrie_shell'}).json()
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]['modalidad'], 'cowrie_shell')
+            self.assertEqual(len(self.client.get('/api/sesiones', params={'q': 'port-routing-explicit',
+                'modalidad': 'cowrie_shell'}).json()), 1)
+            fallback = self.client.get('/api/sesiones', params={'q': 'port-routing-unregistered'}).json()
+            self.assertEqual(len(fallback), 1)
+            self.assertNotEqual(fallback[0]['modalidad'], 'cowrie_proxy')
 
     def ingest(self,events,status=200):
         response=self.client.post('/api/ingesta/eventos',headers={'X-API-Key':app.state.api_key},json={'eventos':events})
@@ -78,6 +92,21 @@ class IngestionTests(fixtures.AuthFixture):
         e=app.state.tables['evento']
         ids=[r['id_evento'] for r in result['confirmaciones']]
         self.assertEqual(self.connection.execute(select(e.c.numero_secuencia).where(e.c.id_evento.in_(ids)).order_by(e.c.numero_secuencia)).scalars().all(),[1,2])
+
+    def test_sqlite_retry_across_instance_activation_keeps_historical_sensor(self):
+        sensor=uuid4()
+        self.connection.execute(app.state.tables['honeypot'].insert().values(id_honeypot=sensor,nombre='proxy',host='loopback'))
+        raw=event('sqlite:fixture:before-cutover')
+        original=self.ingest([raw])['confirmaciones'][0]['id_evento']
+        attributed={**raw,'_collector':{**raw['_collector'],'instance_id':'cowrie_proxy'}}
+        with patch.object(app.state,'instances',{'cowrie_proxy':sensor}):
+            response=self.ingest([attributed])
+            self.assertEqual(response['duplicados'],1)
+            self.assertEqual(response['confirmaciones'][0]['id_evento'],original)
+            self.assertEqual(self.ingest([{**attributed,'input':'different'}],422)['rechazados'],1)
+        e,s=(app.state.tables[name] for name in ('evento','sesion'))
+        self.assertEqual(self.connection.scalar(select(s.c.id_honeypot).join(e).where(e.c.id_evento==original)),
+                         app.state.honeypot_id)
 
     def test_old_31_bit_collision_no_longer_collides(self):
         result=self.ingest([event('auditoria:16451'),event('auditoria:51147')])

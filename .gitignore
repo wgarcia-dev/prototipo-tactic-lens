@@ -25,3 +25,7 @@ archive-inspection.sql
 *.fernet
 *.sqlite3
 *.key
+# Exportaciones operativas de Cowrie.
+/eventos_json_50.json
+/datasets/cowrie_sesiones_*.csv
+/datasets/cowrie_analizados_*.csv

@@ -57,16 +57,16 @@ class LiveTests(unittest.TestCase):
                     self.assertEqual(results[0]["insertados"], 1)
                     self.assertEqual(results[1]["duplicados"], 1)
                     self.assertEqual(len(results[0]["errores"]), 1)
-                    ioc, observation = (app.state.tables[name] for name in ("ioc", "observacion_ioc"))
-                    self.assertEqual(connection.scalar(select(func.count()).select_from(
-                        observation.join(ioc, observation.c.id_ioc == ioc.c.id_ioc)
-                    ).where(ioc.c.valor == "http://files.corp.local/a.sh")), 1)
                     session = app.state.tables["sesion"]
                     event = app.state.tables["evento"]
                     session_id = connection.scalar(select(session.c.id_sesion).where(session.c.cowrie_session_id == raw["session"]))
                     self.assertIsNotNone(session_id)
                     self.assertEqual(connection.scalar(select(func.count()).where(event.c.id_sesion == session_id)), 1)
                     event_id = connection.scalar(select(event.c.id_evento).where(event.c.id_sesion == session_id))
+                    ioc, observation = (app.state.tables[name] for name in ("ioc", "observacion_ioc"))
+                    self.assertEqual(connection.scalar(select(func.count()).select_from(
+                        observation.join(ioc, observation.c.id_ioc == ioc.c.id_ioc)
+                    ).where(ioc.c.valor == "http://files.corp.local/a.sh", observation.c.id_evento == event_id)), 1)
                     result = AnalysisResult(resumen="Comando de descarga observado", acciones=[Finding(
                         tipo="comando", descripcion="Descarga mediante shell", confianza=0.9, eventos=[event_id],
                         iocs=[IocProposal(tipo="URL", valor="http://files.corp.local/a.sh", evento=event_id)],
@@ -84,7 +84,8 @@ class LiveTests(unittest.TestCase):
                     self.assertEqual(len(details["acciones"]), 1)
                     self.assertEqual(len(details["acciones"][0]["mitre"]), 1)
                     self.assertEqual(connection.scalar(select(func.count()).select_from(app.state.tables["deteccion_ioc"]).where(app.state.tables["deteccion_ioc"].c.id_analisis == details["id_analisis"])), 1)
-                    current = client.get(f"/api/sesiones/{session_id}").json()
+                    with patch.dict("os.environ", model_configuration):
+                        current = client.get(f"/api/sesiones/{session_id}").json()
                     self.assertEqual(current["estado_analisis"], "analizada")
                     with patch.dict("os.environ", model_configuration), patch("backend.routes.real_result", side_effect=AssertionError("LLM should not be called")):
                         reused = client.post(f"/api/sesiones/{session_id}/analizar")
@@ -147,7 +148,8 @@ class LiveTests(unittest.TestCase):
                     self.assertEqual(retried.status_code, 200)
                     self.assertFalse(retried.json()["reutilizado"])
                     self.assertNotEqual(retried.json()["id_analisis"], analysis.json()["id_analisis"])
-                    self.assertEqual(client.get(f"/api/sesiones/{session_id}").json()["estado_analisis"], "analizada")
+                    with patch.dict("os.environ", model_configuration):
+                        self.assertEqual(client.get(f"/api/sesiones/{session_id}").json()["estado_analisis"], "analizada")
                     self.assertEqual(connection.scalar(select(func.count()).select_from(app.state.tables["ioc"]).where(app.state.tables["ioc"].c.valor == "http://files.corp.local/a.sh")), 1)
 
                     # A second request cannot start while a current attempt is in progress.

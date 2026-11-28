@@ -11,6 +11,7 @@ from sqlalchemy import Date, String, and_, case, cast, func, literal, or_, selec
 from sqlalchemy.dialects.postgresql import JSONB
 
 from .correlation import action_link, action_observable_query, mapping_query, mitre_link
+from .intelligence_metrics import calendar_series, technique_count
 from .rag.mitre_evidence import AUTO_CLASSIFICATION
 
 
@@ -102,9 +103,7 @@ def mapping_rows(tables, sensors, instances, filters):
         statement = statement.where(session.c.id_sesion == filters.id_sesion)
     if filters.modalidad:
         statement = statement.where(modality == filters.modalidad)
-    if filters.estado == 'confirmada':
-        statement = statement.where(mapping.c.estado_revision == 'confirmado')
-    elif filters.estado:
+    if filters.estado:
         statement = statement.where(state == filters.estado)
     if filters.plataforma:
         statement = statement.where(cast(technique.c.plataformas, JSONB).contains([filters.plataforma]))
@@ -129,7 +128,8 @@ def counters(rows):
         func.count().label('mapeos'),
         func.count().filter(rows.origen_automatico, rows.estado_identificacion != 'descartada').label('automaticas'),
         func.count().filter(rows.estado_revision == 'confirmado').label('confirmadas'),
-        func.count().filter(rows.estado_identificacion == 'historica_pendiente').label('pendientes'),
+        func.count().filter(rows.estado_revision == 'pendiente').label('pendientes'),
+        func.count().filter(~rows.origen_automatico).label('historicas'),
         func.count().filter(rows.estado_identificacion == 'descartada').label('descartadas'),
         func.count().filter(rows.citas > 0).label('con_citas'),
         func.count().filter(rows.citas == 0).label('sin_citas'),
@@ -176,10 +176,12 @@ def breakdown(conn, rows, *fields):
                                             .group_by(*fields).order_by(*fields)).mappings()]
 
 
-def timeline(conn, rows):
+def timeline(conn, rows, filters):
     day = cast(func.timezone('America/Guayaquil', rows.primera_aparicion), Date).label('fecha')
     source = case((rows.citas > 0, 'evento_citado'), else_='inicio_sesion').label('origen_fecha')
-    return breakdown(conn, rows, day, source)
+    zero = {field.name: 0 for field in counters(rows)}
+    return calendar_series(breakdown(conn, rows, day, source), 'fecha', {**zero,'origen_fecha':'sin_actividad'},
+                           start=filters.desde, end=filters.hasta)
 
 
 def totals(conn, tables, rows):
@@ -188,7 +190,7 @@ def totals(conn, tables, rows):
         refs.join(rows, refs.c.id_mapeo == rows.c.id_mapeo)).correlate(None).scalar_subquery())
     rows = rows.c
     values = conn.execute(select(
-        func.count(func.distinct(rows.codigo_tecnica)).label('tecnicas'),
+        technique_count(rows).label('tecnicas'),
         func.count(func.distinct(rows.codigo_tactica)).label('tacticas'),
         func.count(func.distinct(rows.id_sesion)).label('sesiones'),
         func.count(func.distinct(rows.id_accion)).label('acciones'),
@@ -199,14 +201,17 @@ def totals(conn, tables, rows):
     return dict(values)
 
 
-def analytics(conn, tables, statement):
+def analytics(conn, tables, statement, filters=None):
+    filters = filters or MitreFilters()
     rows = statement.subquery().c
+    series, period = timeline(conn, rows, filters)
     return {
         'totales': totals(conn, tables, rows.codigo_tecnica.table),
         'tacticas': breakdown(conn, rows, rows.codigo_tactica, rows.tactica),
         'modalidades': breakdown(conn, rows, rows.modalidad),
         'estados': breakdown(conn, rows, rows.estado_identificacion),
-        'evolucion': timeline(conn, rows),
+        'evolucion': series, 'periodo_evolucion': period,
+        'poblacion': {'unidad':'técnica distinta con mapeo registrado', 'filtros':filters.model_dump()},
         'recurrentes': [dict(row) for row in conn.execute(technique_groups(statement, 'sesiones').limit(8)).mappings()],
     }
 

@@ -48,10 +48,16 @@ try {
     calls.push([path,url.search])
     const data={
       '/api/auth/me':auth,'/api/auth/csrf':auth,'/api/health':{},
+      '/api/mitre/clasificadores':{version:'fixture',clasificadores:[{codigo:'T1033',nombre:technique.tecnica,
+        version:'1',modalidades:['cowrie_shell'],tacticas:['TA0007'],minimo_evidencias_distintas:1,
+        limitacion:'Contrato sintético de descubrimiento de usuario.',presente_en_catalogo:true}]},
       '/api/mitre/resumen':overview,'/api/mitre/matriz':url.searchParams.get('catalogo')==='true'?cells:cells.slice(0,1),
       '/api/mitre/tecnicas':[technique],'/api/mitre/tecnicas/T1033':{...overview,catalogo},
       '/api/mitre/tecnicas/T1033/sesiones':[session],'/api/mitre/mapeos':[mapping],
       '/api/mitre/mapeos/map1/observables':{mapeo:mapping,observables:[],hay_mas:false},
+      '/api/propuestas-salvaguardas':[{id_analisis:'analysis1',id_sesion:'session1',cowrie_session_id:'cowrie-one',
+        codigo:'SG-001',estado:'propuesta',fecha_inicio:d,fecha_analisis:d,id_salvaguarda:'task1',
+        ficha:{title:'Propuesta sintética vinculada',rows:[['Código','SG-001']]},historial:[],total:1}],
     }[path]??[]
     return r.respond({status:200,contentType:'application/json',body:JSON.stringify(data)})
   })
@@ -59,6 +65,8 @@ try {
   const click=(tag,text)=>page.evaluate((tag,text)=>[...document.querySelectorAll(tag)].find(node=>node.innerText.trim().includes(text))?.click(),tag,text)
   await page.goto(origin+'/mitre',{waitUntil:'domcontentloaded'})
   await wait('ATT&CK Enterprise 20.1')
+  await click('summary','Contratos de evidencia MITRE ATT&CK')
+  await wait('Contrato sintético de descubrimiento de usuario.')
   await page.screenshot({path:join(build,'mitre-resumen.png')})
   await click('summary','Matriz MITRE ATT&CK')
   await wait('Incluir catálogo vigente')
@@ -98,6 +106,11 @@ try {
   await page.type('input[name=q]','T1033')
   await click('button','Aplicar filtros')
   await page.waitForFunction(()=>new URLSearchParams(location.search).get('q')==='T1033',{timeout:7000})
+  await page.goto(origin+'/salvaguardas/propuestas?analisis=analysis1',{waitUntil:'domcontentloaded'})
+  await wait('Propuesta sintética vinculada')
+  assert.ok(calls.some(([path,query])=>path==='/api/propuestas-salvaguardas'&&query.includes('id_analisis=analysis1')))
+  assert.equal(await page.$$eval('a[href="/salvaguardas?id=task1"]',nodes=>nodes.length),1)
+  assert.equal(await page.$$eval('summary',nodes=>nodes.filter(node=>node.innerText.includes('Registrar seguimiento')).length),0)
   assert.deepEqual(errors,[])
   console.log('Flujo Chromium verificado. Capturas:',build)
 } finally { await browser.close() }

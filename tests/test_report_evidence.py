@@ -19,17 +19,16 @@ class EvidenceReportTests(TestCase):
                 self.event(3,'cowrie.client.kex',hassh='701158e75b508e76f0410d5d22ef9df0'),
                 self.event(4,'cowrie.login.success'),self.event(5,'cowrie.command.input',input='whoami')]
         result=complete_assessment(self.report(),events,SimpleNamespace(ip_origen='192.168.56.1'),
-            {'informe':{'fases':[{'eventos':[5]}]}},5)
+            {'informe':{'fases':[{'eventos':[5]}]}},5, modality='cowrie_proxy')
         text=str(result)
         self.assertIn('50557',text)
         self.assertIn('701158e75b508e76f0410d5d22ef9df0',text)
-        self.assertIn('Proxy hacia Alpine/QEMU',text)
+        self.assertIn('cowrie_proxy',text)
         self.assertIn('Pendiente de verificación independiente',text)
         self.assertIn('PasswordAuthentication no',text)
         self.assertIn('auditd',text)
         self.assertIn('H01',text)
-        self.assertNotIn('La severidad del incidente es baja',text)
-        self.assertIn('Por determinar por el analista',text)
+        self.assertIn('La severidad del incidente es baja',text)
 
     def test_absence_is_qualified_and_transfer_is_not_automatically_exfiltration(self):
         events=[self.event(1,'cowrie.session.file_download',url='http://host/file')]
@@ -38,5 +37,6 @@ class EvidenceReportTests(TestCase):
         self.assertIn('Una descarga hacia el señuelo indica ingreso',text)
 
     def test_unknown_port_does_not_assign_a_mode(self):
-        result=complete_assessment(self.report(),[],SimpleNamespace(ip_origen='10.0.0.2'),{},0)
-        self.assertIn('Modo pendiente de identificar',str(result))
+        events=[self.event(1,'cowrie.session.connect',dst_port=2223)]
+        result=complete_assessment(self.report(),events,SimpleNamespace(ip_origen='10.0.0.2'),{},0)
+        self.assertIn('desconocido',str(result))

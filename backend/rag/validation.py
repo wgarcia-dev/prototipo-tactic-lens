@@ -1,6 +1,6 @@
 """Ground proposals in retrieved official definitions and deterministic evidence."""
 from .mitre_evidence import (
-    ATTEMPT, AUTO_CLASSIFICATION, CONTRACTS, OBSERVED, VALIDATOR_VERSION,
+    ATTEMPT, AUTO_CLASSIFICATION, CONTRACTS, OBSERVED, SOURCE_LIMITATIONS, VALIDATOR_VERSION,
     collect_evidence, telemetry,
 )
 
@@ -38,7 +38,15 @@ def _validate_proposal(proposal, candidate, cited, action_events, events, matche
         return 'evidencia_insuficiente', 'Los eventos citados no sustentan la técnica'
     cited_ids = set(cited)
     selected = {eid: signal for eid, signal in matches.items() if eid in cited_ids}
-    if not any(group.keys() == selected.keys() for group in contract.groups(selected)):
+    if contract.sequence:
+        bounded = {eid: signal for eid, signal in matches.items()
+                   if eid in cited_ids or signal.step == 'contradiccion'}
+        supported = any(set(contract.sequence_witness(group)) == cited_ids for group in contract.groups(bounded))
+        if not supported and any(set(contract.sequence_witness(group)) == cited_ids for group in contract.groups(selected)):
+            return 'evidencia_contradictoria', 'Otro evento de la sesión contradice la secuencia citada'
+    else:
+        supported = any(group.keys() == selected.keys() for group in contract.groups(selected))
+    if not supported:
         return 'evidencia_ambigua', 'Las citas no componen un grupo de observaciones suficiente'
     grade = OBSERVED if all(signal.grade == OBSERVED for signal in selected.values()) else ATTEMPT
     if proposal.grado_evidencia == OBSERVED and grade != OBSERVED:
@@ -48,23 +56,41 @@ def _validate_proposal(proposal, candidate, cited, action_events, events, matche
 
 def validate(result, events, context):
     candidates = {row['codigo_tecnica']: row for row in context['candidatos']}
+    children_by_parent = {}
+    for code, candidate in candidates.items():
+        if parent := candidate.get('tecnica_padre_id'):
+            children_by_parent.setdefault(parent, []).append(code)
     rejected, provenance = [], {}
     by_id = {event.id_evento: event for event in events}
     delivered = set(context.get('eventos_entregados', by_id)) & by_id.keys()
     modality = context.get('modalidad', 'desconocido')
-    matches = collect_evidence((event for eid, event in by_id.items() if eid in delivered), modality)
+    matches = collect_evidence(events, modality)
     for index, action in enumerate(result.acciones):
         action_events = set(action.eventos)
         if not action_events <= delivered:
             raise ValueError('Evidencia ajena a la sesión o al muestreo')
         action.eventos = list(dict.fromkeys(action.eventos))
         accepted, seen = [], set()
+        proposed_codes = {proposal.codigo for proposal in action.mitre}
         for proposal in action.mitre:
             candidate = candidates.get(proposal.codigo)
             cited = list(dict.fromkeys(proposal.eventos))
-            pair = (proposal.codigo, proposal.codigo_tactica)
             failure, detail = _validate_proposal(proposal, candidate, cited, action_events, by_id,
                                                 matches.get(proposal.codigo, {}), modality)
+            children = children_by_parent.get(proposal.codigo, ())
+            if failure is None and set(children).isdisjoint(proposed_codes):
+                eligible = []
+                for child in children:
+                    refined = proposal.model_copy(update={'codigo': child})
+                    child_failure, child_grade = _validate_proposal(
+                        refined, candidates[child], cited, action_events, by_id, matches.get(child, {}), modality
+                    )
+                    if child_failure is None:
+                        eligible.append((refined, child_grade))
+                if len(eligible) == 1:
+                    proposal, detail = eligible[0]
+                    candidate = candidates[proposal.codigo]
+            pair = (proposal.codigo, proposal.codigo_tactica)
             if failure is None and pair in seen:
                 failure, detail = 'duplicada', 'Propuesta duplicada; se conserva una sola asociación'
             if failure:
@@ -76,23 +102,45 @@ def validate(result, events, context):
                 continue
             seen.add(pair)
             contract = CONTRACTS[proposal.codigo]
-            proposal.eventos = cited
+            if contract.sequence:
+                cited_ids = set(cited)
+                proposal.eventos = [eid for eid in matches[proposal.codigo] if eid in cited_ids]
+            else:
+                proposal.eventos = cited
             proposal.grado_evidencia = detail
             limitation = contract.observed_limitation if detail == OBSERVED else contract.limitation
-            if modality == 'desconocido':
-                limitation += ' La modalidad histórica no está registrada.'
-            proposal.limitaciones = [*proposal.limitaciones, limitation]
+            scope = SOURCE_LIMITATIONS[modality]
+            status = 'Resultado registrado por Cowrie' if detail == OBSERVED else 'Intento sustentado por los eventos'
+            proposal.comportamiento_observado = contract.minimum
+            proposal.justificacion = f'{status}. {contract.minimum}'
+            proposal.limitaciones = [limitation, scope]
             accepted.append(proposal)
             provenance[(index, *pair)] = {
                 'metodo': context['metodo'], 'catalogo': context['catalogo'], 'modelo_embeddings': context['modelo_embeddings'],
                 'stix_id': candidate['stix_id'], 'version_objeto': candidate.get('version_objeto'),
                 'definicion_sha256': candidate['objeto_sha256'], 'nombre_oficial': candidate['nombre'],
                 'puntuacion_hibrida': candidate['puntuacion_hibrida'], 'similitud_vectorial': candidate['similitud_vectorial'],
-                'eventos': cited, 'citas_explicitas': True, 'limitaciones': proposal.limitaciones,
+                'eventos': proposal.eventos, 'citas_explicitas': True, 'limitaciones': proposal.limitaciones,
                 'clasificacion': AUTO_CLASSIFICATION, 'version_validador': VALIDATOR_VERSION, 'modalidad': modality,
+                'alcance_sensor': scope, 'grado_evidencia': detail,
                 'contrato_evidencia': proposal.codigo, 'version_contrato': contract.version, 'rasgo_validado': contract.tag,
                 'comportamiento_observado': proposal.comportamiento_observado,
                 'advertencia': 'Identificación automática; confianza y similitud no son probabilidades de ataque',
             }
         action.mitre = accepted
+    children = {}
+    for (_, code, _), entry in provenance.items():
+        if parent := candidates[code].get('tecnica_padre_id'):
+            children.setdefault(parent, []).append(set(entry['eventos']))
+    for index, action in enumerate(result.acciones):
+        retained = []
+        for proposal in action.mitre:
+            if any(set(proposal.eventos) <= evidence for evidence in children.get(proposal.codigo, ())):
+                del provenance[(index, proposal.codigo, proposal.codigo_tactica)]
+                rejected.append({'codigo': proposal.codigo, 'codigo_tactica': proposal.codigo_tactica,
+                                 'estado': 'descartada', 'causa': 'padre_redundante', 'eventos': proposal.eventos,
+                                 'motivo': 'Las mismas citas sustentan una subtécnica oficial más específica'})
+            else:
+                retained.append(proposal)
+        action.mitre = retained
     return rejected, provenance

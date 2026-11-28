@@ -1,8 +1,9 @@
-import {useEffect,useState} from 'react'
+import {useState} from 'react'
+import {useMonitorQuery} from '../monitoring/Realtime'
 import {Link} from 'react-router-dom'
 import {api} from '../auth/client'
 import {Chart,Stats,mitreDate,modalities} from './MitreDashboard'
-import {eventEvidencePath,reviewLabels,scopeLabels,sessionEvidencePath,type IocReviewState} from './iocEvidence'
+import {enrichmentStatusLabel,eventEvidencePath,reviewLabels,scopeLabels,sessionEvidencePath,type IocReviewState} from './iocEvidence'
 
 export const IOC_FILTERS=['q','tipo','estado','alcance','modalidad','sesion','sensor','evento','tecnica','tactica',
   'evidencia','relacion','desde','hasta','orden'] as const
@@ -47,15 +48,15 @@ export function withFilters(path:string,filter:string) {
 function useExplorer<T>(path:string,revision=0) {
   const [response,setResponse]=useState<{path:string;data?:T;error?:string}>()
   const [attempt,refresh]=useState(0)
-  useEffect(()=>{
-    const controller=new AbortController()
-    api<T>(path,{signal:controller.signal}).then(data=>{
-      if(!controller.signal.aborted)setResponse({path,data})
-    }).catch((error:Error)=>{
-      if(!controller.signal.aborted)setResponse({path,error:error.message})
-    })
-    return ()=>controller.abort()
-  },[path,attempt,revision])
+  useMonitorQuery(async signal=>{
+    try {
+      const data=await api<T>(path,{signal})
+      if(!signal.aborted)setResponse({path,data})
+    } catch(error) {
+      if(!signal.aborted)setResponse({path,error:(error as Error).message})
+      throw error
+    }
+  },5000,[path,attempt,revision],['iocs'])
   return {...(response?.path===path?response:undefined),retry:()=>{setResponse(undefined);refresh(n=>n+1)}}
 }
 
@@ -174,7 +175,7 @@ export function IocProfile({id,filter,revision}: {id:string;filter:string;revisi
       <p className="muted text-xs mt-2">Resultados guardados durante análisis anteriores. Un resultado externo aporta contexto de reputación y requiere corroboración. Este módulo solo lee datos persistidos.</p>
       {data.enriquecimiento.resultados.length?<ul className="mt-3 space-y-2 text-xs">
         {data.enriquecimiento.resultados.map((entry,index)=><li key={entry.proveedor+index} className="border-l line pl-3">
-          <strong>{({threatfox:'ThreatFox',urlhaus:'URLhaus',misp_warning_lists:'MISP Warning Lists'} as Record<string,string>)[entry.proveedor]??entry.proveedor}</strong> · {entry.estado??entry.resultado??'Sin resultado'}
+          <strong>{({threatfox:'ThreatFox',urlhaus:'URLhaus',misp_warning_lists:'MISP Warning Lists'} as Record<string,string>)[entry.proveedor]??entry.proveedor}</strong> · {enrichmentStatusLabel(entry.estado??entry.resultado)}
           <p className="muted">{[entry.nombre,entry.motivo,entry.consultado_en&&mitreDate(entry.consultado_en)].filter(Boolean).join(' · ')}</p>
           <Link className="accent underline" to={sessionEvidencePath(entry.id_sesion)+'?'+new URLSearchParams({analisis:entry.id_analisis})}>Análisis de procedencia</Link>
         </li>)}

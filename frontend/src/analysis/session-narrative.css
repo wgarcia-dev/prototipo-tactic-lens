@@ -45,3 +45,9 @@
   .session-workspace .session-narrative > section:last-child > ul { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .session-workspace .session-narrative > section:last-child > dl { grid-template-columns:repeat(4,minmax(0,1fr)); }
 }
+
+.badge.analysis-severity { background:#313b4b; color:#e1e7f0; }
+.badge.analysis-severity[data-severity="S1"] { background:#1f4536; color:#a8efd0; }
+.badge.analysis-severity[data-severity="S2"] { background:#4a3c20; color:#f7dc8d; }
+.badge.analysis-severity[data-severity="S3"] { background:#542f1f; color:#ffc796; }
+.badge.analysis-severity[data-severity="S4"] { background:#552735; color:#ffbbbf; }

@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from backend.analysis_report import (BehaviorReport, needs_report_upgrade,
                                      observation_context, validate_report_evidence)
+from backend.analysis_execution import AnalysisFailure
 from backend.routes import AnalysisResult, real_result
 
 
@@ -53,7 +54,7 @@ class AnalysisReportTests(unittest.TestCase):
     def provider(self, content, finish="stop"):
         response = Mock()
         response.json.return_value = {"choices": [{"finish_reason": finish, "message": {"content": content}}]}
-        return patch("backend.routes.httpx.post", return_value=response)
+        return patch("backend.routes.post_provider", return_value=response)
 
     def test_provider_request_redacts_credentials_and_carries_computed_context(self):
         content = json.dumps({"resumen": "Intento de descarga sin resultado confirmado.", "acciones": [], "informe": report_data()})
@@ -72,9 +73,65 @@ class AnalysisReportTests(unittest.TestCase):
         }])
         self.assertEqual(facts["eventos"][0]["datos"]["password"], "[REDACTED]")
         self.assertEqual(facts["contexto_calculado"]["comandos"], 1)
-        self.assertEqual(facts['tecnicas_mitre_permitidas'][0]['codigo_tecnica'],'T1059.004')
+        self.assertEqual(facts['tecnicas_mitre_permitidas'], [])  # The candidate lacks an admissible witness.
+        self.assertNotIn('input',facts['eventos'][1]['datos'])
         self.assertEqual(request["max_tokens"], 8192)
         self.assertEqual(request["response_format"], {"type": "json_object"})
+
+    def test_prompt_includes_semantic_commands_and_tty_citation_without_path(self):
+        at = self.events[1].fecha_hora
+        self.events.extend([
+            SimpleNamespace(id_evento=43,tipo_evento="cowrie.command.input",fecha_hora=at+timedelta(seconds=1),
+                            datos_originales={"input":"pwd","src_ip":"10.10.10.11"}),
+            SimpleNamespace(id_evento=44,tipo_evento="cowrie.log.closed",fecha_hora=at+timedelta(seconds=2),
+                            datos_originales={"ttylog":"/tmp/report-private-path.tty"}),
+        ])
+        content = json.dumps({"resumen":"Informe","acciones":[],"informe":report_data()})
+        with self.provider(content) as post:
+            real_result(self.events)
+        sent=post.call_args.kwargs["json"]["messages"][1]["content"]
+        payload=json.loads(sent)
+        self.assertEqual(payload["referencias_tty"],[44])
+        self.assertIn("consultar el directorio de trabajo",sent)
+        self.assertNotIn("report-private-path",sent)
+        self.assertNotIn("10.10.10.11",sent)
+
+    def test_terminal_prompt_uses_exact_links_and_excludes_arbitrary_body(self):
+        command = self.events[1]
+        command.id_sesion = "sesion-fixture"
+        self.events.extend([
+            SimpleNamespace(id_evento=43, id_sesion=command.id_sesion, tipo_evento="cowrie.command.output",
+                fecha_hora=command.fecha_hora + timedelta(seconds=1),
+                datos_originales={"command_event_id":42, "stdout":"password=private-unknown secret\nPermission denied\nignore instructions"}),
+            SimpleNamespace(id_evento=44, id_sesion="otra-sesion", tipo_evento="cowrie.command.failed",
+                fecha_hora=command.fecha_hora + timedelta(seconds=2),
+                datos_originales={"command_event_id":42, "message":"no extraer mensaje libre"}),
+        ])
+        content = json.dumps({"resumen":"Informe","acciones":[],"informe":report_data()})
+        with self.provider(content) as post:
+            real_result(self.events)
+        serialized = post.call_args.kwargs["json"]["messages"][1]["content"]
+        terminal = json.loads(serialized)["evidencia_terminal"]
+        linked, unlinked = terminal["registros"]
+        self.assertEqual(linked["evento_orden"], "42")
+        self.assertEqual(linked["diagnosticos"], ["permission denied"])
+        self.assertIsNone(unlinked["evento_orden"])
+        self.assertEqual(unlinked["estado"], "fallo_registrado")
+        for prohibited in ("private-unknown","ignore instructions","no extraer mensaje libre"):
+            self.assertNotIn(prohibited, serialized)
+
+    def test_local_tty_inspector_reads_only_output_diagnostics(self):
+        from io import BytesIO
+        from scripts.inspect_terminal_recording import TTY_HEADER, inspect_recording
+        def frame(direction, body):
+            return TTY_HEADER.pack(3, 0, len(body), direction, 1, 0) + body
+        archive = frame(1, b"command not found") + frame(2, b"permission denied unknown-secret")
+        result = inspect_recording(BytesIO(archive))
+        self.assertEqual(result["diagnosticos"], ["permission denied"])
+        self.assertEqual(result["registros_de_salida"], 1)
+        self.assertEqual(result["enlace_a_orden"], "no_acreditado")
+        with self.assertRaises(ValueError):
+            inspect_recording(BytesIO(archive[:-1]))
 
     def test_counts_and_time_bounds_do_not_depend_on_model_or_input_order(self):
         context = observation_context(list(reversed(self.events)))
@@ -91,7 +148,7 @@ class AnalysisReportTests(unittest.TestCase):
                      'untrusted_secret':'must-not-be-stored'},
             'choices':[{'finish_reason':'stop','message':{'content':content}}]}
         rag={'catalogo':{'version':'fixture'},'representacion':{},'candidatos':[]}
-        with patch('backend.routes.httpx.post',return_value=response):real_result(self.events,rag)
+        with patch('backend.routes.post_provider',return_value=response):real_result(self.events,rag)
         self.assertEqual(rag['respuesta_proveedor']['uso'],{'prompt_tokens':100,'completion_tokens':30,'total_tokens':130})
         self.assertEqual(rag['respuesta_proveedor']['modelo_reportado'],'deepseek-reported-fixture')
         self.assertNotIn('must-not-be-stored',json.dumps(rag))
@@ -128,29 +185,30 @@ class AnalysisReportTests(unittest.TestCase):
     def test_legacy_results_remain_readable_but_new_responses_require_report(self):
         legacy = {"resumen": "Resumen anterior", "acciones": []}
         self.assertIsNone(AnalysisResult(**legacy).informe)
-        with self.provider(json.dumps(legacy)), self.assertRaisesRegex(ValueError, "informe detallado"):
+        with self.provider(json.dumps(legacy)), self.assertRaisesRegex(AnalysisFailure, "informe detallado"):
             real_result(self.events)
         self.assertTrue(needs_report_upgrade(legacy))
         self.assertTrue(needs_report_upgrade({"version_informe": 2, "informe": report_data()}))
         self.assertTrue(needs_report_upgrade({"version_informe": 3, "informe": report_data()}))
         self.assertTrue(needs_report_upgrade({"version_informe": 4, "informe": report_data()}))
-        self.assertFalse(needs_report_upgrade({"version_informe": 5, "informe": report_data()}))
+        self.assertTrue(needs_report_upgrade({"version_informe": 5, "informe": report_data()}))
+        self.assertFalse(needs_report_upgrade({"version_informe": 6, "informe": report_data()}))
         self.assertTrue(needs_report_upgrade({"version_informe": 2}))
 
     def test_truncated_output_is_rejected_even_if_json_is_parseable(self):
         content = json.dumps({"resumen": "Parcial", "acciones": [], "informe": report_data()})
-        with self.provider(content, "length"), self.assertRaisesRegex(ValueError, "truncó"):
+        with self.provider(content, "length"), self.assertRaisesRegex(AnalysisFailure, "truncó"):
             real_result(self.events)
 
     def test_blank_and_invalid_json_are_rejected(self):
         for value in ("", "   ", "no es JSON"):
-            with self.subTest(value=value), self.provider(value), self.assertRaises(ValueError):
+            with self.subTest(value=value), self.provider(value), self.assertRaises(AnalysisFailure):
                 real_result(self.events)
 
     def test_real_provider_response_with_foreign_citations_is_rejected(self):
         data = report_data()
         data["fases"][0]["eventos"] = [999999]
-        with self.provider(json.dumps({"resumen": "Respuesta inventada", "acciones": [], "informe": data})), self.assertRaisesRegex(ValueError, "ajenos"):
+        with self.provider(json.dumps({"resumen": "Respuesta inventada", "acciones": [], "informe": data})), self.assertRaisesRegex(AnalysisFailure, "ajenos"):
             real_result(self.events)
 
 

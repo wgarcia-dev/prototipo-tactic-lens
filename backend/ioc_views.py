@@ -3,7 +3,7 @@ from collections import defaultdict
 from datetime import date, datetime, time
 import re
 from typing import Literal
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -14,7 +14,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from .correlation import action_link, action_observable_query, mapping_query, mitre_link
 from .intelligence import DOWNLOAD, FAILED_DOWNLOAD, UPLOAD, ip_scope, normalize_ip, SHA256
-from .rag.behavior import redact
+from .intelligence_metrics import calendar_series, observable_totals
+from .sensitive import Redactor, redact, session_redactors
 
 ECUADOR = ZoneInfo("America/Guayaquil")
 AUTH = ("cowrie.login.success", "cowrie.login.failed")
@@ -23,12 +24,6 @@ TRANSFERS = (DOWNLOAD, FAILED_DOWNLOAD, UPLOAD)
 CONNECTIONS = ("cowrie.session.connect", "cowrie.direct-tcpip.request", "cowrie.forward-tcpip.request")
 DISCONNECT = "cowrie.session.closed"
 DNS_COMMAND = r"^\s*(?:\S*/)?(?:dig|host|nslookup)\s"
-URL = re.compile(r"""[a-z][a-z0-9+.-]*://[^\s<>"']+""", re.I)
-PRIVATE_BLOCK = re.compile(r"-----BEGIN [^-\n]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-\n]*PRIVATE KEY-----|$)", re.I)
-SECRET_ARGUMENT = re.compile(
-    r"""((?:--header|-H|--cookie|-b|--post-data|--data(?:-raw|-binary|-urlencode)?)(?:\s+|=))(?:"(?:\\.|[^"\\])*"|'[^']*'|[^\s;]+)""",
-    re.I,
-)
 
 
 class IocFilters(BaseModel):
@@ -50,37 +45,30 @@ class IocFilters(BaseModel):
 
 
 def safe_url(value):
-    try:
-        parts = urlsplit(value)
-        if not parts.hostname:
-            return "[URL omitida]"
-        authority = parts.netloc.rsplit("@", 1)[-1]
-        # Paths can contain opaque credentials. Preserve ordinary path segments.
-        path = re.sub(r"(?i)/((?:token|secret|password|credential|api[-_]?key)s?)/[^/]+", r"/\1/[REDACTED]", parts.path)
-        path = re.sub(r"(?<=/)[A-Za-z0-9_%-]{32,}(?=/|$)", "[REDACTED]", path)
-        return urlunsplit((parts.scheme, authority, path, "", ""))
-    except ValueError:
-        return "[URL omitida]"
-
-
-def public_value(value):
-    return URL.sub(lambda match: safe_url(match.group()), value)
+    return Redactor((value,)).url(value)
 
 
 def public_payload(value):
-    """Redact known sensitive fields, keep raw output, payloads and key material out."""
-    if isinstance(value, dict):
-        hidden = {"output", "data", "payload", "key", "private_key", "ttylog", "outfile", "authorization",
-                  "cookie", "headers", "passwd", "password", "passphrase"}
-        return {key: ("[REDACTED]" if key.lower() in hidden or any(x in key.lower() for x in
-                      ("password", "secret", "token", "credential", "private_key", "api_key"))
-                      else public_payload(item)) for key, item in value.items()}
-    if isinstance(value, list):
-        return [public_payload(item) for item in value]
-    if isinstance(value, str):
-        text = SECRET_ARGUMENT.sub(r"\1[REDACTED]", PRIVATE_BLOCK.sub("[REDACTED]", value))
-        return redact(public_value(text))
-    return value
+    return Redactor((value,)).payload(value, raw_event=True)
+
+
+def ioc_redactors(conn, tables, scope, identifiers):
+    keys = tuple(identifiers)
+    if not keys:
+        return {}
+    event = tables["evento"]
+    pairs = select(scope.c.id_ioc, scope.c.id_sesion).where(scope.c.id_ioc.in_(keys)).distinct()
+    sessions_by_ioc = defaultdict(list)
+    for ioc_id, session_id in conn.execute(pairs):
+        sessions_by_ioc[ioc_id].append(session_id)
+    redactors = session_redactors(conn, event, {sid for items in sessions_by_ioc.values() for sid in items})
+    return {key: [redactors[sid] for sid in sessions_by_ioc[key] if redactors[sid].captured] for key in keys}
+
+
+def publish_ioc(row, redactors):
+    for redactor in redactors[row["id_ioc"]]:
+        row = redactor.payload(row)
+    return redact(row)
 
 
 def technical_profile(kind, value):
@@ -236,30 +224,38 @@ def explorer_rows(conn, tables, scope, filters, limit, offset):
     by_ioc = defaultdict(set)
     for _, ioc_id, match in exact_mitre(conn, tables, page_scope, filters):
         by_ioc[ioc_id].add(match["codigo_tecnica"])
-    return [{**row, "valor":public_value(row["valor"]), "tecnicas":len(by_ioc[row["id_ioc"]])} for row in page]
+    redactors = ioc_redactors(conn, tables, page_scope, (row["id_ioc"] for row in page))
+    return [publish_ioc({**row, "tecnicas":len(by_ioc[row["id_ioc"]])}, redactors) for row in page]
 
 
 def summary(conn, tables, scope, filters):
     rows = scope.c
     groups = group_observables(scope).order_by(None).subquery().c
-    totals = dict(conn.execute(select(
-        func.count(func.distinct(rows.id_ioc)).label("observables"),
-        func.count().label("observaciones"), func.count(func.distinct(rows.id_evento)).label("eventos"),
-        func.count(func.distinct(rows.id_sesion)).label("sesiones"),
-        func.count(func.distinct(rows.id_ioc)).filter(rows.verificable).label("verificables"))).mappings().one())
+    totals = dict(conn.execute(observable_totals(rows)).mappings().one())
     totals["con_mitre"] = len({ioc_id for _, ioc_id, _ in exact_mitre(conn, tables, scope, filters)})
-    def breakdown(field):
-        return [dict(row) for row in conn.execute(select(field.label("categoria"),
-            func.count(func.distinct(rows.id_ioc)).label("observables"), func.count().label("observaciones"))
-            .group_by(field).order_by(field)).mappings()]
     states = [dict(row) for row in conn.execute(select(groups.estado_revision.label("categoria"),
         func.count().label("observables")).group_by(groups.estado_revision).order_by(groups.estado_revision)).mappings()]
     day = cast(func.timezone("America/Guayaquil", rows.fecha_hora), Date)
-    recurring = conn.execute(group_observables(scope, "sesiones").limit(8)).mappings()
-    return {"totales":totals, "tipos":breakdown(rows.tipo), "modalidades":breakdown(rows.modalidad),
-            "alcances":[row for row in breakdown(rows.alcance) if row["categoria"]],
-            "estados":states, "evolucion":breakdown(day),
-            "recurrentes":[{"id_ioc":row.id_ioc,"valor":public_value(row.valor),"sesiones":row.sesiones} for row in recurring]}
+    dimensions = (rows.tipo, rows.modalidad, rows.alcance, day)
+    names = ("tipos", "modalidades", "alcances", "dias")
+    breakdown = {name: [] for name in names}
+    aggregates = select(*dimensions, *(func.grouping(field) for field in dimensions),
+                        func.count(func.distinct(rows.id_ioc)), func.count()).group_by(func.grouping_sets(*dimensions))
+    for row in conn.execute(aggregates):
+        index = row[4:8].index(0)
+        if row[index] is not None and (index != 2 or row[index]):
+            breakdown[names[index]].append({"categoria":row[index], "observables":row[8], "observaciones":row[9]})
+    for items in breakdown.values():
+        items.sort(key=lambda item: item["categoria"])
+    recurring = conn.execute(group_observables(scope, "sesiones").limit(8)).mappings().all()
+    redactors = ioc_redactors(conn, tables, scope, (row.id_ioc for row in recurring))
+    series, period = calendar_series(breakdown.pop("dias"), "categoria", {"observables":0,"observaciones":0},
+                                     start=filters.desde, end=filters.hasta)
+    return {"totales":totals, **breakdown,
+            "estados":states, "evolucion":series, "periodo_evolucion":period,
+            "poblacion":{"unidad":"IoC único observado", "filtros":filters.model_dump()},
+            "recurrentes":[publish_ioc({"id_ioc":row.id_ioc,"valor":row.valor,"sesiones":row.sesiones}, redactors)
+                          for row in recurring]}
 
 
 def observation_filter(event, obs, category, order):
@@ -330,9 +326,9 @@ def profile(conn, tables, scope, filters):
                 data["tamano"] = int(source.tamano)
             if "archivo" in data or "tamano" in data:
                 artifacts.append(data)
-    value = item["valor"]
-    return {**item, "valor":public_value(value), "clasificacion":technical_profile(item["tipo"],value),
-            "comportamiento":behavior, "artefactos":artifacts, "enriquecimiento":stored_enrichment(conn,tables,scope,item)}
+    redactors = ioc_redactors(conn, tables, scope, [item["id_ioc"]])
+    return publish_ioc({**item, "clasificacion":technical_profile(item["tipo"],item["valor"]),
+        "comportamiento":behavior, "artefactos":artifacts, "enriquecimiento":stored_enrichment(conn,tables,scope,item)}, redactors)
 
 
 def linked_actions(tables, scope):
@@ -368,7 +364,7 @@ def stored_enrichment(conn, tables, scope, item):
             if not result or provider in seen:
                 continue
             seen.add(provider)
-            for entry in result if isinstance(result,list) else [result]:
+            for entry in result if isinstance(result,list) else [result, *result.get("coincidencias", [])] if isinstance(result,dict) else []:
                 if isinstance(entry,dict):
                     entries.append({"proveedor":provider, "id_analisis":row.id_analisis, "id_sesion":row.id_sesion,
                                     **public_payload({key:entry[key] for key in (
@@ -377,8 +373,8 @@ def stored_enrichment(conn, tables, scope, item):
             "resultados":entries}
 
 
-def session_page(conn, tables, scope, filters, limit, offset):
-    from .analysis_state import states_for_sessions
+def session_page(conn, tables, scope, filters, limit, offset, sensors, instances):
+    from .analysis_state import current_inputs, states_for_sessions
     rows = scope.c
     query = (select(rows.id_sesion, rows.cowrie_session_id, rows.modalidad, rows.sensor, rows.ip_origen,
                     rows.fecha_inicio, rows.fecha_fin, func.count().label("observaciones"),
@@ -393,7 +389,8 @@ def session_page(conn, tables, scope, filters, limit, offset):
     ids = [row["id_sesion"] for row in page]
     event_counts = dict(conn.execute(select(event.c.id_sesion, func.count()).where(
         event.c.id_sesion.in_(ids)).group_by(event.c.id_sesion)).all())
-    states = states_for_sessions(conn, tables["analisis_llm"], event_counts)
+    inputs, _ = current_inputs(conn, tables, ids, sensors, instances)
+    states = states_for_sessions(conn, tables["analisis_llm"], inputs)
     page_scope = select(scope).where(rows.id_sesion.in_(ids)).subquery()
     actions = linked_actions(tables, page_scope)
     action_counts = dict(conn.execute(select(actions.c.id_sesion,func.count(func.distinct(actions.c.id_accion)))
@@ -406,4 +403,5 @@ def session_page(conn, tables, scope, filters, limit, offset):
         row.update(eventos=event_counts[sid], acciones=action_counts.get(sid,0),
                    tecnicas=sorted(techniques[sid]), estado_analisis=states[sid]["estado_analisis"],
                    analisis=states[sid]["analisis"], duracion_segundos=(end-start).total_seconds() if end else None)
-    return page
+    redactors = session_redactors(conn, event, ids)
+    return [redactors[row["id_sesion"]].payload(row) for row in page]

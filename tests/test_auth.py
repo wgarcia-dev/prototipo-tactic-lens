@@ -6,6 +6,7 @@ CSRF, roles, tokens, row locks and SQL constraints use the actual implementation
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import json
+import os
 import re
 import secrets
 import unittest
@@ -252,6 +253,7 @@ class AuthFixture(unittest.TestCase):
         # Legacy token consumption tests isolate the admin decision; the full HTTP
         # approval path is exercised in test_administration.
         from backend.auth.recovery import create_request, send_approved_link
+        from backend.auth.notifications import dispatch_one
         from backend.auth.store import identity
         request=Request({"type":"http","app":app,"client":("127.0.0.1",0),"headers":[],"path":"/cli/test-fixture","scheme":"http","server":("localhost",0),"query_string":b""})
         user=identity(self.connection,request,user_id,lock=True)
@@ -259,7 +261,9 @@ class AuthFixture(unittest.TestCase):
         row=self.connection.execute(select(q).where(q.c.id_usuario==user_id,q.c.estado=="pendiente")).mappings().first()
         row=row or create_request(self.connection,request,user)
         self.assertIsNotNone(row)
-        self.assertTrue(send_approved_link(self.connection,request,user,row,user_id,"Aprobación de fixture para probar consumo"))
+        notification = send_approved_link(self.connection,request,user,row,user_id,"Aprobación de fixture para probar consumo")
+        self.assertIsNotNone(notification)
+        dispatch_one(request, notification)
         return re.search(r"#token=([^\s]+)",self.messages[-1][2])[1]
 
 class AuthIntegrationTests(AuthFixture):
@@ -764,9 +768,16 @@ class AuthIntegrationTests(AuthFixture):
         self.post("/mfa/verificar",{"codigo":self.otp(secret)})
 
     def test_migration_is_idempotent_and_preserves_data(self):
+        if os.getenv("TACTICLENS_ISOLATED_SECURITY_TEST") != "1":
+            self.skipTest("La prueba requiere el propietario de una base PostgreSQL desechable")
+        self.assertTrue(self.connection.scalar(select(func.current_database())).startswith("tacticlens_h02_"))
+        from backend.db import migration_engine
         from scripts.migrate import migrate
         before={name:self.connection.scalar(select(func.count()).select_from(app.state.tables[name])) for name in ("usuario","rol","sesion","evento")}
-        migrate(app.state.engine)
+        engine = migration_engine()
+        self.addCleanup(engine.dispose)
+        result = migrate(engine, runtime_role=os.environ["DATABASE_USER"])
+        self.assertEqual(result["applied"], [])
         after={name:self.connection.scalar(select(func.count()).select_from(app.state.tables[name])) for name in before}
         self.assertEqual(before,after)
 

@@ -10,6 +10,7 @@ type Report = {
   title: string
   reference: string
   status: string
+  snapshot: string
   metadata: [string, string][]
   sections: {title: string, paragraphs: string[], columns: string[], rows: string[][]}[]
 }
@@ -45,10 +46,11 @@ export function SessionReport({id,analysisId}: {id: string;analysisId:string}) {
   }
 
   async function download(format: 'pdf' | 'docx') {
+    if (!report?.snapshot) return
     setDownloading(format)
     setError('')
     try {
-      const blob = await apiBlob(path + '&formato=' + format)
+      const blob = await apiBlob(path + '&formato=' + format + '&snapshot=' + encodeURIComponent(report.snapshot))
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
@@ -81,7 +83,7 @@ export function SessionReport({id,analysisId}: {id: string;analysisId:string}) {
       {report && <>
         <div className="flex flex-wrap gap-2 mb-5">
           {(['pdf', 'docx'] as const).map(format =>
-            <button key={format} className="btn flex items-center gap-2" disabled={!!downloading}
+            <button key={format} className="btn flex items-center gap-2" disabled={!!downloading || !report.snapshot}
               onClick={() => download(format)}>
               <Download size={15} aria-hidden/>
               {downloading === format ? 'Generando…' : format === 'pdf' ? 'Descargar PDF' : 'Descargar Word'}

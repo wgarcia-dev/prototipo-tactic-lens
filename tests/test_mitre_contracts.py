@@ -3,7 +3,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from backend.rag.evaluation import evaluate_independent
-from backend.rag.mitre_evidence import CONTRACTS, EvidenceContract, Signal, contract_signature, technique_evidence
+from backend.rag.mitre_evidence import CONTRACTS, KNOWN_MODES, EvidenceContract, Signal, contract_signature, technique_evidence
 from backend.rag.retrieval import select_candidates
 from backend.rag.validation import validate
 from test_rag import event, local_context, proposal, result
@@ -37,13 +37,24 @@ class ContractTests(TestCase):
             'T1059.004':('TA0002','sh -c "pwd"'),'T1053.003':('TA0003','crontab /tmp/jobs'),
             'T1136.001':('TA0003','useradd demo'),'T1070.003':('TA0005','history -c'),
         }
+        negatives={
+            'T1105':'curl https://example.org/a','T1082':'uname --help','T1033':'id some_user',
+            'T1083':'ls --help','T1016':'ip link set sample0 up','T1057':'ps --help',
+            'T1059.004':'sh --version','T1053.003':'crontab -l',
+            'T1136.001':'useradd --help','T1070.003':'history 5',
+        }
         for code,(tactic,command) in commands.items():
-            with self.subTest(code=code):
-                accepted, rejected, _=self.classify(code,tactic,[event(command=command)])
-                self.assertFalse(rejected)
-                self.assertEqual(accepted[0].grado_evidencia,'intento')
+            for mode in KNOWN_MODES:
+                with self.subTest(code=code,mode=mode):
+                    accepted,rejected,_=self.classify(code,tactic,[event(command=command)],modality=mode)
+                    self.assertFalse(rejected)
+                    self.assertEqual(accepted[0].grado_evidencia,'intento')
+                    self.assertFalse(self.classify(code,tactic,[event(command=negatives[code])],modality=mode)[0])
+                    self.assertFalse(self.classify(code,tactic,[event(command=command)],citations=[100],modality=mode)[0])
         attempts=[event(i,kind='cowrie.login.failed',src_ip='192.0.2.5',username='fixture',password=str(i)) for i in (1,2,3)]
-        self.assertTrue(self.classify('T1110','TA0006',attempts,[1,2,3])[0])
+        for mode in KNOWN_MODES:
+            self.assertTrue(self.classify('T1110','TA0006',attempts,[1,2,3],modality=mode)[0])
+            self.assertFalse(self.classify('T1110','TA0006',attempts,[1,2],modality=mode)[0])
 
     def test_new_contracts_require_positive_compatible_cited_input(self):
         for code,tactic,positive,contrary,ambiguous,incomplete in NEW_CONTRACTS:
@@ -56,8 +67,9 @@ class ContractTests(TestCase):
                 self.assertFalse(self.classify(code,tactic,events,citations=[345])[0])
                 self.assertEqual(self.classify(code,tactic,events,grade='resultado_en_honeypot')[1][0]['causa'],
                                  'resultado_no_demostrado')
-                for mode in ('cowrie_proxy','cowrie_llm','desconocido'):
-                    self.assertEqual(self.classify(code,tactic,events,modality=mode)[1][0]['causa'],'modalidad_incompatible')
+                for mode in ('cowrie_proxy','cowrie_llm'):
+                    self.assertTrue(self.classify(code,tactic,events,modality=mode)[0])
+                self.assertEqual(self.classify(code,tactic,events,modality='desconocido')[1][0]['causa'],'modalidad_incompatible')
                 for command in (contrary,ambiguous,incomplete):
                     self.assertFalse(self.classify(code,tactic,[event(command=command)])[0])
                     self.assertFalse(self.classify(code,tactic,[*events,event(2,command)],citations=[1,2])[0])

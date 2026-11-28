@@ -46,10 +46,12 @@ def prepare(raw):
     return origin, when, original, hashlib.sha256(encoded).hexdigest()
 
 
-def save_event(conn, tables, sensor, raw, prepared):
+def save_event(conn, tables, sensor, raw, prepared, legacy_alias=None):
     s,e,o = (tables[n] for n in ("sesion","evento","evento_origen"))
     origin,when,original,digest = prepared
-    previous = conn.execute(select(o.c.id_evento,o.c.contenido_sha256).where(o.c.id_honeypot==sensor,o.c.origen_id==origin)).first()
+    identities = (origin, legacy_alias) if legacy_alias else (origin,)
+    previous = conn.execute(select(o.c.id_evento,o.c.contenido_sha256).where(
+        o.c.id_honeypot==sensor,o.c.origen_id.in_(identities)).order_by((o.c.origen_id==origin).desc()).limit(1)).first()
     if previous:
         if previous.contenido_sha256!=digest:
             raise ValueError("origen_reutilizado_con_otro_contenido")
@@ -99,8 +101,12 @@ def save_event(conn, tables, sensor, raw, prepared):
     return event_id,state
 
 
-def persist(engine, tables, sensor, events, *, partial=False, instances=None):
+def persist(engine, tables, sensor, events, *, partial=False, instances=None, received_at=None, legacy_manual_aliases=None):
+    from collections import defaultdict
+    from .realtime import notify_change
+
     receipts=[]
+    inserted = defaultdict(list)
     try:
         with engine.begin() as conn:
             # Serialize ingestion for this sensor, including concurrent retries.
@@ -114,24 +120,47 @@ def persist(engine, tables, sensor, events, *, partial=False, instances=None):
                     collector = raw["_collector"]
                     instance = sensor
                     name = collector.get("instance_id")
-                    if name is None and instances:
+                    if "instance_id" not in collector and instances:
                         port = raw.get("dst_port")
-                        if isinstance(port, (int, str)) and not isinstance(port, bool) and str(port).isdigit():
-                            name = {2222: "cowrie_shell", 2223: "cowrie_proxy", 2224: "cowrie_llm"}.get(int(port))
-                    if name is not None:
+                        if type(port) in (int, str):
+                            inferred = {"2222": "cowrie_shell", "2223": "cowrie_proxy", "2224": "cowrie_llm"}.get(str(port))
+                            if inferred in instances:
+                                name = inferred
+                    if name is not None or "instance_id" in collector:
                         if not isinstance(name, str) or name not in ("cowrie_shell", "cowrie_proxy", "cowrie_llm"):
                             raise ValueError("instancia_invalida")
                         if not instances or name not in instances:
                             raise HTTPException(503, "Instancia pendiente de registro")
                         instance = instances[name]
                     with conn.begin_nested():
-                        event_id,state=save_event(conn,tables,instance,raw,prepared)
+                        previous = None
+                        # SQLite source IDs contain the queue UUID and row ID. Retrying
+                        # one across the attribution cutover must preserve its receipt.
+                        if instances and prepared[0].startswith('sqlite:'):
+                            origins = tables['evento_origen']
+                            matches = conn.execute(select(origins.c.id_evento,origins.c.contenido_sha256).where(
+                                origins.c.id_honeypot.in_((sensor,*instances.values())),
+                                origins.c.origen_id == prepared[0]).limit(2)).all()
+                            if len(matches) > 1:
+                                raise ValueError('origen_repetido_entre_sensores')
+                            previous = matches[0] if matches else None
+                        if previous:
+                            if previous.contenido_sha256 != prepared[3]:
+                                raise ValueError('origen_reutilizado_con_otro_contenido')
+                            event_id,state=previous.id_evento,'duplicado'
+                        else:
+                            alias = legacy_manual_aliases.get(prepared[0]) if legacy_manual_aliases else None
+                            event_id,state=save_event(conn,tables,instance,raw,prepared,alias)
                     receipt.update(estado=state,id_evento=event_id)
+                    if state == "insertado":
+                        inserted[instance].append(event_id)
                 except (ValueError, TypeError, OverflowError, IntegrityError, DataError):
                     if not partial:
                         raise HTTPException(422,"El evento no cumple el contrato de ingesta") from None
                     receipt.update(estado="rechazado",error="evento_invalido_o_identidad_en_conflicto")
                 receipts.append(receipt)
+            for instance, event_ids in inserted.items():
+                notify_change(conn, [instance], 'sesiones', 'iocs', 'panel', events=event_ids, received_at=received_at)
     except (SQLAlchemyError,RuntimeError):
         # Infrastructure failures must never acknowledge or quarantine valid data.
         raise HTTPException(503,"Ingesta temporalmente no disponible; conserve y reintente el lote") from None

@@ -1,4 +1,15 @@
-export type Notice = {tipo:string, epoca?:string, revision?:number, recibido_api?:string, confirmado_api?:string, eventos?:number[]}
+export const monitorDomains = ['sesiones','analisis','iocs','mitre','salvaguardas','panel'] as const
+export type MonitorDomain = typeof monitorDomains[number]
+export type Notice = {tipo:string, epoca?:string, revision?:number, dominios?:MonitorDomain[], recibido_api?:string, confirmado_api?:string, eventos?:number[]}
+
+export function affectedDomains(notice: Notice): readonly MonitorDomain[] {
+  if (notice.tipo === 'listo' || notice.dominios === undefined) return monitorDomains
+  return monitorDomains.filter(domain => notice.dominios?.includes(domain))
+}
+
+export function watchesDomain(watched:readonly MonitorDomain[], changed:readonly MonitorDomain[]) {
+  return watched.some(domain => changed.includes(domain))
+}
 type Socket = Pick<WebSocket,'send'|'close'> & {
   readyState?:number
   onopen: ((event: Event) => void)|null

@@ -165,14 +165,19 @@ def deliver_pending(conn,mapping,url,key,batch_size=50,transport='ssh-loopback')
     queue_uuid=conn.execute("SELECT valor FROM tacticlens_envio_meta WHERE clave='queue_uuid'").fetchone()[0]
     if conn.execute("SELECT valor FROM tacticlens_envio_meta WHERE clave='source_table'").fetchone()[0]!=mapping['table']:
         raise ValueError('Mapeo de cola diferente')
-    query=('SELECT CAST(q.'+ident(mapping['id_column'])+' AS TEXT),q.'+ident(mapping['json_column'])
+    tagged = mapping['table']=='events' and conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE name='tacticlens_eventos_instancia'").fetchone()
+    instance = ',i.instancia' if tagged else ',NULL'
+    join = ' LEFT JOIN tacticlens_eventos_instancia i ON i.event_id=q.id' if tagged else ''
+    query=('SELECT CAST(q.'+ident(mapping['id_column'])+' AS TEXT),q.'+ident(mapping['json_column'])+instance
         +' FROM '+ident(mapping['table'])+' q LEFT JOIN tacticlens_entregas d ON d.origen_pk=CAST(q.'+ident(mapping['id_column'])+' AS TEXT)'
+        +join
         +" WHERE d.estado IS NULL OR (d.estado='pendiente' AND d.proximo_intento<=?) ORDER BY q."+ident(mapping['id_column'])+' LIMIT ?')
     rows=conn.execute(query,(time.time(),batch_size)).fetchall()
     events=[];identities=[];size_used=16
     conn.execute('BEGIN IMMEDIATE')
     try:
-        for pk,payload in rows:
+        for pk,payload,mode in rows:
             try:
                 digest=hashlib.sha256(payload if isinstance(payload,bytes) else payload.encode()).hexdigest()
                 previous=conn.execute('SELECT contenido_sha256 FROM tacticlens_entregas WHERE origen_pk=?',(pk,)).fetchone()
@@ -187,12 +192,8 @@ def deliver_pending(conn,mapping,url,key,batch_size=50,transport='ssh-loopback')
                 if len(source)>512:
                     raise ValueError('identidad_demasiado_larga')
                 event['_collector']={'source_id':source}
-                port = event.get('dst_port')
-                modes = {2222: 'cowrie_shell', 2223: 'cowrie_proxy', 2224: 'cowrie_llm'}
-                if isinstance(port, (int, str)) and not isinstance(port, bool) and str(port).isdigit():
-                    mode = modes.get(int(port))
-                    if mode:
-                        event['_collector']['instance_id'] = mode
+                if mode is not None:
+                    event['_collector']['instance_id'] = mode
                 # Validate finite JSON before constructing the network batch.
                 event_size=len(json.dumps(event,allow_nan=False,ensure_ascii=False,separators=(',',':')).encode())+1
                 if size_used+event_size>1_900_000:

@@ -3,7 +3,7 @@ import argparse
 import os
 from dotenv import load_dotenv
 from sqlalchemy import text
-from backend.db import database_engine
+from backend.db import migration_engine
 
 
 def main():
@@ -13,7 +13,7 @@ def main():
     args=parser.parse_args()
     if not 1<=len(args.host)<=255 or not 1<=len(args.version)<=30:
         raise SystemExit('Metadatos fuera de rango')
-    load_dotenv();engine=database_engine()
+    load_dotenv();engine=migration_engine()
     try:
         with engine.begin() as conn:
             name=conn.scalar(text('UPDATE honeypot.honeypot SET host=:host,version=:version,actualizado_en=now() WHERE id_honeypot=CAST(:sensor AS uuid) RETURNING nombre'),

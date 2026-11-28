@@ -22,6 +22,7 @@ from .schemas import (RegistrationProfile, Login, EmailPayload, EmailCode, Secon
 from .security import DUMMY_HASH, PASSWORDS, fingerprint, matching_interval, now, opaque_token, verify_password, password_strength
 from .service import (create_account, issue_email_code, issue_reset, notify, reauthenticate,
                       replace_recovery_codes, verify_second_factor, validate_new_password, is_temporary_password)
+from ..sensitive import redact
 from .store import (AuthError, approved, audit, eligible, factor, identity, new_session, next_stage,
                     public_user, rate, require_admin, revoke, session, table, transaction, clear_account_rate)
 
@@ -432,12 +433,13 @@ def update_user(user_id: UUID, payload: UserUpdate, request: Request):
             if record:
                 link_delivered = send_approved_link(conn, request, updated, record, actor.id_usuario, "Autorización administrativa del registro")
     title = "Solicitud de cuenta rechazada" if payload.rechazar else "Solicitud de cuenta autorizada" if payload.aprobar else {"suspender":"Cuenta suspendida", "bloquear":"Cuenta bloqueada", "reactivar":"Cuenta reactivada"}.get(action, "Rol o estado de cuenta actualizado")
-    delivered = link_delivered
+    delivered = False
     if link_delivered is None and target.correo_verificado_en:
         delivered = notify(request, user_id, (target.correo, title,
             title + ". Un administrador actualizó su cuenta. Sus sesiones previas fueron revocadas. "
             "La recuperación de contraseña no permite eludir restricciones. Contacte al administrador por un canal conocido si necesita una revisión."))
-    return {"mensaje":"Cuenta actualizada; sus sesiones anteriores fueron revocadas", "notificacion_enviada":bool(delivered)}
+    return {"mensaje":"Cuenta actualizada; sus sesiones anteriores fueron revocadas", "notificacion_enviada":bool(delivered),
+            "notificacion_estado":"pendiente" if link_delivered else "enviada" if delivered else "no_confirmada"}
 
 
 @router.post("/admin/usuarios/{user_id}/mfa/restablecer")
@@ -495,4 +497,5 @@ def security_audit(request: Request, limit: int = Query(50,ge=1,le=100), offset:
         if tipo:
             statement = statement.where(t.c.tipo==tipo)
         rows=conn.execute(statement.order_by(t.c.fecha_evento.desc(),t.c.id_auditoria.desc()).limit(limit).offset(offset)).mappings()
-        return [{**dict(row), "metadatos":{k:v for k,v in row.metadatos.items() if k in {"reason","rol","resultado","request_id"}}} for row in rows]
+        return [{**dict(row), "metadatos":redact({k:v for k,v in row.metadatos.items()
+                 if k in {"reason","rol","resultado","request_id"}})} for row in rows]

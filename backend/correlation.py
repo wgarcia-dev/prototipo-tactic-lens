@@ -246,7 +246,8 @@ def mitre_link(row, link, mapping):
     compatible = (
         ("transfer" in active and bool(observed_roles & {ATTEMPT, "descarga_registrada", "archivo_capturado"}))
         or ("shell" in active and any(detail["campo"] == "input" for detail in row.detalles))
-        or ("auth_repeated" in active and row.tipo_evento == "cowrie.login.failed" and "origen_sesion" in observed_roles)
+        or (bool({"auth_repeated", "password_guessing", "password_spraying"} & active)
+            and row.tipo_evento == "cowrie.login.failed" and "origen_sesion" in observed_roles)
     )
     if not compatible:
         return None

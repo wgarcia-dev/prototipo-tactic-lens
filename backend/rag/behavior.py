@@ -2,8 +2,8 @@
 from collections import Counter, defaultdict
 import re
 import shlex
-from urllib.parse import urlsplit,urlunsplit
-from .mitre_evidence import CONTRACTS, inbound_download, technique_evidence
+from ..sensitive import redact
+from .mitre_evidence import CONTRACTS, OBSERVED, inbound_download, technique_evidence
 
 LABELS={
  'system_discovery':'system information discovery operating system hostname hardware uname',
@@ -28,34 +28,6 @@ LABELS={
  'history':'command history clearing disable shell history',
  'unknown':'unknown command; insufficient behavioral evidence; emulated honeypot only',
 }
-
-
-def redact(value):
-    if isinstance(value,dict):
-        return {k:('[REDACTED]' if k.lower()=='key' or any(part in k.lower() for part in ('password','passwd','secret','token','authorization','credential','api_key')) else redact(v)) for k,v in value.items()}
-    if isinstance(value,list):return [redact(v) for v in value[:500]]
-    if not isinstance(value,str):return value
-    value=re.sub(r'https?://[^\s<>\"\']+',lambda m:clean_url(m.group()),value)
-    argument = r"""(?:"(?:\\.|[^"\\])*"|'[^']*'|[^\s;]+)"""
-    prefixes = (
-        r"\b(?:password|passwd|passphrase|token|secret|api[_-]?key|x-api-key)\s*[=:]\s*",
-        r"(?:--password|--token|--secret|--api-key|--user|-u)(?:\s+|=)",
-        r"\bsshpass\s+-p\s+",
-        r"\b(?:Bearer|Basic)\s+",
-        r"\b[A-Za-z_][A-Za-z0-9_]*=",
-    )
-    for prefix in prefixes:
-        value = re.sub("(?i)(" + prefix + ")" + argument, r"\1[REDACTED]", value)
-    return value[:4000]
-
-
-def clean_url(value):
-    try:
-        url=urlsplit(value)
-        host=url.hostname or ''
-        if url.port:host+=':'+str(url.port)
-        return urlunsplit((url.scheme,host,url.path,'[REDACTED]' if url.query else '', ''))
-    except ValueError:return '[URL REDACTED]'
 
 
 def command_features(command,depth=0):
@@ -124,13 +96,13 @@ def represent(events, modality='desconocido'):
     sequence=[];features={};confirmed=[]
     for event in ordered:
         data=event.datos_originales
-        if event.tipo_evento=='cowrie.command.input':
+        if event.tipo_evento=='cowrie.command.input' and data.get('realm') is None:
             tags=command_features(data.get('input',''))-{'transfer'}
             if event.id_evento in transfers:tags.add('transfer')
         elif event.tipo_evento=='cowrie.login.failed':tags={'auth_repeated'} if event.id_evento in guesses else {'unknown'}
         elif event.tipo_evento=='cowrie.session.file_download':
             tags={'transfer'} if event.id_evento in transfers else set()
-            if tags:confirmed.append(event.id_evento)
+            if transfers.get(event.id_evento)==OBSERVED:confirmed.append(event.id_evento)
         else:tags=set()
         tags.update(supported_tags[event.id_evento])
         features[event.id_evento]=sorted(tags)

@@ -37,8 +37,8 @@ try {
 if($ClavesOriginales) {
     & ./.venv/Scripts/python.exe -m scripts.configure_restored_history --auth-file $ClavesOriginales
     if($LASTEXITCODE -ne 0) { throw 'Datos restaurados; configuración MFA original pendiente.' }
-    & ./.venv/Scripts/python.exe -m scripts.migrate
-    if($LASTEXITCODE -ne 0) { throw 'Revise las migraciones; 008 se mantiene diferida.' }
+    & ./.venv/Scripts/python.exe -m scripts.db_roles
+    if($LASTEXITCODE -ne 0) { throw 'Revise los permisos operativos de la base restaurada.' }
 } else {
     Write-Host 'Datos restaurados. Falta el archivo privado AUTH_SECRET_KEY/AUTH_TOTP_KEYS para habilitar el acceso original.'
 }

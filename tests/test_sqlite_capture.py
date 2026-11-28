@@ -1,5 +1,6 @@
 import gzip
 from contextlib import closing
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -86,3 +87,47 @@ CREATE TABLE cursor (name TEXT PRIMARY KEY,inode TEXT NOT NULL,offset INTEGER NO
         self.log.write_text(json.dumps(changed)+'\n')
         self.assertEqual(capture.ingest(self.conn,self.log)['nuevos'],1)
         self.assertEqual(self.count(),2)
+
+    def test_three_sources_label_only_new_sessions_and_retry_without_changing_identity(self):
+        capture.ingest(self.conn,self.log)
+        config={}
+        for mode,key in capture.INSTANCE_LOG_KEYS.items():
+            folder=self.log.parent/mode
+            folder.mkdir()
+            config[key]=str(folder/'cowrie.json')
+        sources=capture.log_sources(config)
+        for path in sources.values():
+            path.write_bytes(self.line)
+        capture.register_sources(self.conn,sources)
+        self.assertEqual(capture.ingest_sources(self.conn,sources,100)['nuevos'],0)
+        future=(datetime.now(timezone.utc)+timedelta(seconds=10)).isoformat()
+        historical={**self.raw,'eventid':'cowrie.session.connect','session':'historical'}
+        for path in sources.values():
+            events=[
+                historical,
+                {**self.raw,'timestamp':future,'session':'historical','_collector':{'instance_id':'cowrie_llm'}},
+                {**self.raw,'eventid':'cowrie.session.connect','timestamp':future},
+                {**self.raw,'timestamp':future,'dst_port':2222,'_collector':{'instance_id':'cowrie_llm'}},
+            ]
+            with path.open('a',encoding='utf-8') as stream:
+                stream.writelines(json.dumps(event)+'\n' for event in events)
+        self.assertEqual(capture.ingest_sources(self.conn,sources,100)['nuevos'],12)
+        capture.register_sources(self.conn,sources)
+        self.assertEqual(capture.ingest_sources(self.conn,sources,100)['nuevos'],0)
+        self.assertEqual(self.conn.execute('SELECT instancia,count(*) FROM tacticlens_eventos_instancia GROUP BY instancia').fetchall(),
+                         [(name,2) for name in sorted(sources)])
+        with patch.object(capture.delivery,'post',side_effect=OSError('offline')) as post:
+            self.assertEqual(capture.delivery.deliver_pending(self.conn,capture.mapping(self.conn),'fixture','fixture'),0)
+            first=post.call_args.args[2]
+        self.conn.execute('UPDATE tacticlens_entregas SET proximo_intento=0')
+        with patch.object(capture.delivery,'post',side_effect=OSError('offline')) as post:
+            capture.delivery.deliver_pending(self.conn,capture.mapping(self.conn),'fixture','fixture')
+            self.assertEqual([event['_collector'] for event in first],
+                             [event['_collector'] for event in post.call_args.args[2]])
+        labels=[event['_collector'].get('instance_id') for event in first if event['session']=='historical']
+        self.assertTrue(labels)
+        self.assertEqual(set(labels),{None})
+        for name in sources:
+            self.assertEqual(sum(event['_collector'].get('instance_id')==name for event in first),2)
+        with self.assertRaises(ValueError):
+            capture.ingest(self.conn,sources['cowrie_shell'],mode='cowrie_llm')

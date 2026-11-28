@@ -39,6 +39,7 @@ def evidence_sample(events, modality='desconocido'):
 
 
 def facts_for_model(events, *, secret_source=None):
+    from ..cowrie_provenance import public_provenance
     mask = protected_text(event.datos_originales for event in (events if secret_source is None else secret_source))
     fields={'eventid','src_ip','dst_ip','src_port','dst_port','protocol'}
     allowed_details={
@@ -58,7 +59,11 @@ def facts_for_model(events, *, secret_source=None):
         if e.tipo_evento in {'cowrie.login.failed', 'cowrie.login.success'}:
             data.update({key: '[REDACTED]' for key in ('username', 'password') if key in raw})
         data={k:(v[:1200] if isinstance(v,str) else v) for k,v in data.items()}
-        facts.append({'id_evento':e.id_evento,'tipo':e.tipo_evento,'fecha':e.fecha_hora.isoformat(),'datos':data})
+        fact = {'id_evento':e.id_evento,'tipo':e.tipo_evento,'fecha':e.fecha_hora.isoformat(),'datos':data}
+        if hasattr(e, "modalidad"):
+            projected = public_provenance(e.modalidad)
+            fact["procedencia_cowrie"] = {k: projected[k] for k in ("modalidad", "sensor", "estado")}
+        facts.append(fact)
     return facts
 
 

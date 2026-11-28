@@ -48,15 +48,11 @@ def citation_query(tables):
 
 
 def mapping_rows(tables, sensors, instances, filters):
+    from .cowrie_provenance import session_mode
     mapping, action, analysis, session, technique, tactic = (tables[name] for name in (
         'mapeo_mitre', 'accion_identificada', 'analisis_llm', 'sesion', 'tecnica_mitre', 'tactica_mitre',
     ))
-    sensor_mode = (case({identifier: name for name, identifier in instances.items()},
-                        value=session.c.id_honeypot, else_='desconocido') if instances else literal('desconocido'))
-    recorded_mode = mapping.c.rag_procedencia['modalidad'].astext
-    modality = case(
-        (recorded_mode.in_(('cowrie_shell', 'cowrie_proxy', 'cowrie_llm', 'desconocido')), recorded_mode),
-        else_=sensor_mode)
+    modality = session_mode(session, tables["evento"], instances)
     automatic = mapping.c.rag_procedencia['clasificacion'].astext == AUTO_CLASSIFICATION
     state = case(
         (mapping.c.estado_revision == 'descartado', 'descartada'),

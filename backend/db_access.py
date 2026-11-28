@@ -20,6 +20,18 @@ RUNTIME_GRANTS = {
     ), ("SELECT", "INSERT", "UPDATE")),
     "salvaguarda_config": ("SELECT", "UPDATE"),
 }
+INCIDENT_GRANTS = {
+    "incidente": ("SELECT", "INSERT", "UPDATE"),
+    **dict.fromkeys(("incidente_evaluacion", "incidente_sesion", "incidente_analisis", "incidente_evidencia"),
+                    ("SELECT", "INSERT")),
+}
+
+
+def runtime_grants(existing):
+    incidents = INCIDENT_GRANTS.keys() & set(existing)
+    if incidents and incidents != INCIDENT_GRANTS.keys():
+        raise RuntimeError("El esquema de evaluación de incidentes está incompleto")
+    return {**RUNTIME_GRANTS, **(INCIDENT_GRANTS if incidents else {})}
 
 
 def verify_migration_owner(conn):
@@ -81,15 +93,16 @@ def verify_runtime_access(conn, role):
         WHERE n.nspname = 'honeypot' AND c.relkind IN ('r','p','v','m','f')
     """), {"role": role}).all()
     existing = {row.relname for row in rows}
-    mismatch = set(RUNTIME_GRANTS) - existing
+    grants = runtime_grants(existing)
+    mismatch = set(grants) - existing
     for row in rows:
-        expected = set(RUNTIME_GRANTS.get(row.relname, ()))
+        expected = set(grants.get(row.relname, ()))
         if set(row.privileges) != expected or set(row.columns) != expected or row.grantable:
             mismatch.add(row.relname)
     if mismatch:
         raise RuntimeError(f"Permisos operativos incompatibles en: {', '.join(sorted(mismatch))}")
     for row in owned_sequences(conn, role):
-        needs_usage = row.kind == "a" and "INSERT" in RUNTIME_GRANTS.get(row.table_name, ())
+        needs_usage = row.kind == "a" and "INSERT" in grants.get(row.table_name, ())
         if row.usage != needs_usage or row.other_access:
             raise RuntimeError(f"Permisos operativos incompatibles en la secuencia: {row.sequence_name}")
     secured = conn.scalar(text("""
@@ -141,11 +154,13 @@ def configure_runtime_grants(conn, role):
         conn.exec_driver_sql(f"REVOKE ALL ({fields}) ON honeypot.{identifier(table)} FROM {grantees}")
 
     conn.exec_driver_sql(f"GRANT USAGE ON SCHEMA honeypot TO {identifier(role)}")
-    for table, privileges in RUNTIME_GRANTS.items():
+    existing = conn.scalars(text("SELECT tablename FROM pg_tables WHERE schemaname = 'honeypot'")).all()
+    grants = runtime_grants(existing)
+    for table, privileges in grants.items():
         conn.exec_driver_sql(f"GRANT {', '.join(privileges)} ON honeypot.{identifier(table)} TO {identifier(role)}")
 
     # PostgreSQL identity columns need no sequence grants. SERIAL defaults do.
     for row in owned_sequences(conn, role):
-        if row.kind == "a" and "INSERT" in RUNTIME_GRANTS.get(row.table_name, ()):
+        if row.kind == "a" and "INSERT" in grants.get(row.table_name, ()):
             conn.exec_driver_sql(f"GRANT USAGE ON SEQUENCE honeypot.{identifier(row.sequence_name)} TO {identifier(role)}")
     verify_runtime_access(conn, role)

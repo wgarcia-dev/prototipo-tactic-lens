@@ -9,6 +9,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DataError, IntegrityError, SQLAlchemyError
 from .intelligence import persist_observables
+from .cowrie_provenance import capture
 
 CONTRACT = "tacticlens.ingesta.v2"
 
@@ -46,7 +47,7 @@ def prepare(raw):
     return origin, when, original, hashlib.sha256(encoded).hexdigest()
 
 
-def save_event(conn, tables, sensor, raw, prepared, legacy_alias=None):
+def save_event(conn, tables, sensor, raw, prepared, legacy_alias=None, provenance=None):
     s,e,o = (tables[n] for n in ("sesion","evento","evento_origen"))
     origin,when,original,digest = prepared
     identities = (origin, legacy_alias) if legacy_alias else (origin,)
@@ -80,11 +81,12 @@ def save_event(conn, tables, sensor, raw, prepared, legacy_alias=None):
     else:
         sequence=conn.scalar(select(func.coalesce(func.max(e.c.numero_secuencia),0)+1).where(e.c.id_sesion==sid))
         event_id=None
+        fields = {"procedencia_cowrie": provenance} if provenance is not None and "procedencia_cowrie" in e.c else {}
         # Historical imports supplied explicit IDs; skip occupied values without
         # renumbering them or moving the identity sequence into the hash range.
         for _ in range(32):
             event_id=conn.scalar(insert(e).values(id_sesion=sid,numero_secuencia=sequence,
-                tipo_evento=raw["eventid"],fecha_hora=when,datos_originales=original)
+                tipo_evento=raw["eventid"],fecha_hora=when,datos_originales=original,**fields)
                 .on_conflict_do_nothing(index_elements=["id_evento"]).returning(e.c.id_evento))
             if event_id is not None:
                 break
@@ -117,30 +119,17 @@ def persist(engine, tables, sensor, events, *, partial=False, instances=None, re
                 receipt={"indice":index,"source_id":source if isinstance(source,str) and len(source)<=512 else None}
                 try:
                     prepared=prepare(raw)
-                    collector = raw["_collector"]
-                    instance = sensor
-                    name = collector.get("instance_id")
-                    if "instance_id" not in collector and instances:
-                        port = raw.get("dst_port")
-                        if type(port) in (int, str):
-                            inferred = {"2222": "cowrie_shell", "2223": "cowrie_proxy", "2224": "cowrie_llm"}.get(str(port))
-                            if inferred in instances:
-                                name = inferred
-                    if name is not None or "instance_id" in collector:
-                        if not isinstance(name, str) or name not in ("cowrie_shell", "cowrie_proxy", "cowrie_llm"):
-                            raise ValueError("instancia_invalida")
-                        if not instances or name not in instances:
-                            raise HTTPException(503, "Instancia pendiente de registro")
-                        instance = instances[name]
+                    instance, provenance = capture(raw, instances or {}, sensor)
+                    alias = legacy_manual_aliases.get(prepared[0]) if legacy_manual_aliases else None
                     with conn.begin_nested():
                         previous = None
                         # SQLite source IDs contain the queue UUID and row ID. Retrying
                         # one across the attribution cutover must preserve its receipt.
-                        if instances and prepared[0].startswith('sqlite:'):
+                        if instances and prepared[0].startswith(('sqlite:', 'manual:')):
                             origins = tables['evento_origen']
                             matches = conn.execute(select(origins.c.id_evento,origins.c.contenido_sha256).where(
                                 origins.c.id_honeypot.in_((sensor,*instances.values())),
-                                origins.c.origen_id == prepared[0]).limit(2)).all()
+                                origins.c.origen_id.in_([prepared[0], alias] if alias else [prepared[0]])).limit(2)).all()
                             if len(matches) > 1:
                                 raise ValueError('origen_repetido_entre_sensores')
                             previous = matches[0] if matches else None
@@ -149,8 +138,7 @@ def persist(engine, tables, sensor, events, *, partial=False, instances=None, re
                                 raise ValueError('origen_reutilizado_con_otro_contenido')
                             event_id,state=previous.id_evento,'duplicado'
                         else:
-                            alias = legacy_manual_aliases.get(prepared[0]) if legacy_manual_aliases else None
-                            event_id,state=save_event(conn,tables,instance,raw,prepared,alias)
+                            event_id,state=save_event(conn,tables,instance,raw,prepared,alias,provenance)
                     receipt.update(estado=state,id_evento=event_id)
                     if state == "insertado":
                         inserted[instance].append(event_id)

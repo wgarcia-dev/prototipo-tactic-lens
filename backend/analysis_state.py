@@ -31,7 +31,7 @@ def implementation_version():
     root = Path(__file__).parent
     components = ("analysis_model.py", "analysis_semantics.py", "analysis_consolidation.py", "analysis_impact.py",
                   "analysis_controls.py", "terminal_evidence.py", "threat_evaluation.py", "incident_assessment.py",
-                  "safeguard_risk.py", "intelligence.py", "enrichment.py", "rag/behavior.py", "rag/retrieval.py",
+                  "safeguard_risk.py", "intelligence.py", "cowrie_provenance.py", "enrichment.py", "rag/behavior.py", "rag/retrieval.py",
                   "rag/pipeline.py", "rag/validation.py", "rag/mitre_evidence.py", "rag/mitre_command_rules.py")
     return digest({component: hashlib.sha256((root / component).read_text(encoding="utf-8").encode()).hexdigest()
                    for component in components})

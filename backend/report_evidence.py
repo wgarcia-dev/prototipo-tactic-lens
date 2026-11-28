@@ -20,7 +20,6 @@ def complete_assessment(report, events, session, payload, total, *, modality="de
     raw = connects[0].datos_originales if connects else {}
     port = raw.get("dst_port") or getattr(session, "puerto_destino", None)
     registered = (payload.get("contexto_observado") or {}).get("modalidad")
-    mode = registered or modality
     proxy_events = by_kind.get("cowrie.proxy.backend_connected", [])
     node = section("Nodo de captura y certeza del entorno", [
         "La modalidad procede de la identidad registrada del sensor. El puerto es un dato de transporte.",
@@ -28,7 +27,8 @@ def complete_assessment(report, events, session, payload, total, *, modality="de
     ], ["Dato", "Evidencia y nivel de certeza"], [
         ["Sensor declarado en el evento", str(raw.get("sensor", "Sin identificador de sensor en la conexión"))],
         ["Destino y puerto observado", str(raw.get("dst_ip", "Dirección no registrada")) + ":" + str(port or "Sin puerto")],
-        ["Modalidad registrada", mode],
+        ["Modalidad verificable de la sesión", modality],
+        ["Modalidad usada por el análisis guardado", registered or "No disponible"],
         ["Conexión al backend del proxy", references(proxy_events)],
         ["Estado real del guest", "Pendiente de verificación independiente. Una conexión proxy o una salida de shell/LLM carece por sí sola de prueba de integridad, persistencia o compromiso del guest."],
         ["Referencia de conexión", references(connects)]

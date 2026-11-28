@@ -96,20 +96,16 @@ def technical_profile(kind, value):
     return {}
 
 
-def modality_column(session, instances):
-    return (case({identifier: mode for mode, identifier in instances.items()},
-                 value=session.c.id_honeypot, else_="desconocido") if instances else literal("desconocido"))
-
-
 def details_have(details, *roles):
     return or_(*(cast(details, JSONB).contains([{"comportamiento": role}]) for role in roles))
 
 
 def observation_query(tables, sensor_ids, instances, filters, ioc_id=None):
+    from .cowrie_provenance import event_mode
     ioc, kind, obs, event, session, sensor = (tables[name] for name in
         ("ioc", "tipo_ioc", "observacion_ioc", "evento", "sesion", "honeypot"))
     verified = func.jsonb_array_length(obs.c.detalles) > 0
-    mode = modality_column(session, instances)
+    mode = event_mode(event, session, instances)
     item = func.jsonb_array_elements(obs.c.detalles).column_valued("detalle_alcance", joins_implicitly=True)
     scope = (select(func.min(func.jsonb_extract_path_text(item, "alcance_ip")))
              .where(func.jsonb_extract_path_text(item, "campo") == "src_ip")

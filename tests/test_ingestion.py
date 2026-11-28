@@ -25,7 +25,7 @@ def event(source='fixture:1',**changes):
 
 
 class IngestionTests(fixtures.AuthFixture):
-    def test_destination_port_routes_shell_without_collector_instance(self):
+    def test_source_identity_routes_shell_and_destination_port_alone_is_insufficient(self):
         self.enroll(96, admin=True)
         shell_id = uuid4()
         self.connection.execute(app.state.tables['honeypot'].insert().values(
@@ -38,16 +38,21 @@ class IngestionTests(fixtures.AuthFixture):
             self.ingest([invalid], status=422)
             result = self.ingest([
                 event('port-routing-1', session='port-routing-test', dst_port='2222'),
+                event('sensor-routing-1', session='sensor-routing-test', sensor='tacticlens-cowrie-01', dst_port=2222),
                 explicit,
                 event('port-routing-unregistered', session='port-routing-unregistered', dst_port=2223),
             ])
-            self.assertEqual(result['insertados'], 3)
-            rows = self.client.get('/api/sesiones', params={'q': 'port-routing-test',
+            self.assertEqual(result['insertados'], 4)
+            rows = self.client.get('/api/sesiones', params={'q': 'sensor-routing-test',
                 'modalidad': 'cowrie_shell'}).json()
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]['modalidad'], 'cowrie_shell')
-            self.assertEqual(len(self.client.get('/api/sesiones', params={'q': 'port-routing-explicit',
-                'modalidad': 'cowrie_shell'}).json()), 1)
+            ambiguous = self.client.get('/api/sesiones', params={'q':'port-routing-test', 'modalidad':'desconocido'}).json()
+            self.assertEqual(len(ambiguous), 1)
+            conflict = self.client.get('/api/sesiones', params={'q':'port-routing-explicit', 'modalidad':'desconocido'}).json()
+            self.assertEqual(len(conflict), 1)
+            events = self.client.get(f"/api/sesiones/{conflict[0]['id_sesion']}/eventos").json()
+            self.assertEqual(events[0]['procedencia']['estado'], 'conflicto')
             fallback = self.client.get('/api/sesiones', params={'q': 'port-routing-unregistered'}).json()
             self.assertEqual(len(fallback), 1)
             self.assertNotEqual(fallback[0]['modalidad'], 'cowrie_proxy')

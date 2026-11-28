@@ -11,14 +11,15 @@ from uuid import UUID
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import MetaData, Table, String, and_, cast, create_engine, or_, select, func
+from sqlalchemy import MetaData, Table, String, and_, cast, create_engine, inspect, or_, select, func
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import URL
 from sqlalchemy.exc import SQLAlchemyError
 from pgvector.sqlalchemy import VECTOR  # registers pgvector type for reflection
 from .analysis_state import current_inputs, public_state, states_for_sessions
 from .db import database_engine
-from .db_access import RUNTIME_GRANTS, verify_runtime_access
+from .db_access import runtime_grants, verify_runtime_access
+from .cowrie_provenance import event_mode, public_provenance, session_mode
 from .sensitive import Redactor, redact as safe, session_redactors
 from .auth.config import Settings
 
@@ -76,8 +77,9 @@ async def lifespan(app: FastAPI):
     with engine.connect() as conn:
         if app.state.auth_settings.production or os.getenv("DATABASE_ENFORCE_RUNTIME_ROLE", "").lower() == "true":
             verify_runtime_access(conn, conn.scalar(select(func.current_user())))
+        grants = runtime_grants(inspect(conn).get_table_names(schema="honeypot"))
     tables = {name: Table(name, meta, schema="honeypot", autoload_with=engine)
-              for name in RUNTIME_GRANTS if name != "schema_migration"}
+              for name in grants if name != "schema_migration"}
     expected = {"sesion": {"id_sesion", "id_honeypot", "cowrie_session_id", "fecha_inicio", "ip_origen", "puerto_origen", "puerto_destino", "protocolo", "fecha_fin", "revision_eventos"}, "evento": {"id_evento", "id_sesion", "numero_secuencia", "tipo_evento", "fecha_hora", "datos_originales"}}
     expected.update(observacion_ioc={"detalles"}, deteccion_ioc={"id_observacion"})
     for name, columns in expected.items():
@@ -149,14 +151,13 @@ def sessions(request: Request, limit: int = Query(50, ge=1, le=200), offset: int
     table = app.state.tables["sesion"]
     events_table = app.state.tables["evento"]
     analysis_table = app.state.tables["analisis_llm"]
+    mode = session_mode(table, events_table, app.state.instances)
     statement = select(table.c.id_sesion, table.c.id_honeypot, table.c.cowrie_session_id, table.c.ip_origen,
                        table.c.protocolo, table.c.fecha_inicio, table.c.fecha_fin).where(table.c.id_honeypot.in_(sensor_ids()))
-    labels = {value: name for name, value in app.state.instances.items()}
     if modalidad is not None:
         if modalidad not in {"desconocido", "cowrie_shell", "cowrie_proxy", "cowrie_llm"}:
             raise HTTPException(422, "Modalidad no válida")
-        target = app.state.honeypot_id if modalidad == "desconocido" else app.state.instances.get(modalidad)
-        statement = statement.where(table.c.id_honeypot == target)
+        statement = statement.where(mode == modalidad)
     if q.strip():
         term = f'%{q.strip()}%'
         statement = statement.where(or_(table.c.cowrie_session_id.ilike(term), cast(table.c.ip_origen, String).ilike(term)))
@@ -165,7 +166,8 @@ def sessions(request: Request, limit: int = Query(50, ge=1, le=200), offset: int
             raise HTTPException(422, "El cursor requiere fecha con zona horaria e identificador, sin desplazamiento")
         statement = statement.where(table.c.fecha_inicio <= antes_fecha, or_(table.c.fecha_inicio < antes_fecha,
             and_(table.c.fecha_inicio == antes_fecha, table.c.id_sesion > antes_id)))
-    page = statement.order_by(table.c.fecha_inicio.desc(), table.c.id_sesion).limit(limit).offset(offset).subquery()
+    page = statement.add_columns(mode.label("modalidad")).order_by(
+        table.c.fecha_inicio.desc(), table.c.id_sesion).limit(limit).offset(offset).subquery()
     count_events = select(func.count()).where(events_table.c.id_sesion == page.c.id_sesion).scalar_subquery().label("eventos")
     has_result = select(1).where(analysis_table.c.id_sesion == page.c.id_sesion,
                                  analysis_table.c.estado == 'completado').exists().label('tiene_resultado')
@@ -179,7 +181,8 @@ def sessions(request: Request, limit: int = Query(50, ge=1, le=200), offset: int
         states = states_for_sessions(conn, analysis_table, inputs)
         redactors = session_redactors(conn, events_table, states)
     return [redactors[row.id_sesion].payload({**{key:value for key,value in row.items() if key != 'tiene_resultado'},
-            "modalidad": labels.get(row.id_honeypot, "desconocido"),
+            "procedencia": public_provenance(row.modalidad) if row.modalidad == "desconocido" else
+                          {"modalidad": row.modalidad, "estado": "verificada"},
             **public_state(states[row.id_sesion])}) for row in rows]
 
 
@@ -188,9 +191,13 @@ def events(id: UUID, request: Request, limit: int = Query(200, ge=1, le=500), of
            id_evento: int | None = Query(None, ge=0, le=(1 << 63) - 1), comandos_recientes: bool = False):
     local_only(request)
     table = app.state.tables["evento"]
+    sessions = app.state.tables["sesion"]
     with app.state.engine.connect() as conn:
-        query = select(table.c.id_evento, table.c.tipo_evento, table.c.fecha_hora, table.c.datos_originales
-                       ).where(table.c.id_sesion == id, table.c.id_sesion.in_(routes.sensor_sessions()))
+        fields = [table.c.procedencia_cowrie] if "procedencia_cowrie" in table.c else []
+        query = (select(table.c.id_evento, table.c.tipo_evento, table.c.fecha_hora, table.c.datos_originales,
+                        event_mode(table, sessions, app.state.instances).label("modalidad"), *fields)
+                 .join(sessions, sessions.c.id_sesion == table.c.id_sesion)
+                 .where(table.c.id_sesion == id, sessions.c.id_honeypot.in_(sensor_ids())))
         if id_evento is not None:
             query = query.where(table.c.id_evento == id_evento)
         order = (table.c.fecha_hora, table.c.numero_secuencia, table.c.id_evento)
@@ -200,13 +207,15 @@ def events(id: UUID, request: Request, limit: int = Query(200, ge=1, le=500), of
         rows = conn.execute(query.order_by(*order).limit(limit).offset(offset)).mappings().all()
         if rows:
             redactor = session_redactors(conn, table, [id])[id]
-    return [{**dict(row), "id_evento_texto": str(row.id_evento),
+    return [{**{k: v for k, v in row.items() if k != "procedencia_cowrie"}, "id_evento_texto": str(row.id_evento),
+             "procedencia": public_provenance(row.modalidad, row.get("procedencia_cowrie")),
              "tipo_evento": redactor.text(row.tipo_evento),
              "datos_originales": redactor.payload(row.datos_originales, raw_event=True)} for row in rows]
 
 
 from . import routes  # noqa: E402,F401 - registers extended routes
 from .safeguards import router as safeguards_router
+from .incident_routes import router as incidents_router
 from .auth.routes import router as auth_router
 from .auth.middleware import AuthMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -214,6 +223,7 @@ from fastapi.responses import JSONResponse
 
 app.include_router(auth_router)
 app.include_router(safeguards_router)
+app.include_router(incidents_router)
 from .auth.onboarding import router as onboarding_router
 app.include_router(onboarding_router)
 from .auth.recovery import router as recovery_router

@@ -20,6 +20,8 @@ from sqlalchemy.dialects.postgresql import insert
 
 from .api import sensor_ids, app, local_only, persist_events
 from .sensitive import Redactor, session_redactors
+from .cowrie_provenance import event_mode, public_provenance, session_mode
+from .incidents import register_analysis
 from .analysis_consolidation import structure_result
 from .analysis_execution import (AnalysisFailure, AttemptBudget, DEFAULT_ATTEMPT_SECONDS, configuration_failure,
                                  expired, positive_seconds, post_provider, provider_configuration, remaining)
@@ -65,8 +67,10 @@ def sensor_sessions():
     return select(sessions.c.id_sesion).where(sessions.c.id_honeypot.in_(sensor_ids()))
 
 
-def sensor_modality(sensor):
-    return next((name for name, identifier in app.state.instances.items() if identifier == sensor), 'desconocido')
+def measured_modality(conn, session_id):
+    sessions, events = table("sesion"), table("evento")
+    return conn.scalar(select(session_mode(sessions, events, app.state.instances))
+                       .where(sessions.c.id_sesion == session_id)) or "desconocido"
 
 
 def sensor_events():
@@ -127,7 +131,8 @@ def upload_cowrie(file: UploadFile = File(...)):
     if not file.filename or not file.filename.lower().endswith((".json", ".jsonl")):
         raise HTTPException(422, "Seleccione un archivo .json o .jsonl")
     from .cowrie_import import import_events
-    return import_events(file.file, persist_events)
+    from functools import partial
+    return import_events(file.file, partial(persist_events, instances=app.state.instances))
 
 
 @app.get("/api/sesiones/{id_sesion}", dependencies=[Depends(local_only)])
@@ -140,9 +145,10 @@ def session_detail(id_sesion: UUID):
             state = states_for_sessions(conn, a, inputs)[id_sesion]
         if row:
             redactor = session_redactors(conn, e, [id_sesion])[id_sesion]
+            mode = measured_modality(conn, id_sesion)
     if not row:
         raise HTTPException(404, "Sesion no encontrada")
-    return redactor.payload({**plain(row), "modalidad": sensor_modality(row.id_honeypot), **public_state(state)})
+    return redactor.payload({**plain(row), "modalidad": mode, "procedencia": public_provenance(mode), **public_state(state)})
 
 
 def dashboard_snapshot():
@@ -160,12 +166,14 @@ def dashboard_snapshot():
             select(technique_count(mappings)).scalar_subquery().label('tecnicas_mitre'),
         )).mappings().one())
         counts.update(iocs=observable_counts['observables'], iocs_verificables=observable_counts['verificables'])
-        totals = conn.execute(select(s.c.id_honeypot, func.count(func.distinct(s.c.id_sesion)), func.count(e.c.id_evento))
-            .select_from(s.outerjoin(e, e.c.id_sesion == s.c.id_sesion)).where(s.c.id_honeypot.in_(sensor_ids()))
-            .group_by(s.c.id_honeypot)).all()
-        groups = {sensor: (sessions_count, events_count) for sensor, sessions_count, events_count in totals}
-        counts["por_modalidad"] = {label: dict(zip(("sesiones", "eventos"), groups.get(sensor, (0, 0))))
-            for label, sensor in {"desconocido": app.state.honeypot_id, **app.state.instances}.items()}
+        sm = session_mode(s, e, app.state.instances)
+        em = event_mode(e, s, app.state.instances)
+        session_totals = dict(conn.execute(select(sm, func.count()).select_from(s)
+            .where(s.c.id_honeypot.in_(sensor_ids())).group_by(sm)).all())
+        event_totals = dict(conn.execute(select(em, func.count()).select_from(e.join(s, e.c.id_sesion == s.c.id_sesion))
+            .where(s.c.id_honeypot.in_(sensor_ids())).group_by(em)).all())
+        counts["por_modalidad"] = {label: {"sesiones":session_totals.get(label,0), "eventos":event_totals.get(label,0)}
+                                  for label in ("desconocido", *app.state.instances)}
         day = cast(func.timezone('America/Guayaquil', e.c.fecha_hora), Date).label('dia')
         today = datetime.now(ioc_views.ECUADOR).date()
         start = today - timedelta(days=6)
@@ -209,7 +217,7 @@ def session_report(id_sesion: UUID, request: Request, formato: Literal["json", "
         elif formato != "json" and not actual:
             raise HTTPException(428, "Abra la vista previa antes de exportar o solicite explícitamente un informe actual.")
         report = report_snapshot(conn, app.state.tables, sensor, id_sesion, analysis_id=id_analisis,
-                                 modality=sensor_modality(sensor), sensors=sensor_ids(), instances=app.state.instances)
+                                 modality=measured_modality(conn, id_sesion), sensors=sensor_ids(), instances=app.state.instances)
     report, token = finalize_report(settings, report, actor, pinned)
     if formato == "json":
         from fastapi.responses import JSONResponse
@@ -454,7 +462,7 @@ def execute_analysis(id_sesion, actualizar_informe, actualizar_rag):
         if session is None:
             raise HTTPException(404, "Sesion no encontrada")
         sensor = session.id_honeypot
-        modality=sensor_modality(sensor)
+        modality=measured_modality(conn, id_sesion)
         inputs, config = current_inputs(conn, app.state.tables, [id_sesion], sensor_ids(), app.state.instances)
         current_input = inputs[id_sesion]
         if not current_input["eventos_total"]:
@@ -494,7 +502,9 @@ def execute_analysis(id_sesion, actualizar_informe, actualizar_rag):
         except RuntimeError:
             failure = configuration_failure("Genere los embeddings del catálogo MITRE activo antes de analizar.")
             raise HTTPException(failure.status, failure.public()) from None
-        events = conn.execute(select(e.c.id_evento, e.c.tipo_evento, e.c.fecha_hora, e.c.datos_originales, e.c.id_sesion)
+        events = conn.execute(select(e.c.id_evento, e.c.tipo_evento, e.c.fecha_hora, e.c.datos_originales, e.c.id_sesion,
+                                     event_mode(e, s, app.state.instances).label("modalidad"))
+                              .join(s, s.c.id_sesion == e.c.id_sesion)
             .where(e.c.id_sesion == id_sesion).order_by(e.c.fecha_hora, e.c.id_evento)).all()
         redactor = Redactor(item.datos_originales for item in events)
         evidence = evidence_snapshot(events)
@@ -577,6 +587,7 @@ def execute_analysis(id_sesion, actualizar_informe, actualizar_rag):
             ))
             if not completed.rowcount:
                 raise expired(phase)
+            register_analysis(conn, app.state.tables, sensor_ids(), app.state.instances, analysis_id)
             notify_change(conn, [sensor], "analisis", "iocs", "mitre", "salvaguardas", "panel")
     except Exception as exc:
         messages = {"recuperacion_rag": "No se pudo recuperar el contexto MITRE.",
@@ -663,7 +674,8 @@ def comparable_sessions(conn, sessions, event, candidates, upper):
         return []
     grouped = defaultdict(list)
     result = conn.execute(select(event.c.id_evento, event.c.tipo_evento, event.c.fecha_hora,
-        event.c.datos_originales, event.c.id_sesion, sessions.c.id_honeypot, sessions.c.ip_origen)
+        event.c.datos_originales, event.c.id_sesion, sessions.c.id_honeypot, sessions.c.ip_origen,
+        event_mode(event, sessions, app.state.instances).label("modalidad"))
         .join(sessions,sessions.c.id_sesion==event.c.id_sesion)
         .where(event.c.id_sesion.in_(candidates), event.c.fecha_hora <= upper)
         .order_by(event.c.fecha_hora, event.c.id_evento))
@@ -672,7 +684,8 @@ def comparable_sessions(conn, sessions, event, candidates, upper):
     history = []
     for session_id, records in grouped.items():
         previous = records[0]
-        previous_mode = sensor_modality(previous.id_honeypot)
+        modes = {item.modalidad for item in records}
+        previous_mode = next(iter(modes)) if len(modes) == 1 else "desconocido"
         mitre, extra, _, _ = scoped_witnesses(records, previous_mode)
         history.append(session_pattern({"id_sesion":session_id,"id_honeypot":previous.id_honeypot,
                                         "ip_origen":previous.ip_origen,"modalidad":previous_mode}, mitre + extra, records))
@@ -937,7 +950,7 @@ def ioc_observations(id_ioc: UUID, filters: Annotated[ioc_views.IocFilters, Depe
             query = (query.join(session, session.c.id_sesion == event.c.id_sesion)
                      .join(sensor, sensor.c.id_honeypot == session.c.id_honeypot)
                      .add_columns(session.c.cowrie_session_id, sensor.c.nombre.label("sensor"),
-                                  ioc_views.modality_column(session,app.state.instances).label("modalidad")))
+                                  event_mode(event, session, app.state.instances).label("modalidad")))
             if id_evento is None and filters.model_dump(exclude_defaults=True, exclude={"orden"}):
                 scope = ioc_views.filtered_scope(conn,app.state.tables,sensor_ids(),app.state.instances,filters,id_ioc)
                 query = query.where(obs.c.id_observacion.in_(select(scope.c.id_observacion)))
@@ -1187,10 +1200,11 @@ def session_candidates(id_sesion:UUID,request:Request):
         sensor=conn.scalar(select(s.c.id_honeypot).where(s.c.id_sesion==id_sesion,s.c.id_honeypot.in_(sensor_ids())))
         if sensor is None:
             raise HTTPException(404,'Sesion no encontrada')
+        modality=measured_modality(conn,id_sesion)
         events=conn.execute(select(e.c.id_evento,e.c.tipo_evento,e.c.fecha_hora,e.c.datos_originales,e.c.id_sesion).where(e.c.id_sesion==id_sesion).order_by(e.c.fecha_hora,e.c.id_evento)).all()
     if not events:raise HTTPException(422,'La sesion no tiene eventos')
     try:
-        return Redactor(event.datos_originales for event in events).payload(rag_context(events,sensor_modality(sensor)))
+        return Redactor(event.datos_originales for event in events).payload(rag_context(events,modality))
     except RuntimeError:raise HTTPException(503,'Buscador no preparado; revise catalogo y embeddings') from None
 
 

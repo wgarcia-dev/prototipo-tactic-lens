@@ -7,7 +7,7 @@ import {sameSnapshot} from '../monitoring/polling'
 import {AnalysisStatus, type AnalysisValidity, type AttemptStatus} from '../analysis/AnalysisStatus'
 
 export type Session = {modalidad?:string,id_sesion:string,cowrie_session_id:string,ip_origen:string|null,fecha_inicio:string,fecha_fin:string|null,protocolo?:string,eventos?:number,estado_analisis?:'pendiente'|'en_proceso'|'analizada'|'error',analisis_desactualizado?:boolean,vigencia_analisis?:AnalysisValidity|null,estado_ultimo_intento?:AttemptStatus,analisis?:{id_analisis:string,estado:string}|null,ultimo_intento?:{id_analisis:string,estado:string,mensaje_error:string|null}|null}
-export type Event = {id_evento:number,id_evento_texto?:string,tipo_evento:string,fecha_hora:string,datos_originales:Record<string,unknown>}
+export type Event = {procedencia?:{modalidad:string;sensor:string|null;estado:string};id_evento:number,id_evento_texto?:string,tipo_evento:string,fecha_hora:string,datos_originales:Record<string,unknown>}
 export const date=(v?:string|null)=>v?new Date(v).toLocaleString('es-EC',{dateStyle:'short',timeStyle:'short',timeZone:'America/Guayaquil'}):'—'
 export const analysisActionLabel=(session:Session)=>session.estado_analisis==='error'?'Reintentar':session.analisis_desactualizado?'Actualizar análisis':'Analizar'
 

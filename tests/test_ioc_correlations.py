@@ -170,7 +170,9 @@ class CorrelationApiTests(fixtures.AuthFixture):
             body = summary.json()
             self.assertEqual(body['version_catalogo'], '20.1')
             self.assertEqual({key: body['totales'][key] for key in ('tecnicas','tacticas','sesiones','mapeos','eventos_citados','con_citas','pendientes')},
-                             {'tecnicas':1,'tacticas':1,'sesiones':2,'mapeos':3,'eventos_citados':2,'con_citas':3,'pendientes':1})
+                             {'tecnicas':1,'tacticas':1,'sesiones':2,'mapeos':3,'eventos_citados':2,'con_citas':3,'pendientes':3})
+            self.assertEqual({row['estado_identificacion']: row['pendientes'] for row in body['estados']},
+                             {'automatica': 2, 'historica_pendiente': 1})
             self.assertEqual([(row['codigo_tactica'],row['mapeos']) for row in body['tacticas']], [('TA0011',3)])
             self.assertEqual([(row['modalidad'],row['mapeos']) for row in body['modalidades']], [('cowrie_shell',3)])
             self.assertTrue(all(row['origen_fecha']=='evento_citado' for row in body['evolucion']))
@@ -217,7 +219,7 @@ class CorrelationApiTests(fixtures.AuthFixture):
             self.assertEqual(reloaded['estado_revision'],'pendiente')
             expanded = self.client.get(f'/api/mitre/mapeos/{current["id_mapeo"]}/observables',params={'detallar_citas':True}).json()
             self.assertIn('wget',expanded['mapeo']['eventos'][0]['comando'])
-            self.assertNotIn('?a=1',str(expanded))
+            self.assertIn(self.URL_A, expanded['mapeo']['eventos'][0]['comando'])
             quotes = app.state.tables['mapeo_mitre_evento']
             self.connection.execute(quotes.delete().where(quotes.c.id_mapeo==UUID(legacy['id_mapeo'])))
             historical = self.client.get('/api/mitre/resumen',params={**filters,'citas':'sin'}).json()
@@ -275,14 +277,16 @@ class CorrelationApiTests(fixtures.AuthFixture):
         self.assertNotIn("fixture-opaque",str(priority))
         matched, = self.client.get('/api/iocs/explorar',params={"sesion":name,"tecnica":"T1105","tactica":"TA0011"}).json()
         self.assertEqual((matched["id_ioc"],matched["tecnicas"]),(str(url),1))
-        self.assertNotIn("?a=",matched["valor"])
+        self.assertEqual(matched["valor"], self.URL_A)
         sessions = self.client.get(f'/api/iocs/{url}/sesiones')
         self.assertEqual(sessions.status_code,200,sessions.text)
         related, = sessions.json()
         self.assertEqual((related["id_sesion"],related["eventos"],related["observaciones"],related["tecnicas"]),
                          (str(sid),4,1,["T1105"]))
-        self.assertEqual(self.client.patch(f"/api/inteligencia/observacion_ioc/{exact['id_observacion']}/revision",
-                         json={"estado":"confirmado","motivo":"Un analista no puede confirmar evidencia"}).status_code,403)
+        revision = f"/api/inteligencia/observacion_ioc/{exact['id_observacion']}/revision"
+        expected = self.client.get(revision).json()["revision"]
+        self.assertEqual(self.client.patch(revision, json={"estado":"confirmado", "revision_esperada":expected,
+                         "motivo":"Un analista no puede confirmar evidencia"}).status_code,403)
 
     def test_matrix_counts_each_historical_pair_only_once(self):
         self.enroll(827)
@@ -413,11 +417,20 @@ class CorrelationApiTests(fixtures.AuthFixture):
                 self.assertEqual((observable["valor"],observable["estado"]), (self.URL_A,state))
 
         assert_relation("pendiente","contextual")
+        revision = f"/api/inteligencia/mitre/{mid}/revision"
+        decision = {"estado":"confirmado", "motivo":"Decisión documentada de la revisión"}
+        self.assertEqual(self.client.patch(revision, json=decision).status_code, 422)
+        expected = self.client.get(revision).json()["revision"]
+        self.assertIsNone(expected)
         for review,state in (("confirmado","contextual"),("descartado","insuficiente")):
-            response = self.client.patch(f"/api/inteligencia/mitre/{mid}/revision", json={
-                "estado": review, "motivo": "Decisión documentada de la revisión"})
+            if review == "descartado":
+                stale = self.client.patch(revision, json={**decision, "estado":review, "revision_esperada":None})
+                self.assertEqual(stale.status_code, 409, stale.text)
+                assert_relation("confirmado", "contextual")
+            response = self.client.patch(revision, json={**decision, "estado":review, "revision_esperada":expected})
             self.assertEqual(response.status_code, 200, response.text)
             assert_relation(review,state)
+            expected = response.json()["revision"]
         self.assertEqual(self.client.get(analysis_path).json()["resultado_estructurado"], analysis["resultado_estructurado"])
         with patch("backend.routes.real_result", side_effect=AssertionError("Análisis completado")):
             self.assertTrue(self.client.post(f"/api/sesiones/{session_id}/analizar").json()["reutilizado"])
@@ -477,11 +490,13 @@ class CorrelationApiTests(fixtures.AuthFixture):
             Finding(tipo='descarga',descripcion='Comando de descarga observado',confianza=0.8,eventos=[eid],
                     mitre=[self.proposal('T1105','TA0011',[eid])])]))
         self.assertEqual(self.client.get("/api/mitre/resumen").status_code, 200)
-        mapping = self.client.get("/api/mitre/mapeos").json()[0]
+        mapping, = self.client.get("/api/mitre/mapeos", params={"id_sesion":str(self.session_id(eid))}).json()
         endpoint = f"/api/mitre/mapeos/{mapping['id_mapeo']}/observables"
         self.assertEqual(self.client.get(endpoint).status_code, 200)
         self.assertEqual(self.client.get(f"/api/mitre/mapeos/{uuid4()}/observables").status_code, 404)
-        denied = self.client.patch(f"/api/inteligencia/mitre/{mapping['id_mapeo']}/revision", json={
-            "estado": "confirmado", "motivo": "Intento de editar como analista"})
+        revision = f"/api/inteligencia/mitre/{mapping['id_mapeo']}/revision"
+        version = self.client.get(revision).json()["revision"]
+        denied = self.client.patch(revision, json={
+            "estado": "confirmado", "motivo": "Intento de editar como analista", "revision_esperada":version})
         self.assertEqual(denied.status_code, 403)
         self.assertEqual(self.client.get(endpoint).json()["mapeo"]["estado_revision"], mapping["estado_revision"])

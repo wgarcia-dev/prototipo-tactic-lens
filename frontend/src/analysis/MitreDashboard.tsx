@@ -58,7 +58,7 @@ export function CountLabels({counts}: {counts:Counts}) {
   return <span className="flex flex-wrap gap-1">
     {!!counts.automaticas&&<span className="badge contextual">{counts.automaticas} {counts.automaticas===1?'automática':'automáticas'}</span>}
     {!!counts.confirmadas&&<span className="badge contextual">{counts.confirmadas} {counts.confirmadas===1?'confirmada':'confirmadas'}</span>}
-    {!!counts.pendientes&&<span className="badge warn">{counts.pendientes} {counts.pendientes===1?'histórica pendiente':'históricas pendientes'}</span>}
+    {!!counts.pendientes&&<span className="badge warn">{counts.pendientes} {counts.pendientes===1?'pendiente de revisión':'pendientes de revisión'}</span>}
     {!!counts.descartadas&&<span className="badge error">{counts.descartadas} {counts.descartadas===1?'descartada':'descartadas'}</span>}
   </span>
 }

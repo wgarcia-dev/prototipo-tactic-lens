@@ -1,4 +1,4 @@
-export const monitorDomains = ['sesiones','analisis','iocs','mitre','salvaguardas','panel'] as const
+export const monitorDomains = ['sesiones','analisis','iocs','mitre','salvaguardas','respuesta_incidentes','panel'] as const
 export type MonitorDomain = typeof monitorDomains[number]
 export type Notice = {tipo:string, epoca?:string, revision?:number, dominios?:MonitorDomain[], recibido_api?:string, confirmado_api?:string, eventos?:number[]}
 

@@ -1,0 +1,7 @@
+.response-kanban { grid-template-columns:repeat(5,minmax(0,1fr)); }
+@media (min-width:901px) and (max-width:1250px) {
+  .response-kanban { grid-template-columns:repeat(5,minmax(12rem,1fr)); overflow-x:auto; padding-bottom:.5rem; }
+}
+@media (max-width:900px) {
+  .response-kanban { grid-template-columns:minmax(0,1fr); }
+}

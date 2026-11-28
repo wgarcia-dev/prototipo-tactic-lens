@@ -1,4 +1,4 @@
-import {useEffect, useId, useRef, useState, type ReactNode} from 'react'
+import {useEffect, useId, useRef, useState, type ReactNode, type RefObject} from 'react'
 import {Link} from 'react-router-dom'
 import {DndContext, DragOverlay, KeyboardSensor, MouseSensor, TouchSensor, useDraggable,
   useDroppable, useSensor, useSensors, pointerWithin, closestCenter, type CollisionDetection,
@@ -44,20 +44,9 @@ export function BoardDrawer({title,onClose,children}: {title:string;onClose:()=>
 }
 
 const collisions:CollisionDetection = args=> args.pointerCoordinates ? pointerWithin(args) : closestCenter(args)
-const keyboardColumns:KeyboardCoordinateGetter = (event,{currentCoordinates,context})=>{
-  const direction = {ArrowLeft:-1,ArrowUp:-1,ArrowRight:1,ArrowDown:1}[event.code]
-  const index = columns.indexOf((context.over?.id ?? context.active?.data.current?.task.estado) as Stage)
-  if (!direction || index<0 || !context.collisionRect) return
-  event.preventDefault()
-  const target=columns[index+direction]
-  const rect=target && context.droppableRects.get(target)
-  if (!rect) return
-  return {x:currentCoordinates.x+rect.left+rect.width/2-context.collisionRect.left-context.collisionRect.width/2,
-    y:currentCoordinates.y+Math.min(rect.height/2,85)+rect.top-context.collisionRect.top-context.collisionRect.height/2}
-}
 
 function Card({task,selected,draggable,onSelect}: {task:Task;selected:boolean;draggable:boolean;onSelect:()=>void}) {
-  const {attributes,listeners,setNodeRef,setActivatorNodeRef,isDragging}=useDraggable({id:task.id_salvaguarda,data:{task},disabled:!draggable})
+  const {attributes,listeners,setNodeRef,setActivatorNodeRef,isDragging}=useDraggable({id:task.id_salvaguarda,data:{task,stage:task.estado},disabled:!draggable})
   const today = new Intl.DateTimeFormat('en-CA',{timeZone:'America/Guayaquil',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())
   const overdue = task.estado!=='realizada' && !!task.vence_en && task.vence_en<today
   return <article ref={setNodeRef} className="kanban-card" data-overdue={overdue} data-dragging={isDragging}>
@@ -106,7 +95,34 @@ function Column({stage,page,wip,loading,selected,active,admin,userId,onSelect,on
 export function SafeguardBoard({pages,wip,loading,selected,admin,userId,onSelect,onMove,onMore}: {
   pages:Record<Stage,Page>;wip:Wip|null;loading:boolean;selected:string|null;admin:boolean;userId?:string;
   onSelect:(id:string)=>void;onMove:(task:Task,state:Stage)=>void;onMore:(state:Stage)=>void}) {
-  const [active,setActive]=useState<Task|null>(null)
+  return <KanbanInteraction columns={columns} labels={states} allowed={(task:Task)=>allowedMoves(task,admin,userId)}
+    onMove={onMove} preview={task=><><strong>{task.codigo}</strong> · {task.nombre}</>}>
+    {(active,board)=><div ref={board} className="safeguard-kanban" aria-label="Tablero de salvaguardas">
+      {columns.map(stage=><Column key={stage} stage={stage} page={pages[stage]} wip={wip} loading={loading}
+        selected={selected} active={active} admin={admin} userId={userId} onSelect={onSelect} onMore={()=>onMore(stage)}/>)}
+    </div>}
+  </KanbanInteraction>
+}
+
+function keyboardColumns<S extends string>(columns:readonly S[]):KeyboardCoordinateGetter {
+  return (event,{currentCoordinates,context})=>{
+    const direction = {ArrowLeft:-1,ArrowUp:-1,ArrowRight:1,ArrowDown:1}[event.code]
+    const index = columns.indexOf((context.over?.id ?? context.active?.data.current?.stage) as S)
+    if (!direction || index<0 || !context.collisionRect) return
+    event.preventDefault()
+    const target=columns[index+direction]
+    const rect=target && context.droppableRects.get(target)
+    if (!rect) return
+    return {x:currentCoordinates.x+rect.left+rect.width/2-context.collisionRect.left-context.collisionRect.width/2,
+      y:currentCoordinates.y+Math.min(rect.height/2,85)+rect.top-context.collisionRect.top-context.collisionRect.height/2}
+  }
+}
+
+export function KanbanInteraction<T,S extends string>({columns,labels,allowed,onMove,preview,children}:{
+  columns:readonly S[];labels:Record<S,string>;allowed:(task:T)=>readonly S[];onMove:(task:T,stage:S)=>void;
+  preview:(task:T)=>ReactNode;children:(active:T|null,board:RefObject<HTMLDivElement|null>)=>ReactNode;
+}) {
+  const [active,setActive]=useState<T|null>(null)
   const [pointerDrag,setPointerDrag]=useState(false)
   const board=useRef<HTMLDivElement>(null)
   useEffect(()=>{
@@ -135,24 +151,21 @@ export function SafeguardBoard({pages,wip,loading,selected,admin,userId,onSelect
   },[pointerDrag])
   const sensors=useSensors(useSensor(MouseSensor,{activationConstraint:{distance:6}}),
     useSensor(TouchSensor,{activationConstraint:{delay:180,tolerance:7}}),
-    useSensor(KeyboardSensor,{coordinateGetter:keyboardColumns}))
+    useSensor(KeyboardSensor,{coordinateGetter:keyboardColumns(columns)}))
   return <DndContext sensors={sensors} collisionDetection={collisions}
     autoScroll={{canScroll:element=>element===document.scrollingElement&&window.matchMedia('(max-width: 900px)').matches}}
     accessibility={{screenReaderInstructions:{draggable:'Pulsa Espacio para tomar una tarjeta. Usa las flechas para elegir la columna. Pulsa Espacio para soltar o Escape para cancelar.'},
-      announcements:{onDragStart:()=> 'Tarjeta tomada.',onDragOver:({over})=>over?states[over.id as Stage]:'Fuera de las columnas.',
-        onDragEnd:({over})=>over?`Tarjeta soltada en ${states[over.id as Stage]}.`:'Movimiento cancelado.',onDragCancel:()=> 'Movimiento cancelado.'}}}
+      announcements:{onDragStart:()=> 'Tarjeta tomada.',onDragOver:({over})=>over?labels[over.id as S]:'Fuera de las columnas.',
+        onDragEnd:({over})=>over?`Tarjeta soltada en ${labels[over.id as S]}.`:'Movimiento cancelado.',onDragCancel:()=> 'Movimiento cancelado.'}}}
     onDragStart={event=>{setActive(event.active.data.current?.task??null);setPointerDrag(!(event.activatorEvent instanceof KeyboardEvent))}}
     onDragCancel={()=>{setActive(null);setPointerDrag(false)}} onDragEnd={event=>{
       setActive(null)
       setPointerDrag(false)
-      const task=event.active.data.current?.task as Task|undefined
-      const stage=event.over?.id as Stage|undefined
-      if(task&&stage&&allowedMoves(task,admin,userId).includes(stage))onMove(task,stage)
+      const task=event.active.data.current?.task as T|undefined
+      const stage=event.over?.id as S|undefined
+      if(task&&stage&&allowed(task).includes(stage))onMove(task,stage)
     }}>
-    <div ref={board} className="safeguard-kanban" aria-label="Tablero de salvaguardas">
-      {columns.map(stage=><Column key={stage} stage={stage} page={pages[stage]} wip={wip} loading={loading}
-        selected={selected} active={active} admin={admin} userId={userId} onSelect={onSelect} onMore={()=>onMore(stage)}/>)}
-    </div>
-    <DragOverlay dropAnimation={null} style={{pointerEvents:'none'}}>{active&&<div className="panel kanban-preview"><strong>{active.codigo}</strong> · {active.nombre}</div>}</DragOverlay>
+    {children(active,board)}
+    <DragOverlay dropAnimation={null} style={{pointerEvents:'none'}}>{active&&<div className="panel kanban-preview">{preview(active)}</div>}</DragOverlay>
   </DndContext>
 }

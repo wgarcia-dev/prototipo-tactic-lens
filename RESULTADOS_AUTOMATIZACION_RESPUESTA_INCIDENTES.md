@@ -1,6 +1,6 @@
 # Automatización de Respuesta a Incidentes
 
-La automatización quedó implementada en `integration/incidentes`. El commit funcional es `86697c89e9647292ded0dc8ce5f04d96c10740a2`. La migración 018 se verificó en PostgreSQL aislado. La activación operativa y el lote de 21 candidatos quedan pendientes de despliegue. Las pruebas usaron DeepSeek simulado y correo sin entrega externa.
+La automatización quedó implementada en `integration/incidentes`. El commit funcional es `86697c89e9647292ded0dc8ce5f04d96c10740a2`. La migración 018 se verificó en PostgreSQL aislado y se aplicó en el entorno operativo. La vista previa inicial identificó 21 candidatos históricos. El lote queda pendiente de autorización y la configuración operativa mantiene desactivados la generación automática, el correo externo de incidentes y el archivo histórico de Salvaguardas.
 
 ## Flujo de trabajo
 
@@ -47,7 +47,7 @@ La automatización quedó implementada en `integration/incidentes`. El commit fu
 | `npm --prefix frontend test` | 37 aprobadas. |
 | `npm --prefix frontend run build` | Compilación de TypeScript y Vite correcta. Se observaron avisos del empaquetador sobre directivas de React Router. |
 | `node frontend/src/incidents/response/response.browser.mjs` | Chromium con dos pestañas y API/WebSocket simulados. Verificó Kanban, «Mis acciones», recuperación histórica, borrador del candidato sin controles de aprobación y lectura de la campana. |
-| Regresión ampliada de autenticación | Dos fallos reproducidos también en el commit base `2bc0957`. La prueba de alta guiada espera un token en el último correo capturado con el outbox detenido. La prueba de revisión IoC omite `revision_esperada`. |
+| Regresión ampliada de autenticación | La prueba de alta guiada despacha explícitamente la referencia persistida con un proveedor simulado y verifica la deduplicación. La prueba de IoC obtiene `revision_esperada` y verifica el rechazo de una decisión obsoleta. |
 
 ## Activación del lote histórico
 
@@ -59,7 +59,8 @@ La automatización quedó implementada en `integration/incidentes`. El commit fu
 
 ## Límites y pendientes
 
+- El piloto operativo autorizado ejecutó una solicitud a `deepseek-v4-pro`. El proveedor consumió 2.286 tokens de entrada y los 2.800 de salida en razonamiento, devolvió `finish_reason=length` y no devolvió un borrador estructurado. El trabajo quedó fallido y emitió un aviso interno. El corte por tokens queda pendiente de corrección. El lote histórico sigue sin activarse.
 - La calidad semántica de recomendaciones y el comportamiento de Resend en vivo requieren validación operativa. La validación automática comprueba la estructura y la pertenencia de citas, y la revisión humana valida la pertinencia de la actuación y las conclusiones.
 - La autorización actual usa el alcance de sensores configurado para la instancia y las cuentas autorizadas. El proyecto carece de un calendario de disponibilidad y de un ACL individual por sensor. Las sugerencias usan la carga registrada y el WIP compartido.
 - El control de duplicados compara la procedencia y la medida normalizada. Las recomendaciones equivalentes con redacción diferente requieren conciliación humana. Las vistas de la API muestran hasta 50 borradores y 100 ediciones por borrador.
-- La migración operativa, la generación retrospectiva, el despacho de correo real y el cambio a archivo histórico requieren la ventana de activación correspondiente. La rama queda disponible localmente con sus archivos de trabajo ajenos preservados.
+- La generación retrospectiva, el despacho de correo real y el cambio a archivo histórico requieren la autorización y las comprobaciones de activación correspondientes.

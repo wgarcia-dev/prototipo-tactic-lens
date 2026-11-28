@@ -114,6 +114,7 @@ class AuthFixture(unittest.TestCase):
             "AUTH_MAX_ATTEMPTS": "5", "AUTH_IDLE_SECONDS": "1800", "AUTH_RESEND_SECONDS": "60",
             "AUTH_EMAIL_TTL_SECONDS": "300", "AUTH_CHALLENGE_SECONDS": "300", "MAIL_TRANSPORT": "file",
             "AUTH_RESET_SECONDS": "900", "AUTH_RECOVERY_REQUEST_SECONDS": "86400", "AUTH_RECENT_ACTIVITY_SECONDS": "120",
+            "MAIL_OUTBOX_ENABLED": "false",
             "ADMIN_EMAIL":"", "SUPPORT_EMAIL":"",
         })
         cls.settings_patch.start()
@@ -370,12 +371,30 @@ class AuthIntegrationTests(AuthFixture):
         self.post("/password/inicial",{"password":PASSWORD,"confirmacion":PASSWORD})
 
     def test_admin_accepts_guided_signup_but_password_and_mfa_still_required(self):
+        from backend.auth.notifications import dispatch_one
+
         target_id,data=self.public_signup()
         _,_,secret,_=self.enroll(99,admin=True)
         self.advance()
+        before=len(self.messages)
         response=self.client.patch(f"/api/auth/admin/usuarios/{target_id}",json={"codigo":self.otp(secret),"rol":"analista","activo":True,"aprobar":True})
         self.assertEqual(response.status_code,200,response.text)
-        token=re.search(r"#token=([^\s]+)",self.messages[-1][2])[1]
+        self.assertEqual(len(self.messages),before)
+        outbox=app.state.tables["auth_notificacion"]
+        pending=self.connection.execute(select(outbox).where(outbox.c.tipo=="recuperacion_enlace",
+            outbox.c.destinatario==data["correo"])).mappings().one()
+        self.assertEqual(pending.estado,"pendiente")
+        request=Request({"type":"http","method":"GET","path":"/tareas/cola-correo","headers":[],
+                         "query_string":b"","app":app})
+        dispatch_one(request,pending.id_notificacion)
+        dispatch_one(request,pending.id_notificacion)
+        self.assertEqual(len(self.messages),before+1)
+        self.assertEqual(self.messages[-1][0],data["correo"])
+        self.assertEqual(self.connection.scalar(select(outbox.c.estado).where(
+            outbox.c.id_notificacion==pending.id_notificacion)),"aceptado")
+        captured=re.search(r"#token=([^\s]+)",self.messages[-1][2])
+        self.assertIsNotNone(captured)
+        token=captured[1]
         self.post("/password/validar",{"token":token})
         self.post("/password/restablecer",{"token":token,"password":PASSWORD,"confirmacion":PASSWORD})
         self.post("/logout")
@@ -857,9 +876,15 @@ class AuthIntegrationTests(AuthFixture):
         self.assertEqual(row["estado_revision"], "pendiente")
         self.assertEqual(row["evidencias"], 1)
         endpoint = f"/api/inteligencia/ioc/{row['id_ioc']}/revision"
-        self.assertEqual(self.client.patch(endpoint, json={"estado":"confirmado", "motivo":"corto"}).status_code, 422)
-        reviewed = self.client.patch(endpoint, json={"estado":"confirmado", "motivo":"Origen observado en Cowrie"})
+        decision = {"estado":"confirmado", "motivo":"Origen observado en Cowrie"}
+        self.assertEqual(self.client.patch(endpoint, json=decision).status_code, 422)
+        version = self.client.get(endpoint)
+        self.assertEqual(version.status_code, 200, version.text)
+        guarded = {**decision, "revision_esperada":version.json()["revision"]}
+        self.assertEqual(self.client.patch(endpoint, json={**guarded, "motivo":"corto"}).status_code, 422)
+        reviewed = self.client.patch(endpoint, json=guarded)
         self.assertEqual(reviewed.status_code, 200, reviewed.text)
+        self.assertEqual(self.client.patch(endpoint, json={**guarded, "estado":"descartado"}).status_code, 409)
         observation = t["observacion_ioc"]
         self.assertEqual(self.connection.scalar(select(observation.c.estado_revision).where(
             observation.c.id_evento == event_id)), "confirmado")
